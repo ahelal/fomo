@@ -61,6 +61,29 @@ body {
 .statusbar__loading { color: var(--yellow); animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+/* ─── Filter pills ───────────────────────────────────────────────────────────── */
+.filters {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.filter-pill {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  transition: all 0.1s;
+}
+.filter-pill:hover { border-color: var(--blue-bright); color: var(--text); }
+.filter-pill--active { background: var(--blue-dim); border-color: var(--blue); color: var(--text-bright); }
+
 /* ─── StatusBar interactive elements ─────────────────────────────────────────── */
 .statusbar__settings-btn,
 .statusbar__help-btn {

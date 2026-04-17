@@ -11,6 +11,13 @@ import { HelpOverlay } from './components/HelpOverlay.js';
 
 type FilterStatus = Status | 'all' | 'saved';
 
+const FILTERS: { label: string; value: FilterStatus }[] = [
+  { label: '1 All', value: 'all' },
+  { label: '2 Unread', value: 'unread' },
+  { label: '3 Read', value: 'read' },
+  { label: '4 Saved', value: 'saved' },
+];
+
 // Same-origin client — auth handled by session cookie
 const client = new FomoClient({ baseUrl: '' });
 
@@ -307,6 +314,19 @@ export function App() {
         }}
         onSettingsClick={() => setShowSettings(true)}
       />
+
+      {/* Filter pills */}
+      <div className="filters">
+        {FILTERS.map((f) => (
+          <button
+            key={f.value}
+            className={['filter-pill', fomo.filter === f.value ? 'filter-pill--active' : ''].join(' ')}
+            onClick={() => fomo.setFilter(f.value)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
 
       {/* Main area */}
       <div className={`main main--preview-${isDetailOpen ? (previewPosition === 'off' ? 'none' : previewPosition) : 'none'}`}>

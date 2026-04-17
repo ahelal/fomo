@@ -7,6 +7,7 @@ import { UpdatesTable } from './components/UpdatesTable.js';
 import { StatusBar } from './components/StatusBar.js';
 import { DetailPane } from './components/DetailPane.js';
 import { HelpOverlay } from './components/HelpOverlay.js';
+import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS } from './components/SettingsPane.js';
 
 type FilterStatus = Status | 'all' | 'saved';
@@ -17,6 +18,7 @@ interface Props {
 
 // Fixed line counts for chrome
 const STATUSBAR_H = 2; // content + border line
+const FILTERBAR_H = 1;
 
 export function App({ service }: Props) {
   const { exit } = useApp();
@@ -390,7 +392,7 @@ export function App({ service }: Props) {
   });
 
   // ── Layout calculations ─────────────────────────────────────────────────────
-  const chrome = STATUSBAR_H;
+  const chrome = STATUSBAR_H + FILTERBAR_H;
   const availableH = rows - chrome;
   const selectedUpdate = updates[selectedIndex];
 
@@ -399,6 +401,7 @@ export function App({ service }: Props) {
     return (
       <Box flexDirection="column" height={rows}>
         <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        <FilterBar active={filter} columns={columns} />
         <HelpOverlay context={helpContext} height={availableH} columns={columns} />
       </Box>
     );
@@ -409,6 +412,7 @@ export function App({ service }: Props) {
     return (
       <Box flexDirection="column" height={rows}>
         <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        <FilterBar active={filter} columns={columns} />
         <SettingsPane
           settings={appSettings}
           sources={sources}
@@ -430,6 +434,7 @@ export function App({ service }: Props) {
     return (
       <Box flexDirection="column" height={rows}>
         <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        <FilterBar active={filter} columns={columns} />
         <Box flexGrow={1} height={availableH}>
           <Box width={tableW}>
             <UpdatesTable
@@ -464,6 +469,7 @@ export function App({ service }: Props) {
   return (
     <Box flexDirection="column" height={rows}>
       <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+      <FilterBar active={filter} columns={columns} />
       <UpdatesTable
         updates={updates}
         selectedIndex={selectedIndex}
