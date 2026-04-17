@@ -1,0 +1,17 @@
+{
+// Version: 0.7.1
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:24",
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": []
+    }
+  },
+  "remoteEnv": {},
+  "mounts": [
+    "source=${localEnv:HOME}/.copilot,target=/root/.copilot,type=bind"
+  ],
+  "initializeCommand": ["bash", ".devcontainer/initialize.sh"],
+  "runArgs": ["--env-file=${localWorkspaceFolder}/.devcontainer/.env"],
+  "postCreateCommand": "bash .devcontainer/postCreate.sh"
+}
