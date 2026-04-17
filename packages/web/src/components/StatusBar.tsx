@@ -5,13 +5,13 @@ interface Props {
   stats: StatsResponse | undefined;
   loading: boolean;
   message: string | undefined;
-  filter: string;
   userEmail?: string;
   onLogout(): void;
-  onFetchClick(): void;
+  onHelpClick(): void;
+  onSettingsClick(): void;
 }
 
-export function StatusBar({ stats, loading, message, filter, userEmail, onLogout, onFetchClick }: Props) {
+export function StatusBar({ stats, loading, message, userEmail, onLogout, onHelpClick, onSettingsClick }: Props) {
   return (
     <div className="statusbar">
       <span className="statusbar__brand">📰 FOMO</span>
@@ -36,17 +36,13 @@ export function StatusBar({ stats, loading, message, filter, userEmail, onLogout
         <span className="statusbar__count">loading…</span>
       )}
 
-      <span className="statusbar__sep">│</span>
-      <span className="statusbar__filter">
-        Filter: <strong>{filter.toUpperCase()}</strong>
-      </span>
-
       {loading && <span className="statusbar__loading">⟳</span>}
       {message && <span className="statusbar__message">{message}</span>}
 
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-        <button className="btn btn--primary" onClick={onFetchClick} disabled={loading}>
-          ↻ Fetch
+        <button className="btn" onClick={onSettingsClick}>⚙️</button>
+        <button className="btn btn--primary" onClick={onHelpClick}>
+          [h] help
         </button>
         {userEmail && (
           <>

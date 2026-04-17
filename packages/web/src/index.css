@@ -57,34 +57,25 @@ body {
 .statusbar__count { color: var(--text-dim); }
 .statusbar__count span { color: var(--text-bright); font-weight: bold; }
 .statusbar__count--saved span { color: var(--yellow); }
-.statusbar__filter { margin-left: auto; color: var(--text-dim); }
-.statusbar__filter strong { color: var(--cyan); }
 .statusbar__message { color: var(--green); font-size: 12px; }
 .statusbar__loading { color: var(--yellow); animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-/* ─── Filter pills ───────────────────────────────────────────────────────────── */
-.filters {
-  display: flex;
-  gap: 4px;
-  padding: 6px 12px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.filter-pill {
-  padding: 2px 10px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: transparent;
+/* ─── StatusBar interactive elements ─────────────────────────────────────────── */
+.statusbar__settings-btn,
+.statusbar__help-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
   color: var(--text-dim);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
+  padding: 2px 8px;
   transition: all 0.1s;
 }
-.filter-pill:hover { border-color: var(--blue-bright); color: var(--text); }
-.filter-pill--active { background: var(--blue-dim); border-color: var(--blue); color: var(--text-bright); }
+.statusbar__settings-btn:hover,
+.statusbar__help-btn:hover { border-color: var(--border); color: var(--text); }
 
 /* ─── Main split (table + detail) ───────────────────────────────────────────── */
 .main {
@@ -119,16 +110,54 @@ body {
   z-index: 1;
 }
 .update-row {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+.update-row__inner {
   display: grid;
   grid-template-columns: 140px 100px 40px 1fr;
   gap: 12px;
   padding: 5px 12px;
-  border-bottom: 1px solid var(--border);
   cursor: pointer;
-  transition: background 0.08s;
+  transition: transform 0.2s ease, background 0.08s;
 }
-.update-row:hover { background: var(--panel-hover); }
-.update-row--selected { background: var(--selected-bg); border-left: 2px solid var(--selected-border); }
+.update-row__inner:hover { background: var(--panel-hover); }
+.update-row--selected .update-row__inner { background: var(--selected-bg); border-left: 2px solid var(--selected-border); }
+.update-row--swiped .update-row__inner { transform: translateX(-100px); }
+.update-row__actions {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 100px;
+  display: flex;
+  align-items: stretch;
+}
+.swipe-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--text-bright);
+  transition: opacity 0.1s;
+}
+.swipe-btn:hover { opacity: 0.8; }
+.swipe-btn--read { background: var(--green); }
+.swipe-btn--save { background: var(--yellow); color: var(--bg); }
+
+/* ─── Pull-to-refresh indicator ──────────────────────────────────────────────── */
+.pull-indicator {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  transition: height 0.2s ease;
+}
+.pull-indicator--active { color: var(--cyan); }
 .update-row--unread .update-row__title { color: var(--unread-color); font-weight: 600; }
 .update-row--read .update-row__title,
 .update-row--read .update-row__source,
@@ -216,31 +245,6 @@ body {
 .btn:hover { border-color: var(--blue); color: var(--text-bright); }
 .btn--primary { background: var(--blue-dim); border-color: var(--blue); }
 .btn--primary:hover { background: var(--blue); }
-
-/* ─── Keyboard shortcut footer ───────────────────────────────────────────────── */
-.keyhelp {
-  display: flex;
-  gap: 6px;
-  padding: 4px 12px;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  font-size: 11px;
-  color: var(--text-dim);
-  align-items: center;
-}
-.keyhelp kbd {
-  padding: 0 5px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  font: inherit;
-  color: var(--cyan);
-}
-.keyhelp__sep {
-  color: var(--border);
-  margin: 0 2px;
-}
 
 /* ─── Empty state ────────────────────────────────────────────────────────────── */
 .empty { padding: 32px; text-align: center; color: var(--text-dim); }
@@ -351,4 +355,168 @@ body {
 .settings-panel__options {
   display: flex;
   gap: 6px;
+}
+
+/* ─── Help overlay ───────────────────────────────────────────────────────────── */
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.help-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  min-width: 340px;
+  max-width: 480px;
+}
+.help-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.help-panel__header h2 {
+  font-size: 15px;
+  color: var(--text-bright);
+}
+.help-panel__context {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.help-panel__header .btn {
+  margin-left: auto;
+}
+.help-panel__section {
+  margin-bottom: 14px;
+}
+.help-panel__section h3 {
+  font-size: 12px;
+  color: var(--cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+.help-panel__keys {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.help-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text);
+}
+.help-panel__row kbd {
+  display: inline-block;
+  min-width: 40px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--cyan);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+}
+.help-panel__footer {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-top: 12px;
+}
+.help-panel__footer kbd {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--cyan);
+  font: inherit;
+}
+
+/* ─── Mobile floating action bar ─────────────────────────────────────────────── */
+.mobile-actions {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 6px 8px;
+  gap: 4px;
+  z-index: 50;
+  justify-content: space-around;
+}
+.mobile-actions__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-actions__btn:active { background: var(--panel-hover); color: var(--text-bright); }
+.mobile-actions__btn span:first-child { font-size: 18px; }
+
+/* ─── Mobile responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .mobile-actions { display: flex; }
+
+  /* Leave room for the action bar */
+  .app { padding-bottom: 60px; }
+
+  /* Simplify the updates grid */
+  .updates-header { grid-template-columns: 1fr; gap: 4px; }
+  .updates-header > :not(:last-child) { display: none; }
+  .update-row__inner { grid-template-columns: 32px 1fr; gap: 6px; padding: 8px 10px; }
+  .update-row__source,
+  .update-row__date { display: none; }
+
+  /* Slim status bar */
+  .statusbar { gap: 6px; padding: 6px 8px; flex-wrap: wrap; }
+  .statusbar__counts { display: none; }
+  .statusbar__filter { margin-left: auto; }
+
+  /* Full width detail pane */
+  .main--preview-right .detail-pane,
+  .main--preview-bottom .detail-pane {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 40;
+    background: var(--bg);
+    border: none;
+    padding-bottom: 60px;
+  }
+
+  /* Help / settings panels — full width */
+  .help-panel, .settings-panel {
+    min-width: 0;
+    width: calc(100% - 32px);
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* Larger touch targets */
+  .update-row__inner { padding: 10px 10px; min-height: 44px; }
+  .btn { min-height: 36px; padding: 6px 14px; }
+  .statusbar__settings-btn,
+  .statusbar__help-btn { min-height: 36px; padding: 6px 10px; }
 }

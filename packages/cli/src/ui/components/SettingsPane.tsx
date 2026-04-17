@@ -112,13 +112,11 @@ export const SettingsPane = React.memo(function SettingsPane({
       </Box>
 
       <Box height={1} />
-      <Box paddingX={2}>
-        <Text color="#8b949e">
-          {editingLabel
-            ? 'type label  ⏎ save  Esc cancel'
-            : '↑↓ navigate  ⏎ toggle  e label  c/Esc close'}
-        </Text>
-      </Box>
+      {editingLabel && (
+        <Box paddingX={2}>
+          <Text color="#8b949e">{'type label  ⏎ save  Esc cancel'}</Text>
+        </Box>
+      )}
     </Box>
   );
 });

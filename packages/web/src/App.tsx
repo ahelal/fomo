@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FomoClient } from '@fomo/core';
 import type { Update, Status, PreviewPosition, SourceInfo } from '@fomo/core';
 import { checkAuth, logout, type UserInfo } from './store/auth.js';
@@ -7,36 +7,9 @@ import { StatusBar } from './components/StatusBar.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
 import { DetailPane } from './components/DetailPane.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
+import { HelpOverlay } from './components/HelpOverlay.js';
 
 type FilterStatus = Status | 'all' | 'saved';
-
-const FILTERS: { label: string; value: FilterStatus }[] = [
-  { label: '1 All', value: 'all' },
-  { label: '2 Unread', value: 'unread' },
-  { label: '3 Read', value: 'read' },
-  { label: '4 Saved', value: 'saved' },
-];
-
-const LIST_KEYS: [string, string][] = [
-  ['↵', 'detail'],
-  ['r', 'read'],
-  ['u', 'unread'],
-  ['s', 'save/unsave'],
-  ['x', 'read & next'],
-  ['o', 'open'],
-  ['c', 'settings'],
-];
-
-const DETAIL_KEYS: [string, string][] = [
-  ['Esc', 'back'],
-  ['r', 'read'],
-  ['u', 'unread'],
-  ['s', 'save/unsave'],
-  ['x', 'read & next'],
-  ['o', 'open url'],
-  ['p', 'fetch content'],
-  ['c', 'settings'],
-];
 
 // Same-origin client — auth handled by session cookie
 const client = new FomoClient({ baseUrl: '' });
@@ -48,10 +21,15 @@ export function App() {
   const fomo = useFomo(client);
   const [selected, setSelected] = useState<Update | undefined>();
   const [showSettings, setShowSettings] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [helpContext, setHelpContext] = useState<'list' | 'detail' | 'settings'>('list');
   const [sources, setSources] = useState<SourceInfo[]>([]);
 
   // Preview position from remote settings
   const previewPosition = fomo.settings.previewPosition;
+
+  // Swipe-back gesture tracking
+  const swipeBackRef = useRef({ startX: 0, startY: 0 });
 
   // Check session on mount
   useEffect(() => {
@@ -71,6 +49,34 @@ export function App() {
     client.getSources().then(setSources).catch(() => { /* ignore */ });
   }, [authChecked]);
 
+  // Swipe-back: right swipe from left edge to go back
+  useEffect(() => {
+    function onTouchStart(e: TouchEvent) {
+      const x = e.touches[0].clientX;
+      if (x < 30) {
+        swipeBackRef.current = { startX: x, startY: e.touches[0].clientY };
+      } else {
+        swipeBackRef.current = { startX: -1, startY: 0 };
+      }
+    }
+    function onTouchEnd(e: TouchEvent) {
+      if (swipeBackRef.current.startX < 0) return;
+      const dx = e.changedTouches[0].clientX - swipeBackRef.current.startX;
+      const dy = e.changedTouches[0].clientY - swipeBackRef.current.startY;
+      if (dx > 80 && Math.abs(dx) > Math.abs(dy) * 2) {
+        if (showHelp) { setShowHelp(false); return; }
+        if (showSettings) { setShowSettings(false); return; }
+        if (selected) { setSelected(undefined); return; }
+      }
+    }
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [showHelp, showSettings, selected]);
+
   // Keyboard shortcuts (aligned with CLI TUI)
   useEffect(() => {
     if (!authChecked) return;
@@ -82,16 +88,34 @@ export function App() {
     function onKey(e: KeyboardEvent) {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
 
-      // Settings panel: Escape or c to close
+      // Help overlay: Escape or h to close
+      if (showHelp) {
+        if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'h') {
+          setShowHelp(false);
+        }
+        return;
+      }
+
+      // Settings panel: Escape or c to close, h for help
       if (showSettings) {
-        if (e.key === 'Escape' || e.key === 'c') {
+        if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'c') {
           setShowSettings(false);
+        }
+        if (e.key === 'h') {
+          setHelpContext('settings');
+          setShowHelp(true);
         }
         return; // Consume all keys while settings is open
       }
 
-      if (selected && (e.key === 'Escape' || e.key === 'q')) {
+      if (selected && (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'q')) {
         setSelected(undefined);
+        return;
+      }
+
+      if (e.key === 'h') {
+        setHelpContext(selected ? 'detail' : 'list');
+        setShowHelp(true);
         return;
       }
 
@@ -179,7 +203,9 @@ export function App() {
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [fomo, selected, authChecked, showSettings, previewPosition]);
+  }, [fomo, selected, authChecked, showSettings, showHelp, previewPosition]);
+
+  // ── Callbacks ──
 
   const handleSetStatus = useCallback(
     (id: string, status: Status) => {
@@ -207,6 +233,22 @@ export function App() {
     },
     [fomo],
   );
+
+  const handleSwipeAction = useCallback(
+    (id: string, action: 'read' | 'unread' | 'save') => {
+      if (action === 'save') {
+        const u = fomo.updates.find((x) => x.id === id);
+        if (u) void fomo.setSaved(id, !u.saved);
+      } else {
+        void fomo.setStatus(id, action);
+      }
+    },
+    [fomo],
+  );
+
+  const handleRefresh = useCallback(() => {
+    void fomo.triggerFetch();
+  }, [fomo]);
 
   const handleToggleSource = useCallback(
     (sourceId: string) => {
@@ -250,7 +292,6 @@ export function App() {
   }
 
   const isDetailOpen = !!selected;
-  const helpKeys = isDetailOpen ? DETAIL_KEYS : LIST_KEYS;
 
   return (
     <div className="app">
@@ -258,31 +299,14 @@ export function App() {
         stats={fomo.stats}
         loading={fomo.loading}
         message={fomo.message}
-        filter={fomo.filter}
         userEmail={user?.email}
         onLogout={logout}
-        onFetchClick={() => void fomo.triggerFetch()}
+        onHelpClick={() => {
+          setHelpContext(selected ? 'detail' : 'list');
+          setShowHelp(true);
+        }}
+        onSettingsClick={() => setShowSettings(true)}
       />
-
-      {/* Filter pills */}
-      <div className="filters">
-        {FILTERS.map((f) => (
-          <button
-            key={f.value}
-            className={['filter-pill', fomo.filter === f.value ? 'filter-pill--active' : ''].join(' ')}
-            onClick={() => fomo.setFilter(f.value)}
-          >
-            {f.label}
-          </button>
-        ))}
-        <button
-          className="btn"
-          style={{ marginLeft: 'auto', fontSize: 11 }}
-          onClick={() => setShowSettings(true)}
-        >
-          ⚙️ Settings
-        </button>
-      </div>
 
       {/* Main area */}
       <div className={`main main--preview-${isDetailOpen ? (previewPosition === 'off' ? 'none' : previewPosition) : 'none'}`}>
@@ -291,6 +315,8 @@ export function App() {
           selectedId={selected?.id}
           onSelect={setSelected}
           sourceLabels={fomo.settings.sourceLabels}
+          onSwipeAction={handleSwipeAction}
+          onRefresh={handleRefresh}
         />
         {selected && previewPosition !== 'off' && (
           <DetailPane
@@ -302,15 +328,48 @@ export function App() {
         )}
       </div>
 
-      {/* Keyboard hint bar */}
-      <div className="keyhelp">
-        {helpKeys.map(([key, label], i) => (
-          <React.Fragment key={key}>
-            {i > 0 && <span className="keyhelp__sep">·</span>}
-            <span><kbd>{key}</kbd> {label}</span>
-          </React.Fragment>
-        ))}
-      </div>
+      {/* Mobile floating action bar */}
+      {selected && (
+        <div className="mobile-actions">
+          <button className="mobile-actions__btn" onClick={() => setSelected(undefined)}>
+            <span>←</span><span>Back</span>
+          </button>
+          <button
+            className="mobile-actions__btn"
+            onClick={() => handleSetStatus(selected.id, selected.status === 'unread' ? 'read' : 'unread')}
+          >
+            <span>{selected.status === 'unread' ? '✓' : '●'}</span>
+            <span>{selected.status === 'unread' ? 'Read' : 'Unread'}</span>
+          </button>
+          <button
+            className="mobile-actions__btn"
+            onClick={() => handleToggleSaved(selected.id, !selected.saved)}
+          >
+            <span>{selected.saved ? '★' : '☆'}</span>
+            <span>{selected.saved ? 'Unsave' : 'Save'}</span>
+          </button>
+          <button
+            className="mobile-actions__btn"
+            onClick={() => selected.url && window.open(selected.url, '_blank', 'noopener,noreferrer')}
+          >
+            <span>↗</span><span>Open</span>
+          </button>
+          <button
+            className="mobile-actions__btn"
+            onClick={() => handleFetchContent(selected.id)}
+          >
+            <span>⟳</span><span>Content</span>
+          </button>
+        </div>
+      )}
+
+      {/* Help overlay */}
+      {showHelp && (
+        <HelpOverlay
+          context={isDetailOpen ? 'detail' : 'list'}
+          onClose={() => setShowHelp(false)}
+        />
+      )}
 
       {/* Settings overlay */}
       {showSettings && (

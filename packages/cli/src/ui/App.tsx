@@ -5,9 +5,8 @@ import { DEFAULT_SETTINGS } from '@fomo/core';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
 import { StatusBar } from './components/StatusBar.js';
-import { FilterBar } from './components/FilterBar.js';
 import { DetailPane } from './components/DetailPane.js';
-import { KeyHelp } from './components/KeyHelp.js';
+import { HelpOverlay } from './components/HelpOverlay.js';
 import { SettingsPane, PREVIEW_OPTIONS } from './components/SettingsPane.js';
 
 type FilterStatus = Status | 'all' | 'saved';
@@ -18,8 +17,6 @@ interface Props {
 
 // Fixed line counts for chrome
 const STATUSBAR_H = 2; // content + border line
-const FILTERBAR_H = 2; // content + border line
-const KEYHELP_H = 2; // border line + content
 
 export function App({ service }: Props) {
   const { exit } = useApp();
@@ -39,6 +36,8 @@ export function App({ service }: Props) {
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelBuffer, setLabelBuffer] = useState('');
+  const [showHelp, setShowHelp] = useState(false);
+  const [helpContext, setHelpContext] = useState<'list' | 'detail' | 'settings'>('list');
 
   // Keep refs so async callbacks always see the latest state
   const updatesRef  = useRef(updates);
@@ -230,11 +229,17 @@ export function App({ service }: Props) {
 
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((input, key) => {
+    // ── Help overlay — Esc or h to close, consume all other input ──
+    if (showHelp) {
+      if (key.escape || key.backspace || input === 'h') setShowHelp(false);
+      return;
+    }
+
     // ── Settings view input handling ──
     if (showSettings) {
       // Label edit mode — character input
       if (editingLabel) {
-        if (key.escape) {
+        if (key.escape || key.backspace) {
           setEditingLabel(false);
           setLabelBuffer('');
           return;
@@ -266,7 +271,7 @@ export function App({ service }: Props) {
         return;
       }
 
-      if (key.escape || input === 'c') {
+      if (key.escape || key.backspace || input === 'c') {
         setShowSettings(false);
         return;
       }
@@ -318,11 +323,23 @@ export function App({ service }: Props) {
         }
         return;
       }
+      if (input === 'h') {
+        setHelpContext('settings');
+        setShowHelp(true);
+        return;
+      }
       return; // Consume all other input while in settings
     }
 
+    // Help
+    if (input === 'h') {
+      setHelpContext(showDetail ? 'detail' : 'list');
+      setShowHelp(true);
+      return;
+    }
+
     // Detail-specific: Esc or q to close
-    if (showDetail && (key.escape || input === 'q')) {
+    if (showDetail && (key.escape || key.backspace || input === 'q')) {
       setShowDetail(false);
       return;
     }
@@ -373,16 +390,25 @@ export function App({ service }: Props) {
   });
 
   // ── Layout calculations ─────────────────────────────────────────────────────
-  const chrome = STATUSBAR_H + FILTERBAR_H + KEYHELP_H;
+  const chrome = STATUSBAR_H;
   const availableH = rows - chrome;
   const selectedUpdate = updates[selectedIndex];
+
+  // Help overlay — replaces main content area
+  if (showHelp) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        <HelpOverlay context={helpContext} height={availableH} columns={columns} />
+      </Box>
+    );
+  }
 
   // Settings overlay — replaces main content area
   if (showSettings) {
     return (
       <Box flexDirection="column" height={rows}>
-        <StatusBar stats={stats} loading={loading} message={message} filter={filter} columns={columns} />
-        <FilterBar filter={filter} columns={columns} />
+        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
         <SettingsPane
           settings={appSettings}
           sources={sources}
@@ -392,7 +418,6 @@ export function App({ service }: Props) {
           height={availableH}
           columns={columns}
         />
-        <KeyHelp view="settings" columns={columns} />
       </Box>
     );
   }
@@ -404,8 +429,7 @@ export function App({ service }: Props) {
 
     return (
       <Box flexDirection="column" height={rows}>
-        <StatusBar stats={stats} loading={loading} message={message} filter={filter} columns={columns} />
-        <FilterBar filter={filter} columns={columns} />
+        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
         <Box flexGrow={1} height={availableH}>
           <Box width={tableW}>
             <UpdatesTable
@@ -429,7 +453,6 @@ export function App({ service }: Props) {
             </Box>
           </Box>
         </Box>
-        <KeyHelp view="detail" columns={columns} />
       </Box>
     );
   }
@@ -440,8 +463,7 @@ export function App({ service }: Props) {
 
   return (
     <Box flexDirection="column" height={rows}>
-      <StatusBar stats={stats} loading={loading} message={message} filter={filter} columns={columns} />
-      <FilterBar filter={filter} columns={columns} />
+      <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
       <UpdatesTable
         updates={updates}
         selectedIndex={selectedIndex}
@@ -457,7 +479,6 @@ export function App({ service }: Props) {
           position="bottom"
         />
       )}
-      <KeyHelp view={showDetail ? 'detail' : 'list'} columns={columns} />
     </Box>
   );
 }
