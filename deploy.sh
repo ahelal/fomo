@@ -11,8 +11,17 @@
 # =============================================================================
 set -euo pipefail
 
-RG="${1:?Usage: ./deploy.sh <resource-group> [location]}"
-LOCATION="${2:-swedencentral}"
+YES=false
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes) YES=true ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+
+RG="${ARGS[0]:?Usage: ./deploy.sh <resource-group> [location] [-y]}"
+LOCATION="${ARGS[1]:-swedencentral}"
 PROJECT="fomo"
 APP_NAME="${PROJECT}-app"   # Container App name as defined in Bicep app module
 
@@ -43,8 +52,12 @@ az deployment group create \
   --output table
 
 echo ""
-read -rp "Apply this deployment? [y/N] " confirm
-[[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+if [[ "$YES" == "true" ]]; then
+  echo "▶ Auto-confirming (--yes flag set)"
+else
+  read -rp "Apply this deployment? [y/N] " confirm
+  [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+fi
 
 # ── 3. Bootstrap: deploy registry FIRST so we can push the image ──────────────
 #    Uses the same naming formula as main.bicep → idempotent on re-runs.
