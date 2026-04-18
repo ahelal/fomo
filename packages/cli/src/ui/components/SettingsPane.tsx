@@ -14,6 +14,19 @@ interface Props {
 
 const PREVIEW_OPTIONS: PreviewPosition[] = ['right', 'bottom', 'off'];
 
+const COLOR_PALETTE = [
+  '#58a6ff', // cyan (default)
+  '#3fb950', // green
+  '#e3b341', // yellow
+  '#f85149', // red
+  '#bc8cff', // purple
+  '#f78166', // orange
+  '#79c0ff', // light blue
+  '#d2a8ff', // lavender
+  '#ff7b72', // coral
+  '#7ee787', // mint
+];
+
 export const SettingsPane = React.memo(function SettingsPane({
   settings,
   sources,
@@ -52,7 +65,7 @@ export const SettingsPane = React.memo(function SettingsPane({
   return (
     <Box flexDirection="column" height={height} width={columns}>
       <Box paddingX={2} paddingTop={1}>
-        <Text color="#f0f6fc" bold>{'⚙️  Settings'}</Text>
+        <Text color="#f0f6fc" bold>{'⚙️  Config'}</Text>
       </Box>
       <Box height={1} />
 
@@ -66,6 +79,7 @@ export const SettingsPane = React.memo(function SettingsPane({
           if (item.type === 'source') {
             const enabled = item.value === 'enabled';
             const customLabel = settings.sourceLabels[item.id];
+            const sourceColor = settings.sourceColors?.[item.id] || COLOR_PALETTE[0];
             const isEditingThis = editingLabel && focused;
 
             return (
@@ -80,13 +94,16 @@ export const SettingsPane = React.memo(function SettingsPane({
                 <Text color={enabled ? '#3fb950' : '#f85149'} backgroundColor={rowBg}>
                   {(enabled ? ' enabled' : ' disabled').padEnd(statusW)}
                 </Text>
+                <Text color={sourceColor} backgroundColor={rowBg}>
+                  {'■ '}
+                </Text>
                 {isEditingThis ? (
                   <Text color="#e3b341" backgroundColor="#2d1b00">
-                    {` ${(labelBuffer + '▏').padEnd(labelW)}`}
+                    {` ${(labelBuffer + '▏').padEnd(labelW - 2)}`}
                   </Text>
                 ) : (
                   <Text color="#58a6ff" backgroundColor={rowBg}>
-                    {customLabel ? ` ${customLabel}`.padEnd(labelW) : ''.padEnd(labelW)}
+                    {customLabel ? ` ${customLabel}`.padEnd(labelW - 2) : ''.padEnd(labelW - 2)}
                   </Text>
                 )}
                 <Text backgroundColor={rowBg}>{pad}</Text>
@@ -121,4 +138,4 @@ export const SettingsPane = React.memo(function SettingsPane({
   );
 });
 
-export { PREVIEW_OPTIONS };
+export { PREVIEW_OPTIONS, COLOR_PALETTE };

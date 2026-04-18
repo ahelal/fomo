@@ -7,7 +7,7 @@ const STATUS_ICON: Record<string, { icon: string; color: string }> = {
   read:   { icon: '○', color: '#8b949e' },
 };
 
-const SOURCE_COLOR: Record<string, string> = {
+const DEFAULT_SOURCE_COLOR: Record<string, string> = {
   github: '#58a6ff',
   azure:  '#58a6ff',
   vscode: '#3fb950',
@@ -19,9 +19,10 @@ interface Props {
   height: number;
   columns: number;
   sourceLabels?: Record<string, string>;
+  sourceColors?: Record<string, string>;
 }
 
-export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLabels = {} }: Props) {
+export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLabels = {}, sourceColors = {} }: Props) {
   // Reserve lines for header(1) + bottom scroll indicator(1)
   // Each row takes 2 lines (content + separator), except last row takes 1
   const viewportRows = Math.max(1, Math.floor((height - 1) / 2));
@@ -75,7 +76,7 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
         const realIdx = scrollOffset + viewIdx;
         const isSelected = realIdx === selectedIndex;
         const icon = STATUS_ICON[update.status] ?? { icon: '?', color: 'white' };
-        const sourceColor = SOURCE_COLOR[update.source] ?? '#58a6ff';
+        const sourceColor = sourceColors[update.source] ?? DEFAULT_SOURCE_COLOR[update.source] ?? '#58a6ff';
         const dateStr = update.datePublished.slice(0, 10);
         const source = (sourceLabels[update.source] ?? update.source).slice(0, 11).padEnd(sourceW);
         const isUnread = update.status === 'unread';

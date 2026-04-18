@@ -11,11 +11,12 @@ interface Props {
   selectedId: string | undefined;
   onSelect(update: Update): void;
   sourceLabels?: Record<string, string>;
+  sourceColors?: Record<string, string>;
   onSwipeAction?(id: string, action: 'read' | 'unread' | 'save'): void;
   onRefresh?(): void;
 }
 
-export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {}, onSwipeAction, onRefresh }: Props) {
+export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {}, sourceColors = {}, onSwipeAction, onRefresh }: Props) {
   const selectedRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const [swipedId, setSwipedId] = useState<string | null>(null);
@@ -131,7 +132,7 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
             onTouchEnd={(e) => handleRowTouchEnd(e, u.id)}
           >
             <div className="update-row__inner" onClick={() => onSelect(u)}>
-              <span className="update-row__source">{sourceLabels[u.source] ?? u.source}</span>
+              <span className="update-row__source" style={sourceColors[u.source] ? { color: sourceColors[u.source] } : undefined}>{sourceLabels[u.source] ?? u.source}</span>
               <span className="update-row__date">{u.datePublished.slice(0, 10)}</span>
               <span className={`update-row__status-dot update-row__status-dot--${STATUS_ICON[u.status]?.cls ?? u.status}`}>
                 {u.saved ? '⭐' : ''}{STATUS_ICON[u.status]?.icon ?? u.status}

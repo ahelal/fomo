@@ -244,6 +244,7 @@ body {
   word-break: break-word;
 }
 .detail-pane__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.detail-pane__mobile-actions { display: none; }
 .detail-pane__no-preview {
   padding: 16px 12px;
   color: var(--text-dim);
@@ -379,6 +380,46 @@ body {
   display: flex;
   gap: 6px;
 }
+
+/* ─── Source color picker ───────────────────────────────────────────────────── */
+.settings-panel__color-area {
+  position: relative;
+  flex-shrink: 0;
+}
+.settings-panel__color-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.1s;
+}
+.settings-panel__color-btn:hover { border-color: var(--text); }
+.settings-panel__color-picker {
+  position: absolute;
+  right: 0;
+  top: 28px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  width: 140px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 110;
+}
+.settings-panel__color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+}
+.settings-panel__color-swatch:hover { transform: scale(1.2); }
+.settings-panel__color-swatch--active { border-color: var(--text-bright); }
 
 /* ─── Help overlay ───────────────────────────────────────────────────────────── */
 .help-overlay {
@@ -526,6 +567,10 @@ body {
     border: none;
     padding-bottom: 60px;
   }
+
+  /* Swap action rows: show mobile, hide desktop */
+  .detail-pane__mobile-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .detail-pane__actions { display: none; }
 
   /* Help / settings panels — full width */
   .help-panel, .settings-panel {

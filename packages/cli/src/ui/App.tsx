@@ -8,7 +8,7 @@ import { StatusBar } from './components/StatusBar.js';
 import { DetailPane } from './components/DetailPane.js';
 import { HelpOverlay } from './components/HelpOverlay.js';
 import { FilterBar } from './components/FilterBar.js';
-import { SettingsPane, PREVIEW_OPTIONS } from './components/SettingsPane.js';
+import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/SettingsPane.js';
 
 type FilterStatus = Status | 'all' | 'saved';
 
@@ -231,9 +231,12 @@ export function App({ service }: Props) {
 
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((input, key) => {
+    // ── Quit from any screen (but not while editing a label) ──
+    if (input === 'q' && !editingLabel) { exit(); return; }
+
     // ── Help overlay — Esc or h to close, consume all other input ──
     if (showHelp) {
-      if (key.escape || key.backspace || input === 'h') setShowHelp(false);
+      if (key.escape || key.backspace || key.delete || input === 'h') setShowHelp(false);
       return;
     }
 
@@ -241,7 +244,7 @@ export function App({ service }: Props) {
     if (showSettings) {
       // Label edit mode — character input
       if (editingLabel) {
-        if (key.escape || key.backspace) {
+        if (key.escape) {
           setEditingLabel(false);
           setLabelBuffer('');
           return;
@@ -273,7 +276,7 @@ export function App({ service }: Props) {
         return;
       }
 
-      if (key.escape || key.backspace || input === 'c') {
+      if (key.escape || key.backspace || key.delete || input === 'c') {
         setShowSettings(false);
         return;
       }
@@ -295,6 +298,20 @@ export function App({ service }: Props) {
         const sourceId = sources[settingsFocusIndex].id;
         setLabelBuffer(appSettings.sourceLabels[sourceId] ?? '');
         setEditingLabel(true);
+        return;
+      }
+
+      // 'd' to cycle color on a source row
+      if (input === 'd' && settingsFocusIndex < sources.length) {
+        const sourceId = sources[settingsFocusIndex].id;
+        const currentColor = appSettings.sourceColors?.[sourceId] || COLOR_PALETTE[0];
+        const curIdx = COLOR_PALETTE.indexOf(currentColor);
+        const nextColor = COLOR_PALETTE[(curIdx + 1) % COLOR_PALETTE.length];
+        const newColors = { ...appSettings.sourceColors, [sourceId]: nextColor };
+        setAppSettings((prev) => ({ ...prev, sourceColors: newColors }));
+        void service.updateSettings({ sourceColors: newColors })
+          .then((s) => setAppSettings(s))
+          .catch(() => { /* silent */ });
         return;
       }
 
@@ -341,13 +358,10 @@ export function App({ service }: Props) {
     }
 
     // Detail-specific: Esc or q to close
-    if (showDetail && (key.escape || key.backspace || input === 'q')) {
+    if (showDetail && (key.escape || key.backspace || key.delete)) {
       setShowDetail(false);
       return;
     }
-
-    // Quit only from list view
-    if (!showDetail && input === 'q') { exit(); return; }
 
     // Open settings
     if (input === 'c') {
@@ -382,6 +396,27 @@ export function App({ service }: Props) {
     if (input === 'u') { void doMark('unread');   return; }
     if (input === 's') { void doToggleSaved();    return; }
     if (input === 'x') { void doReadAndNext();    return; }
+    if (input === 'n') {
+      // Next unread (navigate only, don't mark current)
+      const items = updatesRef.current;
+      const idx = selectedRef.current;
+      let nextIdx = -1;
+      for (let i = idx + 1; i < items.length; i++) {
+        if (items[i].status === 'unread') { nextIdx = i; break; }
+      }
+      if (nextIdx === -1) {
+        for (let i = 0; i < idx; i++) {
+          if (items[i].status === 'unread') { nextIdx = i; break; }
+        }
+      }
+      if (nextIdx !== -1) {
+        setSelectedIndex(nextIdx);
+        if (!showDetail) setShowDetail(true);
+      } else {
+        showMessage('No unread items');
+      }
+      return;
+    }
     if (input === 'o') { void doOpen();         return; }
     if (input === 'f') { void doFetch(); return; }
     if (input === 'p' && showDetail) {
@@ -443,6 +478,7 @@ export function App({ service }: Props) {
               height={availableH}
               columns={tableW}
               sourceLabels={appSettings.sourceLabels}
+              sourceColors={appSettings.sourceColors}
             />
           </Box>
           <Box borderStyle="single" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor="gray">
@@ -476,6 +512,7 @@ export function App({ service }: Props) {
         height={tableH}
         columns={columns}
         sourceLabels={appSettings.sourceLabels}
+        sourceColors={appSettings.sourceColors}
       />
       {showDetail && selectedUpdate && (
         <DetailPane

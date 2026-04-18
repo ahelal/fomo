@@ -118,6 +118,8 @@ export interface AppSettings {
   pageSize: number;
   /** Custom display labels per source (e.g. { github: "🐙 GH" }). Falls back to source id. */
   sourceLabels: Record<SourceId, string>;
+  /** Custom display colors per source (e.g. { github: "#58a6ff" }). Falls back to default cyan. */
+  sourceColors: Record<SourceId, string>;
 }
 
 export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
@@ -125,5 +127,6 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
   previewPosition: 'right',
   pageSize: 50,
   sourceLabels: {},
+  sourceColors: {},
 };
 

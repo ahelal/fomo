@@ -18,6 +18,7 @@ const LIST_KEYS: [string, string][] = [
   ['u',    'Mark as unread'],
   ['s',    'Save / unsave'],
   ['x',    'Mark read & next unread'],
+  ['n',    'Jump to next unread'],
   ['o',    'Open in browser'],
   ['q',    'Quit'],
 ];
@@ -28,6 +29,7 @@ const DETAIL_KEYS: [string, string][] = [
   ['u',     'Mark as unread'],
   ['s',     'Save / unsave'],
   ['x',     'Mark read & next unread'],
+  ['n',     'Jump to next unread'],
   ['o',     'Open URL in browser'],
   ['p',     'Fetch full content'],
 ];
@@ -37,7 +39,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['↓/j',  'Move down'],
   ['1–4',  'Filter: all / unread / read / saved'],
   ['f',    'Fetch new updates'],
-  ['c',    'Open settings'],
+  ['c',    'Open config'],
   ['.',    'Toggle preview position'],
   ['h',    'Show this help'],
 ];
@@ -47,13 +49,14 @@ const SETTINGS_KEYS: [string, string][] = [
   ['↓/j',  'Move down'],
   ['↵',    'Toggle / cycle option'],
   ['e',    'Edit source label'],
-  ['Esc/⌫','Close settings'],
+  ['d',    'Cycle source color'],
+  ['Esc/⌫','Close config'],
   ['h',    'Show this help'],
 ];
 
 function buildSections(context: Props['context']): Section[] {
   if (context === 'settings') {
-    return [{ title: 'Settings', keys: SETTINGS_KEYS }];
+    return [{ title: 'Config', keys: SETTINGS_KEYS }];
   }
   return [
     {
@@ -67,7 +70,7 @@ function buildSections(context: Props['context']): Section[] {
 const CONTEXT_LABEL: Record<string, string> = {
   list: 'Main View',
   detail: 'Detail View',
-  settings: 'Settings',
+  settings: 'Config',
 };
 
 const KEY_W = 8;

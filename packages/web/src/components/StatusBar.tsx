@@ -46,7 +46,6 @@ export function StatusBar({ stats, loading, message, userEmail, onLogout, onHelp
         </button>
         {userEmail && (
           <>
-            <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{userEmail}</span>
             <button className="btn" onClick={onLogout}>Logout</button>
           </>
         )}

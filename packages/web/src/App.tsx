@@ -173,21 +173,15 @@ export function App() {
         return;
       }
 
+      if (e.key === 'n') {
+        handleNextUnread();
+        return;
+      }
+
       if (!selected) return;
 
       if (e.key === 'x') {
-        const idx = fomo.updates.findIndex((u) => u.id === selected.id);
-        let nextUnread: Update | undefined;
-        for (let i = idx + 1; i < fomo.updates.length; i++) {
-          if (fomo.updates[i].status === 'unread') { nextUnread = fomo.updates[i]; break; }
-        }
-        if (!nextUnread) {
-          for (let i = 0; i < idx; i++) {
-            if (fomo.updates[i].status === 'unread') { nextUnread = fomo.updates[i]; break; }
-          }
-        }
-        if (nextUnread) setSelected(nextUnread);
-        void fomo.setStatus(selected.id, 'read');
+        handleReadAndNext();
         return;
       }
 
@@ -257,6 +251,36 @@ export function App() {
     void fomo.triggerFetch();
   }, [fomo]);
 
+  const findNextUnread = useCallback(
+    (fromId?: string) => {
+      const idx = fromId ? fomo.updates.findIndex((u) => u.id === fromId) : -1;
+      for (let i = idx + 1; i < fomo.updates.length; i++) {
+        if (fomo.updates[i].status === 'unread') return fomo.updates[i];
+      }
+      for (let i = 0; i < (idx === -1 ? fomo.updates.length : idx); i++) {
+        if (fomo.updates[i].status === 'unread') return fomo.updates[i];
+      }
+      return undefined;
+    },
+    [fomo.updates],
+  );
+
+  const handleReadAndNext = useCallback(() => {
+    if (!selected) return;
+    const next = findNextUnread(selected.id);
+    void fomo.setStatus(selected.id, 'read');
+    if (next) {
+      setSelected(next);
+    } else {
+      setSelected(undefined);
+    }
+  }, [selected, fomo, findNextUnread]);
+
+  const handleNextUnread = useCallback(() => {
+    const next = findNextUnread(selected?.id);
+    if (next) setSelected(next);
+  }, [selected, findNextUnread]);
+
   const handleToggleSource = useCallback(
     (sourceId: string) => {
       const disabled = new Set(fomo.settings.disabledSources);
@@ -286,6 +310,15 @@ export function App() {
         delete newLabels[sourceId];
       }
       void fomo.updateSettings({ sourceLabels: newLabels });
+    },
+    [fomo],
+  );
+
+  const handleSetSourceColor = useCallback(
+    (sourceId: string, color: string) => {
+      const newColors = { ...fomo.settings.sourceColors };
+      newColors[sourceId] = color;
+      void fomo.updateSettings({ sourceColors: newColors });
     },
     [fomo],
   );
@@ -335,6 +368,7 @@ export function App() {
           selectedId={selected?.id}
           onSelect={setSelected}
           sourceLabels={fomo.settings.sourceLabels}
+          sourceColors={fomo.settings.sourceColors}
           onSwipeAction={handleSwipeAction}
           onRefresh={handleRefresh}
         />
@@ -344,6 +378,10 @@ export function App() {
             onSetStatus={handleSetStatus}
             onToggleSaved={handleToggleSaved}
             onFetchContent={handleFetchContent}
+            onReadAndNext={handleReadAndNext}
+            onNextUnread={handleNextUnread}
+            onOpen={() => selected.url && window.open(selected.url, '_blank', 'noopener,noreferrer')}
+            onClose={() => setSelected(undefined)}
           />
         )}
       </div>
@@ -368,18 +406,6 @@ export function App() {
             <span>{selected.saved ? '★' : '☆'}</span>
             <span>{selected.saved ? 'Unsave' : 'Save'}</span>
           </button>
-          <button
-            className="mobile-actions__btn"
-            onClick={() => selected.url && window.open(selected.url, '_blank', 'noopener,noreferrer')}
-          >
-            <span>↗</span><span>Open</span>
-          </button>
-          <button
-            className="mobile-actions__btn"
-            onClick={() => handleFetchContent(selected.id)}
-          >
-            <span>⟳</span><span>Content</span>
-          </button>
         </div>
       )}
 
@@ -399,6 +425,7 @@ export function App() {
           onToggleSource={handleToggleSource}
           onSetPreviewPosition={handleSetPreviewPosition}
           onSetSourceLabel={handleSetSourceLabel}
+          onSetSourceColor={handleSetSourceColor}
           onClose={() => setShowSettings(false)}
         />
       )}

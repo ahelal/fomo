@@ -6,6 +6,10 @@ interface Props {
   onSetStatus(id: string, status: Status): void;
   onToggleSaved(id: string, saved: boolean): void;
   onFetchContent(id: string): void;
+  onReadAndNext?(): void;
+  onNextUnread?(): void;
+  onOpen?(): void;
+  onClose?(): void;
 }
 
 const STATUS_OPTIONS: { label: string; value: Status }[] = [
@@ -21,7 +25,7 @@ function stripHtml(html: string): string {
     .slice(0, 1000);
 }
 
-export function DetailPane({ update, onSetStatus, onToggleSaved, onFetchContent }: Props) {
+export function DetailPane({ update, onSetStatus, onToggleSaved, onFetchContent, onReadAndNext, onNextUnread, onOpen, onClose }: Props) {
   const hasContent = !!update.content;
   const content = hasContent ? stripHtml(update.content) : '';
 
@@ -53,6 +57,25 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, onFetchContent 
         {update.url}
       </a>
 
+      {/* Mobile-only quick actions: shown when callbacks provided */}
+      {(onReadAndNext || onNextUnread || onOpen || onClose) && (
+        <div className="detail-pane__mobile-actions">
+          {onReadAndNext && (
+            <button className="btn btn--primary" onClick={onReadAndNext}>Read&Next</button>
+          )}
+          {onNextUnread && (
+            <button className="btn btn--primary" onClick={onNextUnread}>NextUnread</button>
+          )}
+          {onOpen && (
+            <button className="btn" onClick={onOpen}>↗ Open</button>
+          )}
+          {onClose && (
+            <button className="btn" onClick={onClose}>Close</button>
+          )}
+        </div>
+      )}
+
+      {/* Desktop action buttons */}
       <div className="detail-pane__actions">
         {STATUS_OPTIONS.filter((o) => o.value !== update.status).map((o) => (
           <button
