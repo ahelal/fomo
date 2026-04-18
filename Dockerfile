@@ -41,9 +41,6 @@ COPY --from=builder /app/packages/web/dist/server    packages/web/dist/server
 # Copy Vite web build — served as static files by Hono at /
 COPY --from=builder /app/packages/web/dist/client    public/
 
-# Copy allowed-users file for Google SSO email allowlist (optional — if absent, all users allowed)
-COPY .allowed_users.tx[t] .
-
 USER node
 EXPOSE 3000
 
