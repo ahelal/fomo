@@ -23,6 +23,9 @@ param googleClientSecret string
 @secure()
 param sessionSecret string
 
+@secure()
+param allowedUsers string = ''
+
 param tags object = {}
 
 // Single image serves the Hono server (API routes) and the Vite-built Web UI
@@ -54,6 +57,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
         { name: 'google-client-id', value: googleClientId }
         { name: 'google-client-secret', value: googleClientSecret }
         { name: 'session-secret', value: sessionSecret }
+        { name: 'allowed-users', value: allowedUsers }
       ]
     }
     template: {
@@ -71,6 +75,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'GOOGLE_CLIENT_ID', secretRef: 'google-client-id' }
             { name: 'GOOGLE_CLIENT_SECRET', secretRef: 'google-client-secret' }
             { name: 'SESSION_SECRET', secretRef: 'session-secret' }
+            { name: 'ALLOWED_USERS', secretRef: 'allowed-users' }
           ]
           probes: [
             {

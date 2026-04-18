@@ -9,6 +9,7 @@
 #   GOOGLE_CLIENT_ID          — Google OAuth 2.0 Client ID
 #   GOOGLE_CLIENT_SECRET      — Google OAuth 2.0 Client Secret
 #   SESSION_SECRET            — Random string (≥32 chars) for session cookies
+#   ALLOWED_USERS             — Comma-separated allowed emails e.g. "a@b.com,c@d.com"
 #
 # Required GitHub variables (Settings → Variables):
 #   AZURE_CLIENT_ID           — <client-id>
@@ -77,4 +78,5 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          ALLOWED_USERS: ${{ secrets.ALLOWED_USERS }}
         run: bash deploy.sh fomo ${{ env.LOCATION }} --yes
