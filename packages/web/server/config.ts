@@ -12,6 +12,14 @@ function required(name: string): string {
 }
 
 function loadAllowedUsers(filePath: string): Set<string> {
+  // 1. Try env var first (comma-separated, used in CI/cloud where file isn't present)
+  const envVar = process.env['ALLOWED_USERS'];
+  if (envVar) {
+    const emails = envVar.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    console.log(`✓ Loaded ${emails.length} allowed user(s) from ALLOWED_USERS env var`);
+    return new Set(emails);
+  }
+  // 2. Fall back to file
   try {
     const raw = readFileSync(filePath, 'utf-8');
     const emails = raw
@@ -20,7 +28,7 @@ function loadAllowedUsers(filePath: string): Set<string> {
       .filter((line) => line && !line.startsWith('#'));
     return new Set(emails.map((e) => e.toLowerCase()));
   } catch {
-    console.warn(`⚠ Could not read allowed users file: ${filePath}`);
+    console.warn(`⚠ Could not read allowed users file: ${filePath} — all users allowed`);
     return new Set();
   }
 }

@@ -20,6 +20,10 @@ param googleClientSecret string
 @secure()
 param sessionSecret string
 
+@description('Comma-separated list of allowed Google login emails (leave empty to allow all)')
+@secure()
+param allowedUsers string = ''
+
 @description('Cron schedule for the scraper job (UTC, standard cron syntax)')
 param scraperCronSchedule string = '0 * * * *'   // every hour
 
@@ -66,6 +70,7 @@ module app './modules/app.bicep' = {
     googleClientId: googleClientId
     googleClientSecret: googleClientSecret
     sessionSecret: sessionSecret
+    allowedUsers: allowedUsers
     tags: { project: projectName, environment: environmentName }
   }
 }

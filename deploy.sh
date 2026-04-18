@@ -47,7 +47,7 @@ az deployment group create \
   --resource-group "$RG" \
   --template-file infra/main.bicep \
   --parameters infra/main.bicepparam \
-  --parameters googleClientId="$GOOGLE_CLIENT_ID" googleClientSecret="$GOOGLE_CLIENT_SECRET" sessionSecret="$SESSION_SECRET" location="$LOCATION" \
+  --parameters googleClientId="$GOOGLE_CLIENT_ID" googleClientSecret="$GOOGLE_CLIENT_SECRET" sessionSecret="$SESSION_SECRET" location="$LOCATION" allowedUsers="${ALLOWED_USERS:-}" \
   --what-if \
   --output table
 
@@ -88,7 +88,7 @@ DEPLOY_OUT=$(az deployment group create \
   --resource-group "$RG" \
   --template-file infra/main.bicep \
   --parameters infra/main.bicepparam \
-  --parameters googleClientId="$GOOGLE_CLIENT_ID" googleClientSecret="$GOOGLE_CLIENT_SECRET" sessionSecret="$SESSION_SECRET" location="$LOCATION" \
+  --parameters googleClientId="$GOOGLE_CLIENT_ID" googleClientSecret="$GOOGLE_CLIENT_SECRET" sessionSecret="$SESSION_SECRET" location="$LOCATION" allowedUsers="${ALLOWED_USERS:-}" \
   --output json)
 
 FOMO_URL=$(echo "$DEPLOY_OUT" | jq -r '.properties.outputs.url.value')
