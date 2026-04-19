@@ -1,5 +1,6 @@
 import type { SourcePlugin } from '../types.js';
 import { githubSource } from './sources/github.js';
+import { githubBlogSource } from './sources/github-blog.js';
 import { azureSource } from './sources/azure.js';
 import { vscodeSource } from './sources/vscode.js';
 import { copilotCliSource } from './sources/copilot-cli.js';
@@ -14,7 +15,7 @@ import { theRegisterSource } from './sources/theregister.js';
  */
 const registry = new Map<string, SourcePlugin>();
 
-const builtins: SourcePlugin[] = [githubSource, azureSource, vscodeSource, copilotCliSource, theRegisterSource];
+const builtins: SourcePlugin[] = [githubSource, githubBlogSource, azureSource, vscodeSource, copilotCliSource, theRegisterSource];
 for (const plugin of builtins) {
   registry.set(plugin.id, plugin);
 }
