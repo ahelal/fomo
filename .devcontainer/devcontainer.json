@@ -1,5 +1,6 @@
 {
-// Version: 0.7.1
+// Version: 0.9.2
+  "name": "fomo",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:24",
   "remoteUser": "root",
   "customizations": {
@@ -9,9 +10,19 @@
   },
   "remoteEnv": {},
   "mounts": [
-    "source=${localEnv:HOME}/.copilot,target=/root/.copilot,type=bind"
+    "source=${localEnv:HOME}/.copilot,target=/root/.copilot,type=bind",
+    "source=${localEnv:HOME}/.config/opencode,target=/root/.config/opencode,type=bind",
+    "source=${localEnv:HOME}/.local/share/opencode,target=/root/.local/share/opencode,type=bind",
+    "source=${localEnv:HOME}/.claude,target=/root/.claude,type=bind",
+    "source=${localEnv:HOME}/.bob,target=/root/.bob,type=bind"
   ],
-  "initializeCommand": ["bash", ".devcontainer/initialize.sh"],
-  "runArgs": ["--env-file=${localWorkspaceFolder}/.devcontainer/.env"],
+  "initializeCommand": [
+    "bash",
+    ".devcontainer/initialize.sh"
+  ],
+  "runArgs": [
+    "--env-file=${localWorkspaceFolder}/.devcontainer/.env",
+    "--cpus=2"
+  ],
   "postCreateCommand": "bash .devcontainer/postCreate.sh"
 }

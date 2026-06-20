@@ -222,6 +222,7 @@ The backup format is `{ version: 1, exportedAt, count, entities: [...] }`.
 | VS Code       | `vscode`      | VS Code releases (official Atom feed)   |
 | Copilot CLI   | `copilot-cli` | GitHub Copilot CLI releases             |
 | The Register  | `theregister` | The Register tech news (Atom feed)      |
+| GitHub Next   | `github-next` | GitHub Next research & prototypes (RSS) |
 
 ### Adding a New Source
 

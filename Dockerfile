@@ -1,5 +1,5 @@
 # ─── Build stage ─────────────────────────────────────────────────────────────
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -21,7 +21,7 @@ RUN pnpm --filter @fomo/core build && \
     pnpm --filter @fomo/web  build
 
 # ─── Runtime stage ───────────────────────────────────────────────────────────
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 

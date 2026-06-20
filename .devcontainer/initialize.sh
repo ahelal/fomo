@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Version: 0.7.1
+# Version: 0.9.2
 #
 # Runs on the LOCAL machine before the devcontainer starts (initializeCommand).
-# Writes .devcontainer/.env with GITHUB_TOKEN and ensures ~/.copilot exists.
+# Writes .devcontainer/.env with GITHUB_TOKEN, creates .devcontainer/.tmp/
+# for sharing temporary data, and ensures ~/.copilot exists.
 #
 # Hooks (place alongside this file):
 #   initialize_pre_hook.sh   – runs before the core steps
@@ -68,14 +69,32 @@ if ! command -v gh >/dev/null 2>&1; then
 	echo "[initialize] Error: 'gh' CLI not found. Install it from https://cli.github.com" >&2
 	exit 1
 fi
-if ! gh auth status >/dev/null 2>&1; then
+# Validate the active account's token directly. `gh auth status` exits non-zero
+# if ANY configured account is broken, even when the active account is valid
+# (common with multiple accounts), so check the token we actually need instead.
+github_token="$(gh auth token 2>/dev/null || true)"
+if [[ -z "$github_token" ]]; then
 	echo "[initialize] Error: Not authenticated with GitHub. Run 'gh auth login' first." >&2
 	exit 1
 fi
-echo "GITHUB_TOKEN=$(gh auth token)" > "$script_dir/.env"
+echo "GITHUB_TOKEN=$github_token" > "$script_dir/.env"
 if [[ "${DEV_COPILOT_TRACE:-}" == "1" ]]; then
 	echo "DEV_COPILOT_TRACE=1" >> "$script_dir/.env"
 fi
 
-echo "[initialize] Ensuring ~/.copilot exists..."
-mkdir -p "${HOME}/.copilot"
+echo "[initialize] Ensuring .devcontainer/.tmp exists..."
+mkdir -p "$script_dir/.tmp"
+
+# Agent config directories to create on the host (keep in sync with lib/agents.sh).
+AGENT_HOME_DIRS=(
+	".copilot"
+	".config/opencode"
+	".local/share/opencode"
+	".claude"
+	".bob"
+)
+
+echo "[initialize] Ensuring agent config directories exist..."
+for _dir in "${AGENT_HOME_DIRS[@]}"; do
+	mkdir -p "${HOME}/$_dir"
+done

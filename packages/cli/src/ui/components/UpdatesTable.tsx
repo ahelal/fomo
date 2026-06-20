@@ -8,9 +8,14 @@ const STATUS_ICON: Record<string, { icon: string; color: string }> = {
 };
 
 const DEFAULT_SOURCE_COLOR: Record<string, string> = {
-  github: '#58a6ff',
-  azure:  '#58a6ff',
-  vscode: '#3fb950',
+  github:                 '#58a6ff', // blue
+  'github-blog':          '#7ee787', // mint
+  'github-next':          '#a371f7', // purple
+  azure:                  '#58a6ff', // blue
+  vscode:                 '#3fb950', // green
+  theregister:            '#f85149', // red
+  'anthropic-news':       '#fb923c', // amber
+  'anthropic-engineering':'#06b6d4', // teal
 };
 
 interface Props {
