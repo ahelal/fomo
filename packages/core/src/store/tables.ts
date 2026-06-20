@@ -7,6 +7,12 @@ import type {
   ListResponse,
   StatsResponse,
   AppSettings,
+  Todo,
+  TodoStatus,
+  CreateTodoRequest,
+  UpdateTodoRequest,
+  ListTodosOptions,
+  ListTodosResponse,
 } from '../types.js';
 import { DEFAULT_SETTINGS } from '../types.js';
 
@@ -383,4 +389,120 @@ function isTableError(err: unknown, statusCode: number): boolean {
     'statusCode' in err &&
     (err as { statusCode: number }).statusCode === statusCode
   );
+}
+
+// ─── Todo Store ────────────────────────────────────────────────────────────
+
+const TODO_TABLE = 'todos';
+const TODO_PK = 'todo';
+
+type TodoEntity = TableEntity<{
+  subject: string;
+  description: string;
+  dueDate: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}>;
+
+function entityToTodo(e: TodoEntity): Todo {
+  return {
+    id: e.rowKey,
+    subject: e.subject,
+    description: e.description ?? '',
+    dueDate: e.dueDate || undefined,
+    status: e.status as TodoStatus,
+    createdAt: e.createdAt,
+    updatedAt: e.updatedAt,
+  };
+}
+
+export class TodoStore {
+  private readonly client: TableClient;
+
+  constructor(connectionString: string) {
+    const allowInsecureConnection = connectionString.includes('devstoreaccount1');
+    this.client = TableClient.fromConnectionString(connectionString, TODO_TABLE, { allowInsecureConnection });
+  }
+
+  async init(): Promise<void> {
+    await this.client.createTable();
+  }
+
+  async createTodo(req: CreateTodoRequest): Promise<Todo> {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const entity: TodoEntity = {
+      partitionKey: TODO_PK,
+      rowKey: id,
+      subject: req.subject,
+      description: req.description ?? '',
+      dueDate: req.dueDate ?? '',
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.client.createEntity(entity);
+    return entityToTodo(entity);
+  }
+
+  async getTodo(id: string): Promise<Todo | null> {
+    try {
+      const entity = await this.client.getEntity<TodoEntity>(TODO_PK, id);
+      return entityToTodo(entity as TodoEntity);
+    } catch (err: unknown) {
+      if (isTableError(err, 404)) return null;
+      throw err;
+    }
+  }
+
+  async listTodos(opts: ListTodosOptions = {}): Promise<ListTodosResponse> {
+    const filters: string[] = [`PartitionKey eq '${TODO_PK}'`];
+    if (opts.status && opts.status !== 'all') {
+      filters.push(odata`status eq ${opts.status}`);
+    }
+    const filter = filters.join(' and ');
+
+    const iter = this.client.listEntities<TodoEntity>({ queryOptions: { filter } });
+    const todos: Todo[] = [];
+    for await (const entity of iter) {
+      todos.push(entityToTodo(entity as TodoEntity));
+    }
+
+    // Sort: pending first, then in_progress, then done; within group by dueDate asc
+    const statusOrder: Record<TodoStatus, number> = { pending: 0, in_progress: 1, done: 2 };
+    todos.sort((a, b) => {
+      const sd = statusOrder[a.status] - statusOrder[b.status];
+      if (sd !== 0) return sd;
+      if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+      if (a.dueDate) return -1;
+      if (b.dueDate) return 1;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+
+    return { todos };
+  }
+
+  async updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo> {
+    const entity = await this.client.getEntity<TodoEntity>(TODO_PK, id);
+    const updated: TodoEntity = {
+      ...entity,
+      subject: patch.subject ?? entity.subject,
+      description: patch.description !== undefined ? patch.description : entity.description,
+      dueDate: patch.dueDate !== undefined ? (patch.dueDate ?? '') : entity.dueDate,
+      status: patch.status ?? entity.status,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.client.updateEntity(updated, 'Replace', { etag: entity.etag });
+    return entityToTodo(updated);
+  }
+
+  async deleteTodo(id: string): Promise<void> {
+    try {
+      await this.client.deleteEntity(TODO_PK, id);
+    } catch (err: unknown) {
+      if (isTableError(err, 404)) return; // idempotent
+      throw err;
+    }
+  }
 }

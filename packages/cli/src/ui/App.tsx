@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, useInput, useApp } from 'ink';
-import type { FomoService, Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings } from '@fomo/core';
+import type { FomoService, Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus } from '@fomo/core';
 import { DEFAULT_SETTINGS } from '@fomo/core';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
@@ -9,6 +9,7 @@ import { DetailPane } from './components/DetailPane.js';
 import { HelpOverlay } from './components/HelpOverlay.js';
 import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/SettingsPane.js';
+import { TodosView, type TodoFormField } from './components/TodosView.js';
 
 type FilterStatus = Status | 'all' | 'saved';
 
@@ -40,6 +41,17 @@ export function App({ service }: Props) {
   const [labelBuffer, setLabelBuffer] = useState('');
   const [showHelp, setShowHelp] = useState(false);
   const [helpContext, setHelpContext] = useState<'list' | 'detail' | 'settings'>('list');
+
+  // ── Todos state ─────────────────────────────────────────────────────────────
+  const [showTodos, setShowTodos] = useState(false);
+  const [todosList, setTodosList] = useState<Todo[]>([]);
+  const [todosSelectedIndex, setTodosSelectedIndex] = useState(0);
+  const [todosAddMode, setTodosAddMode] = useState(false);
+  const [todosFormField, setTodosFormField] = useState<TodoFormField>('subject');
+  const [todosFormSubject, setTodosFormSubject] = useState('');
+  const [todosFormDue, setTodosFormDue] = useState('');
+  const [todosFormDesc, setTodosFormDesc] = useState('');
+  const [todosMessage, setTodosMessage] = useState<string | undefined>();
 
   // Keep refs so async callbacks always see the latest state
   const updatesRef  = useRef(updates);
@@ -91,6 +103,21 @@ export function App({ service }: Props) {
       // non-critical
     }
   }, [service]);
+
+  const loadTodos = useCallback(async () => {
+    try {
+      const resp = await service.listTodos();
+      setTodosList(resp.todos);
+      setTodosSelectedIndex((i) => Math.min(i, Math.max(0, resp.todos.length - 1)));
+    } catch {
+      // non-critical
+    }
+  }, [service]);
+
+  const showTodosMessage = useCallback((msg: string, ms = 2000) => {
+    setTodosMessage(msg);
+    setTimeout(() => setTodosMessage(undefined), ms);
+  }, []);
 
   const refresh = useCallback(
     async (f?: FilterStatus) => {
@@ -231,13 +258,112 @@ export function App({ service }: Props) {
 
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((input, key) => {
-    // ── Quit from any screen (but not while editing a label) ──
-    if (input === 'q' && !editingLabel) { exit(); return; }
+    // ── Quit from any screen (but not while editing a label or adding a todo) ──
+    if (input === 'q' && !editingLabel && !todosAddMode) { exit(); return; }
 
     // ── Help overlay — Esc or h to close, consume all other input ──
     if (showHelp) {
       if (key.escape || key.backspace || key.delete || input === 'h') setShowHelp(false);
       return;
+    }
+
+    // ── Todos view input handling ──
+    if (showTodos) {
+      if (todosAddMode) {
+        // Form input handling
+        if (key.escape) {
+          setTodosAddMode(false);
+          setTodosFormSubject('');
+          setTodosFormDue('');
+          setTodosFormDesc('');
+          setTodosFormField('subject');
+          return;
+        }
+        if (key.tab) {
+          setTodosFormField((f) =>
+            f === 'subject' ? 'due' : f === 'due' ? 'description' : 'subject',
+          );
+          return;
+        }
+        if (key.return) {
+          if (!todosFormSubject.trim()) {
+            showTodosMessage('⚠ Subject is required');
+            return;
+          }
+          void (async () => {
+            try {
+              await service.createTodo({
+                subject: todosFormSubject.trim(),
+                description: todosFormDesc.trim() || undefined,
+                dueDate: todosFormDue || undefined,
+              });
+              setTodosAddMode(false);
+              setTodosFormSubject('');
+              setTodosFormDue('');
+              setTodosFormDesc('');
+              setTodosFormField('subject');
+              await loadTodos();
+              showTodosMessage('✓ Todo added');
+            } catch (err) {
+              showTodosMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          })();
+          return;
+        }
+        if (key.backspace || key.delete) {
+          if (todosFormField === 'subject')      setTodosFormSubject((b) => b.slice(0, -1));
+          else if (todosFormField === 'due')     setTodosFormDue((b) => b.slice(0, -1));
+          else if (todosFormField === 'description') setTodosFormDesc((b) => b.slice(0, -1));
+          return;
+        }
+        if (input && !key.ctrl && !key.meta) {
+          if (todosFormField === 'subject')      setTodosFormSubject((b) => b + input);
+          else if (todosFormField === 'due')     setTodosFormDue((b) => b + input);
+          else if (todosFormField === 'description') setTodosFormDesc((b) => b + input);
+        }
+        return;
+      }
+
+      // List mode inside todos view
+      if (key.escape || key.backspace || input === 't') {
+        setShowTodos(false);
+        return;
+      }
+      if (key.upArrow || input === 'k') {
+        setTodosSelectedIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (key.downArrow || input === 'j') {
+        setTodosSelectedIndex((i) => Math.min(todosList.length - 1, i + 1));
+        return;
+      }
+      if (input === 'a') {
+        setTodosAddMode(true);
+        setTodosFormField('subject');
+        return;
+      }
+      if (key.return && todosList[todosSelectedIndex]) {
+        const todo = todosList[todosSelectedIndex];
+        const nextStatus: Record<string, string> = {
+          pending: 'in_progress', in_progress: 'done', done: 'pending',
+        };
+        const next = nextStatus[todo.status] as TodoStatus;
+        setTodosList((prev) => prev.map((t) => (t.id === todo.id ? { ...t, status: next } : t)));
+        void service.updateTodo(todo.id, { status: next })
+          .then(() => loadTodos())
+          .catch(() => loadTodos());
+        return;
+      }
+      if (input === 'd' && todosList[todosSelectedIndex]) {
+        const id = todosList[todosSelectedIndex].id;
+        setTodosList((prev) => prev.filter((t) => t.id !== id));
+        setTodosSelectedIndex((i) => Math.max(0, i - 1));
+        void service.deleteTodo(id)
+          .then(() => loadTodos())
+          .catch(() => loadTodos());
+        return;
+      }
+      return; // consume remaining input while in todos view
     }
 
     // ── Settings view input handling ──
@@ -370,6 +496,13 @@ export function App({ service }: Props) {
       return;
     }
 
+    // Open todos view
+    if (input === 't') {
+      setShowTodos(true);
+      void loadTodos();
+      return;
+    }
+
     // Navigation
     if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - 1));                                return; }
     if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.min(updatesRef.current.length - 1, i + 1));     return; }
@@ -438,6 +571,28 @@ export function App({ service }: Props) {
         <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
         <FilterBar active={filter} columns={columns} />
         <HelpOverlay context={helpContext} height={availableH} columns={columns} />
+      </Box>
+    );
+  }
+
+  // Todos overlay — replaces main content area
+  if (showTodos) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        <FilterBar active={filter} columns={columns} />
+        <TodosView
+          todos={todosList}
+          selectedIndex={todosSelectedIndex}
+          height={availableH}
+          columns={columns}
+          addMode={todosAddMode}
+          formField={todosFormField}
+          formSubject={todosFormSubject}
+          formDue={todosFormDue}
+          formDesc={todosFormDesc}
+          message={todosMessage}
+        />
       </Box>
     );
   }

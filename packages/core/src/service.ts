@@ -1,4 +1,4 @@
-import { UpdateStore, type BackupPayload } from './store/tables.js';
+import { UpdateStore, TodoStore, type BackupPayload } from './store/tables.js';
 import { getAllSources, getSource, getSourceIds } from './scraper/registry.js';
 import type {
   FomoService,
@@ -14,6 +14,11 @@ import type {
   SourceInfo,
   SourceFetchResult,
   AppSettings,
+  Todo,
+  CreateTodoRequest,
+  UpdateTodoRequest,
+  ListTodosOptions,
+  ListTodosResponse,
 } from './types.js';
 
 /**
@@ -22,15 +27,20 @@ import type {
  */
 export class FomoDirectService implements FomoService {
   private readonly store: UpdateStore;
+  private readonly todoStore: TodoStore;
   private initPromise: Promise<void> | undefined;
 
   constructor(connectionString: string) {
     this.store = new UpdateStore(connectionString);
+    this.todoStore = new TodoStore(connectionString);
   }
 
   private async ensureInit(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.store.init();
+      this.initPromise = Promise.all([
+        this.store.init(),
+        this.todoStore.init(),
+      ]).then(() => undefined);
     }
     await this.initPromise;
   }
@@ -166,6 +176,35 @@ export class FomoDirectService implements FomoService {
   async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
     await this.ensureInit();
     return this.store.updateSettings(patch);
+  }
+
+  // ─── Todos ──────────────────────────────────────────────────────────────────
+
+  async listTodos(opts: ListTodosOptions = {}): Promise<ListTodosResponse> {
+    await this.ensureInit();
+    return this.todoStore.listTodos(opts);
+  }
+
+  async getTodo(id: string): Promise<Todo> {
+    await this.ensureInit();
+    const todo = await this.todoStore.getTodo(id);
+    if (!todo) throw new Error(`Todo not found: ${id}`);
+    return todo;
+  }
+
+  async createTodo(req: CreateTodoRequest): Promise<Todo> {
+    await this.ensureInit();
+    return this.todoStore.createTodo(req);
+  }
+
+  async updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo> {
+    await this.ensureInit();
+    return this.todoStore.updateTodo(id, patch);
+  }
+
+  async deleteTodo(id: string): Promise<void> {
+    await this.ensureInit();
+    return this.todoStore.deleteTodo(id);
   }
 }
 

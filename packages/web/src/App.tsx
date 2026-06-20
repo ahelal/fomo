@@ -8,14 +8,16 @@ import { UpdatesTable } from './components/UpdatesTable.js';
 import { DetailPane } from './components/DetailPane.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
 import { HelpOverlay } from './components/HelpOverlay.js';
+import { TodosPane } from './components/TodosPane.js';
 
-type FilterStatus = Status | 'all' | 'saved';
+type FilterStatus = Status | 'all' | 'saved' | 'todos';
 
 const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: '1 All', value: 'all' },
   { label: '2 Unread', value: 'unread' },
   { label: '3 Read', value: 'read' },
   { label: '4 Saved', value: 'saved' },
+  { label: '5 Todos', value: 'todos' },
 ];
 
 // Same-origin client — auth handled by session cookie
@@ -128,6 +130,11 @@ export function App() {
 
       if (e.key === 'c') {
         setShowSettings(true);
+        return;
+      }
+
+      if (e.key === 't') {
+        fomo.setFilter('todos');
         return;
       }
 
@@ -362,27 +369,33 @@ export function App() {
       </div>
 
       {/* Main area */}
-      <div className={`main main--preview-${isDetailOpen ? (previewPosition === 'off' ? 'none' : previewPosition) : 'none'}`}>
-        <UpdatesTable
-          updates={fomo.updates}
-          selectedId={selected?.id}
-          onSelect={setSelected}
-          sourceLabels={fomo.settings.sourceLabels}
-          sourceColors={fomo.settings.sourceColors}
-          onSwipeAction={handleSwipeAction}
-          onRefresh={handleRefresh}
-        />
-        {selected && previewPosition !== 'off' && (
-          <DetailPane
-            update={selected}
-            onSetStatus={handleSetStatus}
-            onToggleSaved={handleToggleSaved}
-            onFetchContent={handleFetchContent}
-            onReadAndNext={handleReadAndNext}
-            onNextUnread={handleNextUnread}
-            onOpen={() => selected.url && window.open(selected.url, '_blank', 'noopener,noreferrer')}
-            onClose={() => setSelected(undefined)}
-          />
+      <div className={`main main--preview-${isDetailOpen && fomo.filter !== 'todos' ? (previewPosition === 'off' ? 'none' : previewPosition) : 'none'}`}>
+        {fomo.filter === 'todos' ? (
+          <TodosPane client={client} />
+        ) : (
+          <>
+            <UpdatesTable
+              updates={fomo.updates}
+              selectedId={selected?.id}
+              onSelect={setSelected}
+              sourceLabels={fomo.settings.sourceLabels}
+              sourceColors={fomo.settings.sourceColors}
+              onSwipeAction={handleSwipeAction}
+              onRefresh={handleRefresh}
+            />
+            {selected && previewPosition !== 'off' && (
+              <DetailPane
+                update={selected}
+                onSetStatus={handleSetStatus}
+                onToggleSaved={handleToggleSaved}
+                onFetchContent={handleFetchContent}
+                onReadAndNext={handleReadAndNext}
+                onNextUnread={handleNextUnread}
+                onOpen={() => selected.url && window.open(selected.url, '_blank', 'noopener,noreferrer')}
+                onClose={() => setSelected(undefined)}
+              />
+            )}
+          </>
         )}
       </div>
 

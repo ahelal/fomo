@@ -37,14 +37,25 @@ vi.mock('../store/tables.js', () => {
     })),
   };
 
+  const todoStore = {
+    init: vi.fn().mockResolvedValue(undefined),
+    createTodo: vi.fn(),
+    getTodo: vi.fn(),
+    listTodos: vi.fn().mockResolvedValue({ todos: [] }),
+    updateTodo: vi.fn(),
+    deleteTodo: vi.fn().mockResolvedValue(undefined),
+  };
+
   return {
     UpdateStore: vi.fn().mockImplementation(() => store),
+    TodoStore: vi.fn().mockImplementation(() => todoStore),
     makeId: vi.fn((source: string, url: string) => `${source}__hash`),
     parseId: vi.fn((id: string) => {
       const sep = id.indexOf('__');
       return { source: id.slice(0, sep), rowKey: id.slice(sep + 2) };
     }),
     __mockStore: store,
+    __mockTodoStore: todoStore,
   };
 });
 

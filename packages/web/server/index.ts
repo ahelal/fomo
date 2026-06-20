@@ -4,17 +4,19 @@ import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { config } from './config.js';
-import { UpdateStore } from '@fomo/core/store';
+import { UpdateStore, TodoStore } from '@fomo/core/store';
 import { getAllSources } from '@fomo/core/scrapers';
 import { sessionAuth } from './middleware/auth.js';
 import { authRouter } from './routes/auth.js';
 import { updatesRouter } from './routes/updates.js';
 import { fetchRouter } from './routes/fetch.js';
+import { todosRouter } from './routes/todos.js';
 
 // ── Storage ──────────────────────────────────────────────────────────────────
 const store = new UpdateStore(config.storageConnectionString);
+const todoStore = new TodoStore(config.storageConnectionString);
 
-await store.init();
+await Promise.all([store.init(), todoStore.init()]);
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export const app = new Hono();
@@ -39,9 +41,12 @@ app.use('/fetch/*', auth);
 app.use('/stats', auth);
 app.use('/sources', auth);
 app.use('/settings', auth);
+app.use('/todos/*', auth);
+app.use('/todos', auth);
 
 app.route('/updates', updatesRouter(store));
 app.route('/fetch', fetchRouter(store));
+app.route('/todos', todosRouter(todoStore));
 
 app.get('/stats', async (c) => c.json(await store.getStats()));
 app.get('/sources', (c) =>
