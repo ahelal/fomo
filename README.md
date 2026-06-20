@@ -51,24 +51,20 @@ All data lives in a single Azure Table Storage table (`updates`).
 
 Deploy the web interface and scraper job to Azure Container Apps.
 
-**Prerequisites:** Azure CLI (`az login`), Google OAuth credentials ([setup](#authentication))
+**Prerequisites:** Azure CLI (`az login`), Google OAuth credentials ([setup](#authentication)), and the required deployment environment variables.
 
 ```bash
-# 1. Set credentials
-export GOOGLE_CLIENT_ID="<from Google Cloud Console>"
-export GOOGLE_CLIENT_SECRET="<from Google Cloud Console>"
-export SESSION_SECRET="$(openssl rand -hex 32)"
+# 1. Load local environment (or export the same values)
+source .env
 
-# 2. Edit the email allowlist (one email per line)
+# 2. Edit the email allowlist (one email per line), if desired
 nano .allowed_users.txt
 
 # 3. Deploy everything
-./deploy.sh <resource-group> [location]
+bash deploy.sh fomo swedencentral -y
 ```
 
-The script creates all Azure resources (Container Registry, Storage Account,
-Container Apps Environment, Container App, Scraper Job), builds the Docker image
-remotely on ACR, and deploys the app.
+The deployment expects `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, and optionally `ALLOWED_USERS`. The script creates all Azure resources (Container Registry, Storage Account, Container Apps Environment, Container App, Scraper Job), builds the Docker image remotely on ACR, and deploys the app.
 
 The Container App scales to zero when idle. The scraper job runs hourly.
 
@@ -77,13 +73,15 @@ The Container App scales to zero when idle. The scraper job runs hourly.
 The CLI connects directly to Azure Table Storage — no server needed.
 
 ```bash
-# Install globally (from repo root)
+# Build the CLI
 pnpm --filter @fomo/cli build
-npm link packages/cli
+
+# Run it directly (from the repo root)
+node packages/cli/dist/index.js --help
 
 # Configure
-fomo config set --connection-string "<Azure Storage connection string>"
-fomo config show
+node packages/cli/dist/index.js config set --connection-string "<Azure Storage connection string>"
+node packages/cli/dist/index.js config show
 ```
 
 Or use the environment variable instead of the config file:
@@ -101,7 +99,7 @@ pnpm install
 # Build all packages
 pnpm build
 
-# Run tests (63 tests across core + web)
+# Run tests
 pnpm test
 
 # Start the server locally
@@ -215,14 +213,18 @@ The backup format is `{ version: 1, exportedAt, count, entities: [...] }`.
 
 ### Built-in Sources
 
-| Source        | ID            | What it tracks                          |
-|---------------|---------------|-----------------------------------------|
-| GitHub        | `github`      | GitHub Releases (Node.js, TypeScript, etc.) |
-| Azure         | `azure`       | Azure Updates RSS feed                  |
-| VS Code       | `vscode`      | VS Code releases (official Atom feed)   |
-| Copilot CLI   | `copilot-cli` | GitHub Copilot CLI releases             |
-| The Register  | `theregister` | The Register tech news (Atom feed)      |
-| GitHub Next   | `github-next` | GitHub Next research & prototypes (RSS) |
+| Source | ID | What it tracks |
+|--------|----|----------------|
+| GitHub | `github` | GitHub Releases (Node.js, TypeScript, etc.) |
+| GitHub Blog | `github-blog` | GitHub Blog posts |
+| Azure | `azure` | Azure Updates RSS feed |
+| VS Code | `vscode` | VS Code releases (official Atom feed) |
+| Copilot CLI | `copilot-cli` | GitHub Copilot CLI releases |
+| The Register | `theregister` | The Register tech news (Atom feed) |
+| Anthropic News | `anthropic-news` | Anthropic news |
+| Anthropic Engineering | `anthropic-engineering` | Anthropic engineering blog |
+| Azure SRE Agent | `azure-sre-agent` | Azure SRE Agent updates |
+| GitHub Next | `github-next` | GitHub Next research & prototypes (RSS) |
 
 ### Adding a New Source
 
@@ -306,8 +308,8 @@ alice@example.com
 bob@example.com
 ```
 
-If the file is empty or missing, **all** Google accounts are allowed.
-This file is baked into the Docker image — rebuild and redeploy after editing.
+If the file is empty or missing, and `ALLOWED_USERS` is not set, **all** Google accounts are allowed. `ALLOWED_USERS` overrides the file when present.
+The server reads the allowlist at startup, so restart or redeploy the container after changing it.
 
 ### How It Works
 
@@ -330,6 +332,7 @@ The CLI does **not** use authentication — it connects directly to Azure Storag
 | `GOOGLE_CLIENT_ID`               | Yes      | Google OAuth 2.0 Client ID                      |
 | `GOOGLE_CLIENT_SECRET`           | Yes      | Google OAuth 2.0 Client Secret                  |
 | `SESSION_SECRET`                 | Yes      | Cookie signing secret (≥32 chars random string) |
+| `ALLOWED_USERS`                  | No       | Comma-separated email allowlist override (used instead of the file) |
 | `ALLOWED_USERS_FILE`             | No       | Path to email allowlist (default: `.allowed_users.txt`) |
 | `PORT`                            | No       | HTTP port (default: `3000`)                     |
 
@@ -372,6 +375,7 @@ A GitHub Actions workflow (`.github/workflows/deploy.yml`) deploys on every push
    | Variable         | Default          |
    |------------------|------------------|
    | `AZURE_LOCATION` | `swedencentral`  |
+   | `ALLOWED_USERS`  | *(empty)*        |
 
 4. Push to `main` — the workflow builds, tests, deploys infra via Bicep, and updates the container.
 

@@ -31,6 +31,8 @@ export function FilterBar({ active, columns }: Props) {
           </React.Fragment>
         );
       })}
+      <Text color="gray"> </Text>
+      <Text color="#8b949e">{` t Todos `}</Text>
     </Box>
   );
 }

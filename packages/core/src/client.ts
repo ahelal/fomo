@@ -8,6 +8,11 @@ import type {
   Status,
   SourceInfo,
   AppSettings,
+  Todo,
+  CreateTodoRequest,
+  UpdateTodoRequest,
+  ListTodosOptions,
+  ListTodosResponse,
 } from './types.js';
 
 export interface FomoClientConfig {
@@ -31,6 +36,12 @@ export interface FomoService {
   getSources(): Promise<SourceInfo[]>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  // ─── Todos ──────────────────────────────────────────────────────────────────
+  listTodos(opts?: ListTodosOptions): Promise<ListTodosResponse>;
+  getTodo(id: string): Promise<Todo>;
+  createTodo(req: CreateTodoRequest): Promise<Todo>;
+  updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo>;
+  deleteTodo(id: string): Promise<void>;
 }
 
 export class FomoApiError extends Error {
@@ -150,6 +161,37 @@ export class FomoClient implements FomoService {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
+  }
+
+  // ─── Todos ────────────────────────────────────────────────────────────────
+
+  async listTodos(opts: ListTodosOptions = {}): Promise<ListTodosResponse> {
+    const params = new URLSearchParams();
+    if (opts.status && opts.status !== 'all') params.set('status', opts.status);
+    const qs = params.toString();
+    return this.request<ListTodosResponse>(`/todos${qs ? `?${qs}` : ''}`);
+  }
+
+  async getTodo(id: string): Promise<Todo> {
+    return this.request<Todo>(`/todos/${encodeURIComponent(id)}`);
+  }
+
+  async createTodo(req: CreateTodoRequest): Promise<Todo> {
+    return this.request<Todo>('/todos', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  async updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo> {
+    return this.request<Todo>(`/todos/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async deleteTodo(id: string): Promise<void> {
+    await this.request<void>(`/todos/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   // ─── Health ───────────────────────────────────────────────────────────────

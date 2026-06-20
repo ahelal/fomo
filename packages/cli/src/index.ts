@@ -284,6 +284,69 @@ program
     }
   });
 
+// ── todo ──────────────────────────────────────────────────────────────────────
+const todoCmd = program.command('todo').description('Manage personal todos');
+
+todoCmd
+  .command('add')
+  .description('Add a new todo')
+  .requiredOption('--subject <subject>', 'Todo subject/title')
+  .option('--due <date>', 'Due date (YYYY-MM-DD)')
+  .option('--description <text>', 'Optional description')
+  .action(async (opts: { subject: string; due?: string; description?: string }) => {
+    const svc = new FomoDirectService(loadConfig().connectionString);
+    const todo = await svc.createTodo({
+      subject: opts.subject,
+      dueDate: opts.due,
+      description: opts.description,
+    });
+    const dueStr = todo.dueDate ? ` (due ${todo.dueDate})` : '';
+    console.log(`✓ Added todo: ${todo.subject}${dueStr}`);
+    console.log(`  ID: ${todo.id}`);
+  });
+
+todoCmd
+  .command('list')
+  .description('List todos')
+  .option('--status <status>', 'Filter: all | pending | in_progress | done', 'all')
+  .action(async ({ status }: { status: string }) => {
+    const svc = new FomoDirectService(loadConfig().connectionString);
+    const resp = await svc.listTodos({ status: status as never });
+
+    if (resp.todos.length === 0) {
+      console.log('No todos found.');
+      return;
+    }
+
+    const ICON: Record<string, string> = { pending: '○', in_progress: '◑', done: '●' };
+    for (const t of resp.todos) {
+      const icon = ICON[t.status] ?? '?';
+      const dueStr = t.dueDate ? `  due:${t.dueDate}` : '';
+      const subject = t.subject.length > 50 ? `${t.subject.slice(0, 47)}…` : t.subject;
+      console.log(`${icon}  ${t.id.slice(0, 8)}  ${subject.padEnd(52)}${dueStr}`);
+    }
+    console.log(`\n${resp.todos.length} todo(s)`);
+  });
+
+todoCmd
+  .command('set-status <id> <status>')
+  .description('Update todo status (pending | in_progress | done)')
+  .action(async (id: string, status: string) => {
+    const svc = new FomoDirectService(loadConfig().connectionString);
+    const todo = await svc.updateTodo(id, { status: status as never });
+    const ICON: Record<string, string> = { pending: '○', in_progress: '◑', done: '●' };
+    console.log(`${ICON[todo.status] ?? ''} Todo marked as ${todo.status}: ${todo.subject}`);
+  });
+
+todoCmd
+  .command('delete <id>')
+  .description('Delete a todo by ID')
+  .action(async (id: string) => {
+    const svc = new FomoDirectService(loadConfig().connectionString);
+    await svc.deleteTodo(id);
+    console.log(`✓ Deleted todo ${id}`);
+  });
+
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);

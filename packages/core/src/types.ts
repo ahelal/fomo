@@ -105,6 +105,45 @@ export interface StatsResponse {
   saved: number;
 }
 
+// ─── Todos ───────────────────────────────────────────────────────────────────
+
+export type TodoStatus = 'pending' | 'in_progress' | 'done';
+
+export interface Todo {
+  /** Opaque ID: stored as RowKey in Azure Table Storage. */
+  id: string;
+  subject: string;
+  description: string;
+  /** ISO 8601 date string, e.g. '2024-12-31'. Optional. */
+  dueDate?: string;
+  status: TodoStatus;
+  /** ISO 8601 datetime */
+  createdAt: string;
+  /** ISO 8601 datetime */
+  updatedAt: string;
+}
+
+export interface CreateTodoRequest {
+  subject: string;
+  description?: string;
+  dueDate?: string;
+}
+
+export interface UpdateTodoRequest {
+  subject?: string;
+  description?: string;
+  dueDate?: string;
+  status?: TodoStatus;
+}
+
+export interface ListTodosOptions {
+  status?: TodoStatus | 'all';
+}
+
+export interface ListTodosResponse {
+  todos: Todo[];
+}
+
 // ─── Centralised settings ────────────────────────────────────────────────────
 
 export type PreviewPosition = 'right' | 'bottom' | 'off';
