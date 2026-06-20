@@ -4,6 +4,7 @@ import { azureSource } from '../scraper/sources/azure.js';
 import { vscodeSource } from '../scraper/sources/vscode.js';
 import { copilotCliSource } from '../scraper/sources/copilot-cli.js';
 import { theRegisterSource } from '../scraper/sources/theregister.js';
+import { githubNextSource } from '../scraper/sources/github-next.js';
 import { getAllSources, getSource, getSourceIds, registerSource } from '../scraper/registry.js';
 import type { SourcePlugin } from '../types.js';
 
@@ -277,6 +278,60 @@ describe('theregister source fetch', () => {
   });
 });
 
+describe('github-next source', () => {
+  it('has correct metadata', () => {
+    expect(githubNextSource.id).toBe('github-next');
+    expect(githubNextSource.displayName).toBe('GitHub Next');
+    expect(githubNextSource.capabilities.preview).toBe(true);
+  });
+});
+
+describe('github-next source fetch', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const RSS_FEED = `<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>
+      <title>GitHub Next</title>
+      <link>https://githubnext.com/</link>
+      <item>
+        <title>/goooooooal!</title>
+        <link>https://githubnext.com/posts/goal/</link>
+        <guid isPermaLink="true">https://githubnext.com/posts/goal/</guid>
+        <description>Turn an issue into an agentic mission</description>
+        <pubDate>Thu, 11 Jun 2026 00:00:00 GMT</pubDate>
+      </item>
+      <item>
+        <title>Crane: verified code migration</title>
+        <link>https://githubnext.com/posts/crane/</link>
+        <guid isPermaLink="true">https://githubnext.com/posts/crane/</guid>
+        <description>Crane is a migration assistant for GitHub repositories.</description>
+        <pubDate>Mon, 08 Jun 2026 00:00:00 GMT</pubDate>
+      </item>
+    </channel></rss>`;
+
+  it('parses RSS feed correctly', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(RSS_FEED, { status: 200 }),
+    );
+
+    const items = await githubNextSource.fetch();
+    expect(items).toHaveLength(2);
+    expect(items[0].title).toBe('/goooooooal!');
+    expect(items[0].url).toBe('https://githubnext.com/posts/goal/');
+    expect(items[0].content).toBe('Turn an issue into an agentic mission');
+    expect(items[0].datePublished).toBeInstanceOf(Date);
+    expect(items[1].title).toBe('Crane: verified code migration');
+  });
+
+  it('returns empty array on failure', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+    const items = await githubNextSource.fetch();
+    expect(items).toEqual([]);
+  });
+});
+
 describe('scraper registry', () => {
   it('getAllSources returns all built-in sources', () => {
     const sources = getAllSources();
@@ -286,6 +341,7 @@ describe('scraper registry', () => {
     expect(ids).toContain('vscode');
     expect(ids).toContain('copilot-cli');
     expect(ids).toContain('theregister');
+    expect(ids).toContain('github-next');
   });
 
   it('getSource returns a source by id', () => {
@@ -300,6 +356,7 @@ describe('scraper registry', () => {
     expect(ids).toContain('vscode');
     expect(ids).toContain('copilot-cli');
     expect(ids).toContain('theregister');
+    expect(ids).toContain('github-next');
   });
 
   it('registerSource adds a custom source', () => {

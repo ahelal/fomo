@@ -4,9 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@fomo/cli': link:packages/cli
+
 importers:
 
   .:
+    dependencies:
+      '@fomo/cli':
+        specifier: link:packages/cli
+        version: link:packages/cli
     devDependencies:
       turbo:
         specifier: ^2.3.0

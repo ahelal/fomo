@@ -24,6 +24,16 @@ const COLOR_PALETTE = [
   '#d2a8ff', // lavender
   '#ff7b72', // coral
   '#7ee787', // mint
+  '#06b6d4', // teal
+  '#f472b6', // pink
+  '#fb923c', // amber
+  '#a3e635', // lime
+  '#34d399', // emerald
+  '#e879f9', // fuchsia
+  '#fbbf24', // gold
+  '#818cf8', // indigo
+  '#f87171', // rose
+  '#94a3b8', // slate
 ];
 
 export function SettingsPanel({ settings, sources, onToggleSource, onSetPreviewPosition, onSetSourceLabel, onSetSourceColor, onClose }: Props) {

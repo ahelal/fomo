@@ -5,6 +5,10 @@ import { azureSource } from './sources/azure.js';
 import { vscodeSource } from './sources/vscode.js';
 import { copilotCliSource } from './sources/copilot-cli.js';
 import { theRegisterSource } from './sources/theregister.js';
+import { anthropicNewsSource } from './sources/anthropic-news.js';
+import { anthropicEngineeringSource } from './sources/anthropic-engineering.js';
+import { azureSreAgentSource } from './sources/azure-sre-agent.js';
+import { githubNextSource } from './sources/github-next.js';
 
 /**
  * Central plugin registry.
@@ -15,7 +19,7 @@ import { theRegisterSource } from './sources/theregister.js';
  */
 const registry = new Map<string, SourcePlugin>();
 
-const builtins: SourcePlugin[] = [githubSource, githubBlogSource, azureSource, vscodeSource, copilotCliSource, theRegisterSource];
+const builtins: SourcePlugin[] = [githubSource, githubBlogSource, azureSource, vscodeSource, copilotCliSource, theRegisterSource, anthropicNewsSource, anthropicEngineeringSource, azureSreAgentSource, githubNextSource];
 for (const plugin of builtins) {
   registry.set(plugin.id, plugin);
 }
