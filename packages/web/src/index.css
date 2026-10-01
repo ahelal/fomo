@@ -255,10 +255,12 @@ body {
 .digest-row--topic .digest-row__title { color: var(--unread-color); font-weight: 600; }
 .digest-row--item .digest-row__title { color: var(--text); padding-left: 8px; }
 .digest-row--item .digest-row__inner { align-items: start; }
+.digest-row--solo .digest-row__inner { align-items: start; }
 .digest-row__summary {
   display: block;
   color: var(--text-dim);
   font-size: 12px;
+  font-weight: normal;
   white-space: normal;
   line-height: 1.35;
   margin-top: 2px;

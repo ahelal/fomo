@@ -22,7 +22,7 @@ import type {
 
 /**
  * Talks to Azure Table Storage directly. Browser-safe: used by the web/PWA with a
- * SAS token and by the CLI (via `FomoDirectService`) with a connection string.
+ * SAS token and by the TUI (via `FomoDirectService`) with a connection string.
  */
 export class FomoStorageService implements FomoService {
   protected readonly store: UpdateStore;

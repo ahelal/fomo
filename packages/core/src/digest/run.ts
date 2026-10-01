@@ -12,7 +12,7 @@ import {
 } from './reconcile.js';
 import { importanceRank } from './view.js';
 
-/** LLM backend used to group items. Implemented in the CLI with the GitHub Copilot SDK. */
+/** LLM backend used to group items. Implemented in the TUI with the GitHub Copilot SDK. */
 export interface Summarizer {
   /** Send the prompt and return the parsed JSON response (must follow `schema`). */
   generateJson(req: ModelRequest): Promise<unknown>;

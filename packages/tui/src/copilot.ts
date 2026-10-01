@@ -95,3 +95,24 @@ export class CopilotSummarizer implements Summarizer {
     if (client) await client.stop().catch(() => undefined);
   }
 }
+
+/** Hands out one summarizer per model; replaced ones stay open until `close()` in case a run still uses them. */
+export class SummarizerCache {
+  private current: CopilotSummarizer | undefined;
+  private readonly retired: CopilotSummarizer[] = [];
+
+  get(model?: string): CopilotSummarizer {
+    const wanted = model || DEFAULT_COPILOT_MODEL;
+    if (this.current?.model !== wanted) {
+      if (this.current) this.retired.push(this.current);
+      this.current = new CopilotSummarizer({ model: wanted });
+    }
+    return this.current;
+  }
+
+  async close(): Promise<void> {
+    const all = [...this.retired.splice(0), ...(this.current ? [this.current] : [])];
+    this.current = undefined;
+    await Promise.all(all.map((s) => s.close()));
+  }
+}

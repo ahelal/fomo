@@ -23,9 +23,15 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
   const statsStr = stats
     ? `Total: ${total}  Unread: ${unread}  Read: ${read}  Saved: ${saved}`
     : 'loading…';
-  const rightStr = `${loading ? ' ⟳ ' : ''}${message ? ` ${message} ` : ''}${sep}[h] help `;
-
   const leftLen = brandStr.length + sep.length + statsStr.length;
+  const fixedRightLen = (loading ? 3 : 0) + sep.length + '[h] help '.length;
+  const room = columns - leftLen - fixedRightLen - 3;
+  const shownMessage = message && message.length > room
+    ? (room > 1 ? `${message.slice(0, room - 1)}…` : undefined)
+    : message;
+
+  const rightStr = `${loading ? ' ⟳ ' : ''}${shownMessage ? ` ${shownMessage} ` : ''}${sep}[h] help `;
+
   const rightLen = rightStr.length;
   const gap = Math.max(1, columns - leftLen - rightLen);
   const pad = ' '.repeat(gap);
@@ -51,7 +57,7 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
         )}
         <Text backgroundColor={bg}>{pad}</Text>
         {loading && <Text color="#e3b341" backgroundColor={bg}>{' ⟳ '}</Text>}
-        {message && <Text color="#3fb950" backgroundColor={bg}>{` ${message} `}</Text>}
+        {shownMessage && <Text color="#3fb950" backgroundColor={bg}>{` ${shownMessage} `}</Text>}
         <Text color="#8b949e" backgroundColor={bg}>{sep}</Text>
         <Text color="#58a6ff" bold backgroundColor={bg}>{'[h]'}</Text>
         <Text color="#8b949e" backgroundColor={bg}>{' help '}</Text>

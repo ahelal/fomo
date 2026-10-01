@@ -26,7 +26,7 @@ export function ConnectScreen({ error, onConnect }: Props) {
         <h1 className="connect__title">📰 FOMO</h1>
         <p>This device isn't connected yet.</p>
         <p>
-          On your computer run <kbd>fomo link</kbd> and scan the QR code or open the link here.
+          On your computer run <kbd>fomo</kbd>, press <kbd>c</kbd> → <em>Link a device</em>, then scan the QR code or open the link here.
           The access token stays on this device.
         </p>
         {error && <p className="connect__error">{error}</p>}

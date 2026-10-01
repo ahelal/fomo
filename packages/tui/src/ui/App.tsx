@@ -1,9 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
-import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow } from '@fomo/core';
-import { DEFAULT_SETTINGS, flattenDigest, removeAndAdvance } from '@fomo/core';
-import type { FomoDirectService } from '@fomo/core/service';
+import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult } from '@fomo/core';
+import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, removeAndAdvance, soloUpdate } from '@fomo/core';
+import { FomoDirectService } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
+import { DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, tildify, type LocalConfig } from '../config.js';
+import { buildSettingsRows, editStartValue, findRow, firstFocusable, moveFocus, parseConfigEdit, type SettingsRow } from './settings.js';
+import { copyToClipboard } from './clipboard.js';
+import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
+import { RestorePicker, type BackupFile } from './components/RestorePicker.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
 import { DigestTable } from './components/DigestTable.js';
@@ -17,24 +24,35 @@ import { TodosView, type TodoFormField } from './components/TodosView.js';
 
 type FilterStatus = Status | 'all' | 'saved' | 'digest';
 
-interface Props {
-  service: FomoDirectService;
-  /** Group unread updates with Copilot (runs after an `f`/`F` fetch). */
-  digest?(onProgress: (message: string) => void): Promise<DigestResult>;
+export interface DigestRunOptions {
+  /** Forget all topics and regroup every unread update. */
+  reset?: boolean;
 }
 
-/** The update a digest row points at (items and single-item entries), if any. */
+interface Props {
+  service: FomoDirectService;
+  /** Effective local config (file + environment). */
+  config: LocalConfig;
+  /** Save a local config change; returns an error message on failure. */
+  onConfigChange(patch: Partial<LocalConfig>): string | undefined;
+  /** Group unread updates with Copilot (runs after an `f`/`F` fetch). */
+  digest?(onProgress: (message: string) => void, options?: DigestRunOptions): Promise<DigestResult>;
+}
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** The update a digest row points at (items and single-update topics), if any. */
 function rowUpdate(row: DigestRow | undefined): Update | undefined {
   if (!row) return undefined;
   if (row.kind === 'item') return row.update;
-  return row.entry.synthetic ? row.entry.items[0] : undefined;
+  return soloUpdate(row.entry);
 }
 
 // Fixed line counts for chrome
 const STATUSBAR_H = 2; // content + border line
 const FILTERBAR_H = 1;
 
-export function App({ service, digest }: Props) {
+export function App({ service, config, onConfigChange, digest }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
 
@@ -50,8 +68,20 @@ export function App({ service, digest }: Props) {
   const [settingsFocusIndex, setSettingsFocusIndex] = useState(0);
   const [appSettings, setAppSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
   const [sources, setSources] = useState<SourceInfo[]>([]);
-  const [editingLabel, setEditingLabel] = useState(false);
-  const [labelBuffer, setLabelBuffer] = useState('');
+  const settingsRows = useMemo(() => buildSettingsRows(sources), [sources]);
+  /** Key of the config row being edited (source label or local setting). */
+  const [editingKey, setEditingKey] = useState<string | undefined>();
+  const [editBuffer, setEditBuffer] = useState('');
+  /** Key of the action row waiting for a second ↵. */
+  const [confirmKey, setConfirmKey] = useState<string | undefined>();
+  const [lastFetch, setLastFetch] = useState<Record<string, SourceFetchResult>>({});
+  const [linkView, setLinkView] = useState<LinkView | undefined>();
+  const [restoreFiles, setRestoreFiles] = useState<BackupFile[] | undefined>();
+  const [restoreIndex, setRestoreIndex] = useState(0);
+  const [restoreConfirm, setRestoreConfirm] = useState(false);
+  /** Only show updates from this source (list views). */
+  const [sourceFilter, setSourceFilter] = useState<string | undefined>();
+  const sourceFilterRef = useRef<string | undefined>();
   const [showHelp, setShowHelp] = useState(false);
   const [helpContext, setHelpContext] = useState<HelpContext>('list');
 
@@ -120,9 +150,10 @@ export function App({ service, digest }: Props) {
           setDigestPending(resp.pending);
           return;
         }
+        const source = sourceFilterRef.current;
         const opts = f === 'saved'
-          ? { saved: true, limit: 200 }
-          : { status: f as Status | 'all', limit: 200 };
+          ? { saved: true, source, limit: 200 }
+          : { status: f as Status | 'all', source, limit: 200 };
         const resp = await service.listUpdates(opts);
         setUpdates(resp.updates);
         setSelectedIndex((i) => Math.min(i, Math.max(0, resp.updates.length - 1)));
@@ -177,33 +208,158 @@ export function App({ service, digest }: Props) {
     return updatesRef.current[selectedRef.current];
   }, []);
 
-  // One fetch + digest at a time; a second run would plan the same items twice.
-  const fetchingRef = useRef(false);
-  const doFetch = useCallback(async () => {
-    if (fetchingRef.current) return;
-    fetchingRef.current = true;
+  const sourceName = useCallback(
+    (id: string) => appSettings.sourceLabels[id] || sources.find((s) => s.id === id)?.displayName || id,
+    [appSettings.sourceLabels, sources],
+  );
+
+  // One fetch / regroup / restore at a time; a second digest run would plan the same items twice.
+  const busyRef = useRef(false);
+  const claimBusy = useCallback(() => {
+    if (busyRef.current) {
+      showMessage('⏳ Still busy — wait for the current run to finish');
+      return false;
+    }
+    busyRef.current = true;
     setLoading(true);
-    showMessage('Fetching latest updates…', 600_000);
+    return true;
+  }, [showMessage]);
+  const releaseBusy = useCallback(() => {
+    busyRef.current = false;
+    setLoading(false);
+  }, []);
+
+  /** Fetch every enabled source, or only `only` (even if disabled), then group with Copilot. */
+  const doFetch = useCallback(async (only?: string[]) => {
+    if (!claimBusy()) return;
+    showMessage(`Fetching ${only ? only.map(sourceName).join(', ') : 'latest updates'}…`, 600_000);
     try {
-      const resp = await service.fetch();
-      const added = `✓ Added ${resp.added} update${resp.added !== 1 ? 's' : ''}`;
-      if (digest) {
+      const resp = await service.fetch(only ? { sources: only } : {});
+      setLastFetch((prev) => ({ ...prev, ...resp.results }));
+      const failed = Object.entries(resp.results).filter(([, r]) => r.error).map(([id]) => sourceName(id));
+      const failedNote = failed.length ? ` · ⚠ ${failed.join(', ')} failed` : '';
+      const added = `✓ Added ${resp.added} update${resp.added !== 1 ? 's' : ''}${failedNote}`;
+      if (digest && config.autoDigest !== false) {
         showMessage(`${added} · summarising with Copilot…`, 600_000);
         await refresh();
         const result = await digest((msg) => showMessage(msg, 600_000));
         const errs = result.errors.length ? ` · ⚠ ${result.errors.length} failed` : '';
         showMessage(`${added} · grouped ${result.processed} into topics${errs}`, 5000);
       } else {
-        showMessage(added);
+        showMessage(added, failed.length ? 5000 : 2500);
       }
       await refresh();
     } catch (err) {
-      showMessage(`Fetch error: ${err instanceof Error ? err.message : String(err)}`, 5000);
+      showMessage(`Fetch error: ${errorText(err)}`, 5000);
     } finally {
-      fetchingRef.current = false;
-      setLoading(false);
+      releaseBusy();
     }
-  }, [service, digest, refresh, showMessage]);
+  }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, releaseBusy]);
+
+  /** Forget all topics and regroup every unread update. */
+  const doRegroup = useCallback(async () => {
+    if (!digest || !claimBusy()) return;
+    showMessage('Regrouping all unread updates with Copilot…', 600_000);
+    try {
+      const result = await digest((msg) => showMessage(msg, 600_000), { reset: true });
+      const errs = result.errors.length ? ` · ⚠ ${result.errors.length} failed` : '';
+      const left = result.remaining ? ` · ${result.remaining} left for next time` : '';
+      showMessage(`✓ Regrouped ${result.processed} update${result.processed !== 1 ? 's' : ''} into ${result.created} topics${left}${errs}`, 6000);
+      await refresh();
+    } catch (err) {
+      showMessage(`Regroup error: ${errorText(err)}`, 6000);
+    } finally {
+      releaseBusy();
+    }
+  }, [digest, refresh, showMessage, claimBusy, releaseBusy]);
+
+  const backupDir = config.backupDir ?? DEFAULT_BACKUP_DIR;
+
+  const doBackup = useCallback(async () => {
+    showMessage('Backing up updates…', 600_000);
+    try {
+      const payload = await service.backup();
+      await mkdir(backupDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const file = join(backupDir, `fomo-backup-${stamp}.json`);
+      await writeFile(file, JSON.stringify(payload, null, 2));
+      showMessage(`✓ Backed up ${payload.count} update${payload.count !== 1 ? 's' : ''} → ${tildify(file)}`, 6000);
+    } catch (err) {
+      showMessage(`Backup error: ${errorText(err)}`, 6000);
+    }
+  }, [service, backupDir, showMessage]);
+
+  const openRestore = useCallback(async () => {
+    let names: string[];
+    try {
+      names = (await readdir(backupDir)).filter((n) => n.endsWith('.json'));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        showMessage(`Can’t read ${tildify(backupDir)}: ${errorText(err)}`, 6000);
+        return;
+      }
+      names = [];
+    }
+    const files = await Promise.all(names.map(async (name) => {
+      const path = join(backupDir, name);
+      const s = await stat(path);
+      return { name, path, size: s.size, mtime: s.mtime };
+    }));
+    if (files.length === 0) {
+      showMessage(`No backups in ${tildify(backupDir)} — use “Back up updates” first`, 5000);
+      return;
+    }
+    files.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+    setRestoreFiles(files);
+    setRestoreIndex(0);
+    setRestoreConfirm(false);
+  }, [backupDir, showMessage]);
+
+  const doRestore = useCallback(async (file: BackupFile) => {
+    if (!claimBusy()) return;
+    setRestoreFiles(undefined);
+    setRestoreConfirm(false);
+    showMessage(`Restoring ${file.name}…`, 600_000);
+    try {
+      const payload = JSON.parse(await readFile(file.path, 'utf-8'));
+      if (!payload?.version || !Array.isArray(payload.entities)) throw new Error('not a FOMO backup file');
+      const restored = await service.restore(payload);
+      showMessage(`✓ Restored ${restored} update${restored !== 1 ? 's' : ''} from ${file.name}`, 6000);
+      await refresh();
+    } catch (err) {
+      showMessage(`Restore error: ${errorText(err)}`, 6000);
+    } finally {
+      releaseBusy();
+    }
+  }, [service, refresh, showMessage, claimBusy, releaseBusy]);
+
+  /** Create a magic link (account SAS in the URL fragment) for the web app and show it as a QR code. */
+  const doLink = useCallback(async () => {
+    if (!config.webUrl) {
+      setSettingsFocusIndex(findRow(settingsRows, 'c-webUrl'));
+      showMessage('Set “Web app URL” first (deploy.sh prints it), then link again', 6000);
+      return;
+    }
+    try {
+      const { createWebSas } = await import('@fomo/core/store/sas');
+      const conn = createWebSas(config.connectionString ?? '', { days: config.linkDays ?? DEFAULT_LINK_DAYS });
+      const url = buildConnectLink(config.webUrl, conn);
+      const { default: qrcode } = await import('qrcode-terminal');
+      const qr = await new Promise<string>((resolve) => qrcode.generate(url, { small: true }, resolve));
+      setLinkView({ url, expiresOn: conn.expiresOn, qr });
+    } catch (err) {
+      showMessage(`Can’t create a link: ${errorText(err)}`, 6000);
+    }
+  }, [config.webUrl, config.connectionString, config.linkDays, settingsRows, showMessage]);
+
+  const applySourceFilter = useCallback((id: string | undefined, f: FilterStatus = filterRef.current) => {
+    sourceFilterRef.current = id;
+    setSourceFilter(id);
+    setFilter(f);
+    setSelectedIndex(0);
+    setShowDetail(false);
+    void refresh(f);
+  }, [refresh]);
 
   const doFetchContent = useCallback(async () => {
     const selected = currentUpdate();
@@ -368,14 +524,101 @@ export function App({ service, digest }: Props) {
     return () => { cancelled = true; };
   }, [service, showDetail, digestSelectedUpdate, contentCache]);
 
+  // ── Settings: save the row being edited ─────────────────────────────────────
+  const commitEdit = useCallback((row: SettingsRow, text: string) => {
+    const stopEditing = () => { setEditingKey(undefined); setEditBuffer(''); };
+
+    if (row.kind === 'source') {
+      const sourceId = row.source.id;
+      const label = text.trim();
+      const newLabels = { ...appSettings.sourceLabels, [sourceId]: label };
+      // An empty label (or the id itself) resets to the default
+      if (label === '' || label === sourceId) delete newLabels[sourceId];
+      setAppSettings((prev) => ({ ...prev, sourceLabels: newLabels }));
+      void service.updateSettings({ sourceLabels: newLabels })
+        .then((s) => setAppSettings(s))
+        .catch((err) => showMessage(`Error: ${errorText(err)}`));
+      stopEditing();
+      return;
+    }
+    if (row.kind !== 'config') return;
+
+    const parsed = parseConfigEdit(row.field, text);
+    if ('error' in parsed) { showMessage(`⚠ ${parsed.error}`, 4000); return; }
+    stopEditing();
+
+    const save = () => {
+      const err = onConfigChange(parsed.patch);
+      if (err) { showMessage(`⚠ Could not save: ${err}`, 6000); return; }
+      const env = envSource(row.field);
+      showMessage(env ? `✓ Saved, but ${env} is set and takes precedence` : `✓ Saved ${row.label.toLowerCase()}`, env ? 6000 : 2500);
+    };
+
+    if (row.field === 'connectionString' && parsed.patch.connectionString) {
+      // Check the new account before switching to it; the app reloads with the new data.
+      const connectionString = parsed.patch.connectionString;
+      showMessage('Checking the connection…', 60_000);
+      void (async () => {
+        try {
+          await new FomoDirectService(connectionString).getStats();
+        } catch (err) {
+          showMessage(`⚠ Can’t connect, not saved: ${errorText(err)}`, 8000);
+          return;
+        }
+        save();
+      })();
+      return;
+    }
+    save();
+  }, [service, appSettings.sourceLabels, onConfigChange, showMessage]);
+
+  const updateRemoteSettings = useCallback((patch: Partial<AppSettings>) => {
+    setAppSettings((prev) => ({ ...prev, ...patch }));
+    void service.updateSettings(patch)
+      .then((s) => setAppSettings(s))
+      .catch((err) => showMessage(`Error: ${errorText(err)}`));
+  }, [service, showMessage]);
+
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((input, key) => {
-    // ── Quit from any screen (but not while editing a label or adding a todo) ──
-    if (input === 'q' && !editingLabel && !todosAddMode) { exit(); return; }
+    // ── Quit from any screen (but not while typing) ──
+    if (input === 'q' && !editingKey && !todosAddMode) { exit(); return; }
 
     // ── Help overlay — Esc or h to close, consume all other input ──
     if (showHelp) {
       if (key.escape || key.backspace || key.delete || input === 'h') setShowHelp(false);
+      return;
+    }
+
+    // ── Link a device overlay ──
+    if (linkView) {
+      if (key.escape || key.backspace || key.delete) {
+        setLinkView(undefined);
+      } else if (input === 'o') {
+        void import('open')
+          .then(({ default: open }) => open(linkView.url))
+          .catch(() => showMessage('Could not open browser'));
+      } else if (input === 'y') {
+        copyToClipboard(linkView.url);
+        showMessage('✓ Link copied');
+      }
+      return;
+    }
+
+    // ── Restore picker ──
+    if (restoreFiles) {
+      if (key.escape || key.backspace || key.delete) {
+        if (restoreConfirm) setRestoreConfirm(false);
+        else setRestoreFiles(undefined);
+        return;
+      }
+      if (key.upArrow || input === 'k') { setRestoreIndex((i) => Math.max(0, i - 1)); setRestoreConfirm(false); return; }
+      if (key.downArrow || input === 'j') { setRestoreIndex((i) => Math.min(restoreFiles.length - 1, i + 1)); setRestoreConfirm(false); return; }
+      if (key.return) {
+        const file = restoreFiles[restoreIndex];
+        if (!restoreConfirm) setRestoreConfirm(true);
+        else if (file) void doRestore(file);
+      }
       return;
     }
 
@@ -480,110 +723,89 @@ export function App({ service, digest }: Props) {
 
     // ── Settings view input handling ──
     if (showSettings) {
-      // Label edit mode — character input
-      if (editingLabel) {
-        if (key.escape) {
-          setEditingLabel(false);
-          setLabelBuffer('');
-          return;
-        }
-        if (key.return) {
-          // Save label
-          const sourceId = sources[settingsFocusIndex]?.id;
-          if (sourceId) {
-            const newLabels = { ...appSettings.sourceLabels, [sourceId]: labelBuffer || sourceId };
-            // Remove entry if it matches the source id (reset to default)
-            if (labelBuffer === '' || labelBuffer === sourceId) delete newLabels[sourceId];
-            setAppSettings((prev) => ({ ...prev, sourceLabels: newLabels }));
-            void service.updateSettings({ sourceLabels: newLabels })
-              .then((s) => setAppSettings(s))
-              .catch(() => { /* silent */ });
-          }
-          setEditingLabel(false);
-          setLabelBuffer('');
-          return;
-        }
-        if (key.backspace || key.delete) {
-          setLabelBuffer((b) => b.slice(0, -1));
-          return;
-        }
-        // Append printable characters
-        if (input && !key.ctrl && !key.meta) {
-          setLabelBuffer((b) => b + input);
-        }
+      const row = settingsRows[settingsFocusIndex];
+
+      // Typing into a source label or local setting
+      if (editingKey) {
+        const editRow = settingsRows.find((r) => r.key === editingKey);
+        if (key.escape) { setEditingKey(undefined); setEditBuffer(''); return; }
+        if (key.return) { if (editRow) commitEdit(editRow, editBuffer); return; }
+        if (key.backspace || key.delete) { setEditBuffer((b) => b.slice(0, -1)); return; }
+        // Pasted text arrives in one chunk; drop line breaks
+        if (input && !key.ctrl && !key.meta) setEditBuffer((b) => b + input.replace(/[\r\n]/g, ''));
         return;
       }
 
+      if (key.escape && confirmKey) { setConfirmKey(undefined); return; }
       if (key.escape || key.backspace || key.delete || input === 'c') {
         setShowSettings(false);
+        setConfirmKey(undefined);
         return;
       }
-
-      // Total items: sources.length + 1 (preview position)
-      const totalItems = sources.length + 1;
-
-      if (key.upArrow || input === 'k') {
-        setSettingsFocusIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow || input === 'j') {
-        setSettingsFocusIndex((i) => Math.min(totalItems - 1, i + 1));
-        return;
-      }
-
-      // 'e' to edit label on a source row
-      if (input === 'e' && settingsFocusIndex < sources.length) {
-        const sourceId = sources[settingsFocusIndex].id;
-        setLabelBuffer(appSettings.sourceLabels[sourceId] ?? '');
-        setEditingLabel(true);
-        return;
-      }
-
-      // 'd' to cycle color on a source row
-      if (input === 'd' && settingsFocusIndex < sources.length) {
-        const sourceId = sources[settingsFocusIndex].id;
-        const currentColor = appSettings.sourceColors?.[sourceId] || COLOR_PALETTE[0];
-        const curIdx = COLOR_PALETTE.indexOf(currentColor);
-        const nextColor = COLOR_PALETTE[(curIdx + 1) % COLOR_PALETTE.length];
-        const newColors = { ...appSettings.sourceColors, [sourceId]: nextColor };
-        setAppSettings((prev) => ({ ...prev, sourceColors: newColors }));
-        void service.updateSettings({ sourceColors: newColors })
-          .then((s) => setAppSettings(s))
-          .catch(() => { /* silent */ });
-        return;
-      }
-
-      if (key.return) {
-        if (settingsFocusIndex < sources.length) {
-          // Toggle source enabled/disabled
-          const sourceId = sources[settingsFocusIndex].id;
-          const disabled = new Set(appSettings.disabledSources);
-          if (disabled.has(sourceId)) {
-            disabled.delete(sourceId);
-          } else {
-            disabled.add(sourceId);
-          }
-          const newDisabled = [...disabled];
-          setAppSettings((prev) => ({ ...prev, disabledSources: newDisabled }));
-          void service.updateSettings({ disabledSources: newDisabled })
-            .then((s) => setAppSettings(s))
-            .catch(() => { /* silent */ });
-        } else {
-          // Cycle preview position
-          const curIdx = PREVIEW_OPTIONS.indexOf(appSettings.previewPosition);
-          const next = PREVIEW_OPTIONS[(curIdx + 1) % PREVIEW_OPTIONS.length];
-          setAppSettings((prev) => ({ ...prev, previewPosition: next }));
-          if (next !== 'off') setPreviewPosition(next as 'right' | 'bottom');
-          void service.updateSettings({ previewPosition: next })
-            .then((s) => setAppSettings(s))
-            .catch(() => { /* silent */ });
-        }
-        return;
-      }
+      if (key.upArrow || input === 'k') { setSettingsFocusIndex((i) => moveFocus(settingsRows, i, -1)); setConfirmKey(undefined); return; }
+      if (key.downArrow || input === 'j') { setSettingsFocusIndex((i) => moveFocus(settingsRows, i, 1)); setConfirmKey(undefined); return; }
       if (input === 'h') {
         setHelpContext('settings');
         setShowHelp(true);
         return;
+      }
+      if (!row) return;
+
+      if (row.kind === 'source') {
+        const sourceId = row.source.id;
+        if (key.return) {
+          const disabled = new Set(appSettings.disabledSources);
+          if (disabled.has(sourceId)) disabled.delete(sourceId);
+          else disabled.add(sourceId);
+          updateRemoteSettings({ disabledSources: [...disabled] });
+        } else if (input === 'e') {
+          setEditBuffer(appSettings.sourceLabels[sourceId] ?? '');
+          setEditingKey(row.key);
+        } else if (input === 'd') {
+          const currentColor = appSettings.sourceColors?.[sourceId] || COLOR_PALETTE[0];
+          const nextColor = COLOR_PALETTE[(COLOR_PALETTE.indexOf(currentColor) + 1) % COLOR_PALETTE.length];
+          updateRemoteSettings({ sourceColors: { ...appSettings.sourceColors, [sourceId]: nextColor } });
+        } else if (input === 'f' || input === 'F') {
+          void doFetch([sourceId]);
+        } else if (input === 'v') {
+          setShowSettings(false);
+          applySourceFilter(sourceId, filterRef.current === 'digest' ? 'all' : filterRef.current);
+        }
+        return;
+      }
+
+      if (row.kind === 'preview') {
+        if (key.return) {
+          const next = PREVIEW_OPTIONS[(PREVIEW_OPTIONS.indexOf(appSettings.previewPosition) + 1) % PREVIEW_OPTIONS.length]!;
+          if (next !== 'off') setPreviewPosition(next);
+          updateRemoteSettings({ previewPosition: next });
+        }
+        return;
+      }
+
+      if (row.kind === 'config') {
+        if (!key.return && input !== 'e') return;
+        if (row.field === 'autoDigest') {
+          const err = onConfigChange({ autoDigest: config.autoDigest === false ? undefined : false });
+          if (err) showMessage(`⚠ Could not save: ${err}`, 6000);
+          return;
+        }
+        setEditBuffer(editStartValue(row.field));
+        setEditingKey(row.key);
+        return;
+      }
+
+      if (row.kind === 'action' && key.return) {
+        switch (row.action) {
+          case 'link': void doLink(); break;
+          case 'backup': void doBackup(); break;
+          case 'restore': void openRestore(); break;
+          case 'regroup':
+            if (confirmKey !== row.key) { setConfirmKey(row.key); break; }
+            setConfirmKey(undefined);
+            void doRegroup();
+            break;
+        }
       }
       return; // Consume all other input while in settings
     }
@@ -601,10 +823,18 @@ export function App({ service, digest }: Props) {
       return;
     }
 
+    // Esc clears a source filter (set with v in config)
+    if (key.escape && sourceFilter) {
+      applySourceFilter(undefined);
+      showMessage('Showing all sources');
+      return;
+    }
+
     // Open settings
     if (input === 'c') {
       setShowSettings(true);
-      setSettingsFocusIndex(0);
+      setSettingsFocusIndex(firstFocusable(settingsRows));
+      setConfirmKey(undefined);
       return;
     }
 
@@ -623,6 +853,8 @@ export function App({ service, digest }: Props) {
     const filterMap: Record<string, FilterStatus> = { '0': 'digest', '1': 'all', '2': 'unread', '3': 'read', '4': 'saved' };
     if (input in filterMap) {
       const f = filterMap[input]!;
+      // The digest covers every source, so it drops a source filter
+      if (f === 'digest' && sourceFilterRef.current) { applySourceFilter(undefined, f); return; }
       setFilter(f);
       setSelectedIndex(0);
       void refresh(f);
@@ -647,7 +879,8 @@ export function App({ service, digest }: Props) {
       const row = digestRows[selectedIndex];
       if (!row) return;
       const entry = row.entry;
-      const isTopic = row.kind === 'topic' && !entry.synthetic;
+      const isGroup = entry.items.length > 1;
+      const isTopic = row.kind === 'topic' && isGroup;
       const update = rowUpdate(row);
 
       if (key.return) {
@@ -668,7 +901,7 @@ export function App({ service, digest }: Props) {
           const parent = digestRows.findIndex((r) => r.kind === 'topic' && r.entry.topic.id === entry.topic.id);
           if (parent >= 0) setSelectedIndex(parent);
         }
-        if (!entry.synthetic) setTopicExpanded(entry.topic.id, false);
+        if (isGroup) setTopicExpanded(entry.topic.id, false);
         return;
       }
       if (input === 'x' || input === 'r') {
@@ -737,6 +970,9 @@ export function App({ service, digest }: Props) {
   const chrome = STATUSBAR_H + FILTERBAR_H;
   const availableH = rows - chrome;
   const selectedUpdate = updates[selectedIndex];
+  const filterBar = (
+    <FilterBar active={filter} columns={columns} sourceLabel={sourceFilter ? sourceName(sourceFilter) : undefined} />
+  );
 
   const renderTable = (height: number, width: number) =>
     filter === 'digest' ? (
@@ -782,8 +1018,35 @@ export function App({ service, digest }: Props) {
     return (
       <Box flexDirection="column" height={rows}>
         <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
-        <FilterBar active={filter} columns={columns} />
+        {filterBar}
         <HelpOverlay context={helpContext} height={availableH} columns={columns} />
+      </Box>
+    );
+  }
+
+  if (linkView) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        {filterBar}
+        <LinkOverlay link={linkView} height={availableH} columns={columns} />
+      </Box>
+    );
+  }
+
+  if (restoreFiles) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        {filterBar}
+        <RestorePicker
+          dir={backupDir}
+          files={restoreFiles}
+          focusIndex={restoreIndex}
+          confirming={restoreConfirm}
+          height={availableH}
+          columns={columns}
+        />
       </Box>
     );
   }
@@ -793,7 +1056,7 @@ export function App({ service, digest }: Props) {
     return (
       <Box flexDirection="column" height={rows}>
         <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
-        <FilterBar active={filter} columns={columns} />
+        {filterBar}
         <TodosView
           todos={todosList}
           selectedIndex={todosSelectedIndex}
@@ -815,13 +1078,16 @@ export function App({ service, digest }: Props) {
     return (
       <Box flexDirection="column" height={rows}>
         <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
-        <FilterBar active={filter} columns={columns} />
+        {filterBar}
         <SettingsPane
+          rows={settingsRows}
           settings={appSettings}
-          sources={sources}
+          config={config}
+          stats={stats}
+          lastFetch={lastFetch}
           focusIndex={settingsFocusIndex}
-          editingLabel={editingLabel}
-          labelBuffer={labelBuffer}
+          editBuffer={editingKey ? editBuffer : undefined}
+          confirmKey={confirmKey}
           height={availableH}
           columns={columns}
         />
@@ -837,7 +1103,7 @@ export function App({ service, digest }: Props) {
     return (
       <Box flexDirection="column" height={rows}>
         <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
-        <FilterBar active={filter} columns={columns} />
+        {filterBar}
         <Box flexGrow={1} height={availableH}>
           <Box width={tableW}>
             {renderTable(availableH, tableW)}
@@ -859,7 +1125,7 @@ export function App({ service, digest }: Props) {
   return (
     <Box flexDirection="column" height={rows}>
       <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
-      <FilterBar active={filter} columns={columns} />
+      {filterBar}
       {renderTable(tableH, columns)}
       {showDetail && renderDetail(detailH, columns, 'bottom')}
     </Box>

@@ -60,7 +60,7 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
     return (
       <div className="updates-table empty">
         <p>No updates found.</p>
-        <p>Run <kbd>fomo fetch</kbd> on your computer to pull the latest releases.</p>
+        <p>Run <kbd>fomo</kbd> on your computer and press <kbd>f</kbd> to pull the latest releases.</p>
       </div>
     );
   }

@@ -11,7 +11,7 @@ import type {
 } from './types.js';
 
 /**
- * Node-side service for the CLI: storage access plus scraping, AI digest and backup.
+ * Node-side service for the TUI: storage access plus scraping, AI digest and backup.
  * Requires a connection string (or a SAS) with network access to the sources.
  */
 export class FomoDirectService extends FomoStorageService {

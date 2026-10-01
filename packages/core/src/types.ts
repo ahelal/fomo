@@ -24,7 +24,7 @@ export interface Update {
   saved: boolean;
   /** Empty when listed with `includeContent: false` — load via `getUpdate()`. */
   content: string;
-  /** Digest topic this update was grouped into (set by `fomo digest`). */
+  /** Digest topic this update was grouped into (set by the Copilot digest). */
   topicId?: string;
   /** One-sentence Copilot summary written when the update joins a topic. */
   summary?: string;
@@ -149,7 +149,7 @@ export interface DigestEntry {
 
 export interface DigestResponse {
   entries: DigestEntry[];
-  /** Unread updates not yet grouped into a topic (run `fomo digest`). */
+  /** Unread updates not yet grouped into a topic (press f in the TUI). */
   pending: number;
 }
 
@@ -157,7 +157,7 @@ export interface DigestResponse {
 
 /**
  * How to reach Azure Table Storage.
- * - A full connection string (CLI; can create tables).
+ * - A full connection string (TUI; can create tables).
  * - A Table endpoint + SAS token (browser/PWA; entity access only).
  */
 export type StoreConnection = string | SasConnection;
@@ -172,7 +172,7 @@ export interface SasConnection {
 // ─── Service contract ────────────────────────────────────────────────────────
 
 /**
- * Storage-backed operations shared by the web app (SAS) and the CLI (connection string).
+ * Storage-backed operations shared by the web app (SAS) and the TUI (connection string).
  * Node-only operations (scraping, summarising, backup) live on `FomoDirectService`.
  */
 export interface FomoService {

@@ -5,7 +5,7 @@
 #   • Table Storage  — the data (updates, topics, settings, todos)
 #   • Static website — the web app / installable PWA ($web container)
 #
-# Fetching and Copilot digests run locally from the CLI (`fomo fetch`).
+# Fetching and Copilot digests run locally in the `fomo` TUI.
 #
 # Prerequisites: az login, jq, node + pnpm
 #
@@ -166,10 +166,9 @@ echo "✅ Deployment complete!"
 echo "   Web app : $WEB_URL"
 echo ""
 echo "Next steps:"
-echo "  # Point the CLI at the storage account and the web app:"
-echo "  fomo config set \\"
-echo "    --connection-string \"\$(az storage account show-connection-string -g $RG -n $ACCOUNT -o tsv)\" \\"
-echo "    --web-url $WEB_URL"
-echo ""
-echo "  fomo fetch   # fetch sources + build the Copilot digest"
-echo "  fomo link    # magic link / QR code to connect a browser or phone"
+echo "  1. Copy the storage connection string:"
+echo "       az storage account show-connection-string -g $RG -n $ACCOUNT -o tsv"
+echo "  2. Run fomo and paste it when asked."
+echo "  3. Press c, set \"Web app URL\" (under This computer) to $WEB_URL"
+echo "  4. Choose \"Link a device\" to get a magic link / QR code for your browser or phone."
+echo "  5. Press f any time to fetch updates and group them with Copilot."

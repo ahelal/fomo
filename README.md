@@ -4,7 +4,7 @@
 Track GitHub releases, Azure updates, VS Code changelogs, Copilot CLI versions and tech news in one place,
 with a **GitHub Copilot digest** that folds related updates into one topic with a few highlights.
 
-One storage account · No servers · Two interfaces (CLI/TUI + installable web app)
+One storage account · No servers · Two interfaces (terminal UI + installable web app)
 
 ---
 
@@ -14,15 +14,15 @@ One storage account · No servers · Two interfaces (CLI/TUI + installable web a
 - [Copilot Digest](#copilot-digest)
 - [Installation](#installation)
   - [Azure Deployment](#azure-deployment)
-  - [CLI Setup](#cli-setup)
+  - [TUI Setup](#tui-setup)
   - [Connect the Web App](#connect-the-web-app)
   - [Install on Android](#install-on-android)
   - [Local Development](#local-development)
   - [Migrating from Container Apps](#migrating-from-container-apps)
 - [Using the Web App](#using-the-web-app)
-- [Using the CLI](#using-the-cli)
-  - [Commands](#commands)
-  - [Interactive TUI](#interactive-tui)
+- [Using the TUI](#using-the-tui)
+  - [Keys](#keys)
+  - [Config Screen](#config-screen)
   - [Backup & Restore](#backup--restore)
 - [Sources](#sources)
 - [Security](#security)
@@ -38,7 +38,7 @@ One storage account · No servers · Two interfaces (CLI/TUI + installable web a
 ```mermaid
 flowchart LR
   subgraph laptop[Your machine]
-    CLI["fomo CLI / TUI<br/>fetch · digest · link"]
+    TUI["fomo TUI<br/>fetch · digest · link"]
     Copilot["GitHub Copilot SDK"]
   end
   subgraph azure[Azure Storage account]
@@ -47,8 +47,8 @@ flowchart LR
   end
   Phone["Browser / Android PWA"]
 
-  CLI -- "connection string" --> Tables
-  CLI <--> Copilot
+  TUI -- "connection string" --> Tables
+  TUI <--> Copilot
   Web -. "loads app" .-> Phone
   Phone -- "SAS token (CORS)" --> Tables
 ```
@@ -57,12 +57,13 @@ flowchart LR
 packages/
   core/     Shared types · Azure Table stores · scrapers · digest engine · services
   web/      React/Vite PWA — static files, talks to Table Storage directly
-  cli/      Commander CLI + Ink TUI — fetches sources and runs the Copilot digest
+  tui/      Ink terminal UI (`fomo`) — setup, fetch, Copilot digest, device links, backups
 ```
 
 - **No compute in Azure.** Everything lives in one Storage Account: Table Storage for data and the static website for the web app.
-- **Fetch and digest run from the CLI** (`fomo fetch`) on your machine, using your GitHub Copilot subscription.
-- **The web app is static.** It reads and writes Table Storage from the browser with a SAS token handed over by `fomo link` (magic link / QR code).
+- **Fetch and digest run in the TUI** (`fomo`, then `f`) on your machine, using your GitHub Copilot subscription.
+- **The web app is static.** It reads and writes Table Storage from the browser with a SAS token handed over by the TUI's **Link a device** action (magic link / QR code).
+- **No command-line arguments.** `fomo` opens the TUI; everything else (setup, config, links, backups) is done from inside it.
 
 ---
 
@@ -79,6 +80,7 @@ usually 20–30 topics:
 ```
 
 Open a topic to see a one-sentence summary and up to six highlights (most important first). Each update in the topic also gets its own one-line summary, so you can decide which ones to open.
+A topic with only one update doesn't expand: its row shows that update's title and summary directly, and `Enter` opens the update.
 Mark the whole topic read with `x`, which makes skipping a low-value area a single key press.
 
 **Grouping.** Each topic is one **product or feature area**, such as "Copilot code review", "GitHub Actions", "VS Code releases", "Azure SRE Agent" or "Anthropic news":
@@ -100,24 +102,21 @@ Mark the whole topic read with `x`, which makes skipping a low-value area a sing
 
 Deprecations and protocol changes (such as an SSH algorithm) are never rated high. The digest is sorted by importance, then newest first.
 
-To steer the rating toward what you care about, add an optional interests note. It moves a topic up or down by at most one level and never changes the grouping:
-
-```bash
-fomo config set --interests "Copilot CLI and agents, VS Code; not SAP or billing"
-fomo config set --interests ""      # clear
-```
+To steer the rating toward what you care about, add an optional interests note (`c` → **Interests**), for example
+`Copilot CLI and agents, VS Code; not SAP or billing`. It moves a topic up or down by at most one level and never changes the grouping.
+Save an empty value to clear it.
 
 How it works:
 
-- `fomo fetch` fetches the sources and then runs the digest. `fomo digest` runs it on its own.
+- `f` in the TUI fetches the sources and then runs the digest. Turn **Group after fetch** off in the config screen to fetch only.
 - Only **unread updates that don't have a topic yet** are sent to Copilot, in two passes:
   1. **Plan:** one call sees every pending update (title and a short excerpt) plus the currently open topics. It assigns each update to an existing or new topic and rates it. Updates the model skips get one more call; oversized new topics get a split call.
   2. **Write:** one small call per touched topic writes the summary, the highlights and a one-sentence summary of each new update. These run 6 at a time with low reasoning effort, and a failed call is retried once.
 - Topics are stored in the `topics` table, and each update points to its topic (`topicId`), so the web app and TUI only read.
 - Updates that haven't been digested yet still appear in the digest as single-item entries.
-- About 220 updates take roughly 2 minutes. Use `--max-items` (default 300) to cap a run; later runs only process new items.
-- The default model is `gpt-5-mini`. Change it with `fomo config set --copilot-model <model>`, `FOMO_COPILOT_MODEL`, or `--model`.
-- Existing topics keep their grouping and rating. Run `fomo digest --reset` to regroup and re-rate all unread updates (read and saved status is untouched). This also fills in per-update summaries for updates digested before they existed.
+- About 220 updates take roughly 2 minutes. **Max items per run** (default 300) caps a run; the rest are grouped next time.
+- The default model is `gpt-5-mini`. Change it with **Copilot model** in the config screen or `FOMO_COPILOT_MODEL`.
+- Existing topics keep their grouping and rating. **Regroup all topics** in the config screen regroups and re-rates all unread updates (read and saved status is untouched). This also fills in per-update summaries for updates digested before they existed.
 - Authentication uses your logged-in Copilot CLI user, or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`.
 
 ---
@@ -140,41 +139,39 @@ The script:
 3. Enables the static website and uploads the PWA to `$web`.
 4. Prints the web app URL and the next steps.
 
-### CLI Setup
+### TUI Setup
 
 ```bash
-pnpm --filter @fomo/cli... build
-node packages/cli/dist/index.js --help     # or put `fomo` on your PATH: (cd packages/cli && npm link)
-
-fomo config set \
-  --connection-string "$(az storage account show-connection-string -g fomo -n <account> -o tsv)" \
-  --web-url https://<account>.z1.web.core.windows.net/
-fomo config show
+pnpm --filter @fomo/tui... build
+node packages/tui/dist/index.js      # or put `fomo` on your PATH: (cd packages/tui && npm link)
 ```
+
+The first time, `fomo` asks for the storage connection string. Get it with:
+
+```bash
+az storage account show-connection-string -g fomo -n <account> -o tsv
+```
+
+Paste it and press `Enter`; FOMO checks the connection and saves it to `~/.fomo/config.json`.
+Then press `c` and set **Web app URL** (printed by `deploy.sh`, e.g. `https://<account>.z1.web.core.windows.net/`).
 
 The digest needs GitHub Copilot. If you use the Copilot CLI, you're already signed in; otherwise export `COPILOT_GITHUB_TOKEN`.
-
-```bash
-fomo fetch        # fetch all sources + build the digest
-fomo ui           # read it in the terminal; press f (or F) to fetch + digest from inside the UI
-```
+Press `f` to fetch all sources and build the digest.
 
 ### Connect the Web App
 
-```bash
-fomo link             # prints a magic link and a QR code
-fomo link --days 30   # shorter-lived link
-```
+In the TUI press `c` → **Link a device**. It shows a magic link and a QR code; `o` opens the link, `y` copies it.
+Links are valid for 365 days; change **Link valid (days)** in the config screen for shorter-lived links.
 
 Open the link (or scan the QR code with your phone). It carries a Table Storage SAS token in the URL
 fragment (`#…`), which is never sent to any server. The web app saves it in the browser and removes it from the address bar.
 You can also paste the link into the app's connect screen.
 
-The status bar warns you when the token has 14 days or less left. Run `fomo link` again to renew it. **Disconnect** removes the token from that browser.
+The status bar warns you when the token has 14 days or less left. Create a new link to renew it. **Disconnect** removes the token from that browser.
 
 ### Install on Android
 
-1. Open the magic link in **Chrome** on your phone. Scanning the QR code from `fomo link` works well.
+1. Open the magic link in **Chrome** on your phone. Scanning the QR code from **Link a device** works well.
 2. Tap **⋮ → Add to Home screen → Install**.
 
 FOMO then runs full-screen from your home screen like a native app. The app shell works offline, and data loads from Table Storage when you're online. Pull down on the list to refresh.
@@ -192,23 +189,24 @@ npx azurite --silent --location /tmp/azurite &
 az storage cors add --services t --origins http://localhost:5173 http://localhost:4173 \
   --methods GET HEAD POST PUT PATCH MERGE DELETE OPTIONS --allowed-headers '*' --exposed-headers '*' \
   --connection-string "UseDevelopmentStorage=true"
-fomo config set --connection-string "UseDevelopmentStorage=true" --web-url http://localhost:5173/
-fomo fetch
 
 # Web app dev server
 pnpm --filter @fomo/web dev
-fomo link          # open the printed link to connect the dev server
+
+# TUI against Azurite: paste UseDevelopmentStorage=true at setup (or set it under c → Connection string),
+# set Web app URL to http://localhost:5173/, press f, then c → Link a device to connect the dev server.
+fomo
 ```
 
-With Azurite, `fomo link` creates a SAS token that also allows `http`. The `az storage cors add` command lets the browser call Azurite from the dev server; it mirrors the CORS rule that Bicep sets in Azure.
+With Azurite, **Link a device** creates a SAS token that also allows `http`. The `az storage cors add` command lets the browser call Azurite from the dev server; it mirrors the CORS rule that Bicep sets in Azure.
 
 ### Migrating from Container Apps
 
 Earlier versions ran a Hono server and an hourly scraper job on Azure Container Apps with Google sign-in. The Storage Account and your data stay the same.
 
 1. Run `bash deploy.sh fomo swedencentral --cleanup-legacy`. This deploys the static site and deletes `fomo-app`, `fomo-scraper`, `fomo-env`, `fomo-env-logs` and the Container Registry.
-2. Run `fomo config set --web-url <printed URL>`, then `fomo link`.
-3. Run `fomo digest` once to group your existing unread updates.
+2. Run `fomo`, press `c`, set **Web app URL** to the printed URL, then choose **Link a device**.
+3. Choose **Regroup all topics** once to group your existing unread updates.
 4. Remove the old secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_USERS`) from GitHub and your `.env`, and delete the Google OAuth client.
 
 ---
@@ -235,37 +233,15 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `c`             | Config                                    |
 | `h`             | Help                                      |
 
-Fetching isn't done in the browser. Run `fomo fetch` from the CLI, then pull to refresh.
+Fetching isn't done in the browser. Run `fomo` on your computer and press `f`, then pull to refresh.
 
 ---
 
-## Using the CLI
+## Using the TUI
 
-### Commands
+Run `fomo`. It opens on the **Digest**. There are no subcommands: `fomo --help` and `fomo --version` are the only flags.
 
-| Command                                     | Description                                   |
-|---------------------------------------------|-----------------------------------------------|
-| `fomo fetch`                                | Fetch all sources, then run the Copilot digest |
-| `fomo fetch --source azure vscode`          | Fetch specific sources                        |
-| `fomo fetch --no-digest`                    | Fetch only                                    |
-| `fomo digest`                               | Group unread updates into topics              |
-| `fomo digest --reset`                       | Regroup all unread updates from scratch       |
-| `fomo digest --model <m> --max-items <n>`   | Pick the model and cap items per run (default 300) |
-| `fomo link [--days 365] [--url <u>] [--no-qr]` | Magic link + QR code for the web app       |
-| `fomo list [--status unread] [--source github]` | List updates                              |
-| `fomo mark <id> read`                       | Set status (unread / read)                    |
-| `fomo stats`                                | Counts by status and source                   |
-| `fomo backup [dir]` / `fomo restore <file>` | Backup / restore updates                      |
-| `fomo todo add\|list\|set-status\|delete`    | Personal todos                                |
-| `fomo ui`                                   | Launch the interactive TUI                    |
-| `fomo config set --connection-string <cs> --web-url <u> --copilot-model <m>` | Configure |
-| `fomo config set --interests "<text>"`      | Interests note that steers digest importance (`""` clears) |
-| `fomo config show`                          | Show current config (secrets masked)          |
-| `fomo config remote`                        | View / update shared (remote) settings        |
-
-### Interactive TUI
-
-Launch it with `fomo ui`. It opens on the **Digest**.
+### Keys
 
 | Key             | Action                                    |
 |-----------------|-------------------------------------------|
@@ -281,25 +257,35 @@ Launch it with `fomo ui`. It opens on the **Digest**.
 | `o`             | Open in browser (newest update of a topic)|
 | `p`             | Fetch full content (detail view)          |
 | `f` / `F`       | Fetch latest updates + Copilot digest     |
-| `c`             | Config                                    |
+| `c`             | Config: sources, link a device, backup / restore, local settings |
+| `t`             | Todos (`a` add, `Enter` cycle status, `d` delete) |
+| `Esc`           | Clear the source filter                   |
 | `.`             | Toggle preview position                   |
 | `h`             | Help                                      |
 | `q`             | Quit                                      |
 
+The status bar shows counts by status; the config screen shows counts per source.
+
+### Config Screen
+
+Press `c`. The bottom line shows the keys for the selected row.
+
+| Section | Row | Keys |
+|---------|-----|------|
+| **Actions** | Link a device | `Enter`: magic link + QR code for the web app (`o` open, `y` copy) |
+| | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread update |
+| | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
+| **Sources** (shared with the web app) | One row per source, with its item count and last fetch result | `Enter` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates |
+| **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
+| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Interests, Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Group after fetch). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. |
+
 ### Backup & Restore
 
-Back up all updates from Azure Table Storage to a local JSON file:
+**Back up updates** writes every update from Table Storage to `fomo-backup-<timestamp>.json` in the backup folder
+(default `~/.fomo/backups`, change it under **Backup folder**).
 
-```bash
-fomo backup                    # → ./fomo-backup-2026-04-17T12-00-00.json
-fomo backup ./backups          # → ./backups/fomo-backup-2026-04-17T12-00-00.json
-```
-
-Restore from a backup file. Entities are upserted, so this is safe for both fresh and incremental restores:
-
-```bash
-fomo restore ./fomo-backup-2026-04-17T12-00-00.json
-```
+**Restore from backup** lists the `.json` files in the backup folder, newest first. Pick one and press `Enter` twice.
+Entities are upserted, so this is safe for both fresh and incremental restores; nothing is deleted.
 
 The backup format is `{ version: 1, exportedAt, count, entities: [...] }`.
 
@@ -373,10 +359,10 @@ const builtins: SourcePlugin[] = [
 
 ```bash
 pnpm build
-fomo fetch --source mysource
+fomo      # press c, select your source and press f to fetch just it
 ```
 
-The source is automatically available in the CLI (`fomo fetch`), the digest, and the web app.
+The source is automatically available in the TUI, the digest, and the web app.
 
 See [EXTENDING.md](EXTENDING.md) for more patterns (RSS/Atom feeds, GitHub Releases API).
 
@@ -384,15 +370,15 @@ See [EXTENDING.md](EXTENDING.md) for more patterns (RSS/Atom feeds, GitHub Relea
 
 ## Security
 
-- **CLI:** uses the storage connection string (account key). Keep `~/.fomo/config.json` private.
-- **Web app:** uses an **account SAS token** limited to the Table service and entity operations (`ss=t`, `srt=o`, `sp=raud`), HTTPS only, and valid for `--days` (default 365).
+- **TUI:** uses the storage connection string (account key). Keep `~/.fomo/config.json` private (it is created with mode `600`).
+- **Web app:** uses an **account SAS token** limited to the Table service and entity operations (`ss=t`, `srt=o`, `sp=raud`), HTTPS only, and valid for **Link valid (days)** (default 365).
   - It can read and update your FOMO tables, but it cannot create or delete tables or touch blobs.
   - It is delivered in the URL fragment, so it never reaches a web server or logs, and it is stored in the browser's `localStorage`.
-- **Revoke every link:** rotate the storage key that signed it (`fomo link` signs with the key in your connection string, usually `key1`):
+- **Revoke every link:** rotate the storage key that signed it (**Link a device** signs with the key in your connection string, usually `key1`):
   ```bash
   az storage account keys renew -g fomo -n <account> --key key1
   ```
-  Then update the CLI with the new connection string and run `fomo link` again.
+  Then set the new connection string in the TUI (`c` → **Connection string**) and link your devices again.
 - **CORS:** Table Storage only accepts browser calls from the static website origin (and localhost dev ports). Add custom domains with the `extraCorsOrigins` Bicep parameter.
 - The static website itself is public, but it contains no data.
 
@@ -400,12 +386,12 @@ See [EXTENDING.md](EXTENDING.md) for more patterns (RSS/Atom feeds, GitHub Relea
 
 ## Environment Variables
 
-All are optional. `fomo config set` stores the same values in `~/.fomo/config.json`.
+All are optional. The TUI config screen (`c` → **This computer**) stores the same values in `~/.fomo/config.json`.
 
 | Variable                          | Description                                                  |
 |-----------------------------------|--------------------------------------------------------------|
 | `AZURE_STORAGE_CONNECTION_STRING` | Connection string (fallback when the config file has none)   |
-| `FOMO_WEB_URL`                    | Web app URL for `fomo link` (overrides config)               |
+| `FOMO_WEB_URL`                    | Web app URL for **Link a device** (overrides config)         |
 | `FOMO_COPILOT_MODEL`              | Copilot model for the digest (overrides config)              |
 | `FOMO_INTERESTS`                  | Interests note for digest importance (overrides config)      |
 | `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` | Token for the Copilot SDK (default: logged-in Copilot CLI user) |
@@ -426,7 +412,7 @@ It signs in to Azure with OIDC (Workload Identity Federation), so it needs no Az
 The identity needs **Contributor** on the resource group. `deploy.sh` lists the storage key to upload the site.
 See [docs/workload-identity-federation.md](docs/workload-identity-federation.md) for the setup.
 
-Fetching isn't scheduled in CI. Run `fomo fetch` whenever you want fresh updates.
+Fetching isn't scheduled in CI. Run `fomo` and press `f` whenever you want fresh updates.
 
 ---
 
