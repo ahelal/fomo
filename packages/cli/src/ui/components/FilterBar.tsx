@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 const FILTERS = [
+  { key: '0', label: 'Digest', value: 'digest' },
   { key: '1', label: 'All',    value: 'all' },
   { key: '2', label: 'Unread', value: 'unread' },
   { key: '3', label: 'Read',   value: 'read' },

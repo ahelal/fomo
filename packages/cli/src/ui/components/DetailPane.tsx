@@ -4,6 +4,8 @@ import type { Update } from '@fomo/core';
 
 interface Props {
   update: Update;
+  /** Content is still being loaded. */
+  loading?: boolean;
   height: number;
   columns: number;
   position?: 'bottom' | 'right';
@@ -20,7 +22,7 @@ const SOURCE_COLOR: Record<string, string> = {
   vscode: '#3fb950',
 };
 
-export function DetailPane({ update, height, columns, position = 'bottom' }: Props) {
+export function DetailPane({ update, loading = false, height, columns, position = 'bottom' }: Props) {
   const badge = STATUS_BADGE[update.status] ?? { label: '???', color: 'white' };
   const sourceColor = SOURCE_COLOR[update.source] ?? '#58a6ff';
 
@@ -86,6 +88,8 @@ export function DetailPane({ update, height, columns, position = 'bottom' }: Pro
           <Text wrap="wrap" color="#c9d1d9">
             {truncatedContent}
           </Text>
+        ) : loading ? (
+          <Text color="#8b949e">Loading…</Text>
         ) : (
           <Text wrap="wrap" color="#8b949e">
             {'No preview — press '}

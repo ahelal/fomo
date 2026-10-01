@@ -1,6 +1,8 @@
 import { TableClient, odata, type TableEntity } from '@azure/data-tables';
-import { createHash } from 'node:crypto';
+import { createTableClient, isSasConnection } from './connection.js';
+import { mapLimit } from '../util.js';
 import type {
+  StoreConnection,
   Update,
   Status,
   ListOptions,
@@ -30,7 +32,11 @@ type UpdateEntity = TableEntity<{
   status: string;
   saved: boolean;
   content: string;
+  topicId?: string;
+  summary?: string;
 }>;
+
+const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'topicId', 'summary'];
 
 // ─── ID helpers ────────────────────────────────────────────────────────────
 /**
@@ -39,9 +45,13 @@ type UpdateEntity = TableEntity<{
  *
  * Format: `${source}__${sha256(url).slice(0, 32)}`
  */
-export function makeId(source: string, url: string): string {
-  const hash = createHash('sha256').update(url).digest('hex').slice(0, 32);
-  return `${source}__${hash}`;
+export async function hashUrl(url: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+}
+
+export async function makeId(source: string, url: string): Promise<string> {
+  return `${source}__${await hashUrl(url)}`;
 }
 
 export function parseId(id: string): { source: string; rowKey: string } {
@@ -52,7 +62,7 @@ export function parseId(id: string): { source: string; rowKey: string } {
 
 function entityToUpdate(e: UpdateEntity): Update {
   return {
-    id: makeId(e.partitionKey, e.url),
+    id: `${e.partitionKey}__${e.rowKey}`,
     source: e.partitionKey,
     title: e.title,
     url: e.url,
@@ -61,7 +71,9 @@ function entityToUpdate(e: UpdateEntity): Update {
     // Legacy migration: v1 used 'saved' as a status value; v2+ uses separate flag
     status: (e.status === 'saved' ? 'read' : e.status) as Status,
     saved: e.saved ?? (e.status as string) === 'saved',
-    content: e.content,
+    content: e.content ?? '',
+    ...(e.topicId ? { topicId: e.topicId } : {}),
+    ...(e.summary ? { summary: e.summary } : {}),
   };
 }
 
@@ -78,6 +90,8 @@ export interface BackupEntity {
   status: string;
   saved: boolean;
   content: string;
+  topicId?: string;
+  summary?: string;
 }
 
 export interface BackupPayload {
@@ -91,15 +105,17 @@ export interface BackupPayload {
 export class UpdateStore {
   private readonly client: TableClient;
   private readonly settingsClient: TableClient;
+  private readonly canCreateTables: boolean;
 
-  constructor(connectionString: string) {
-    const allowInsecureConnection = connectionString.includes('devstoreaccount1');
-    this.client = TableClient.fromConnectionString(connectionString, TABLE_NAME, { allowInsecureConnection });
-    this.settingsClient = TableClient.fromConnectionString(connectionString, SETTINGS_TABLE, { allowInsecureConnection });
+  constructor(conn: StoreConnection) {
+    this.client = createTableClient(conn, TABLE_NAME);
+    this.settingsClient = createTableClient(conn, SETTINGS_TABLE);
+    this.canCreateTables = !isSasConnection(conn);
   }
 
-  /** Create the tables if they do not already exist. */
+  /** Create the tables if they do not already exist (no-op for SAS connections). */
   async init(): Promise<void> {
+    if (!this.canCreateTables) return;
     await Promise.all([
       this.client.createTable(),
       this.settingsClient.createTable(),
@@ -114,7 +130,7 @@ export class UpdateStore {
   async insertUpdate(
     update: Omit<Update, 'id' | 'dateAdded' | 'status' | 'saved'>,
   ): Promise<boolean> {
-    const rowKey = createHash('sha256').update(update.url).digest('hex').slice(0, 32);
+    const rowKey = await hashUrl(update.url);
 
     try {
       await this.client.createEntity<UpdateEntity>({
@@ -222,6 +238,23 @@ export class UpdateStore {
     throw new Error('Too many concurrent saved-update conflicts; please retry.');
   }
 
+  /** Unconditional merge of `status` on many entities (no read round-trip). */
+  async setStatusMany(ids: string[], status: Status): Promise<void> {
+    await mapLimit(ids, 8, async (id) => {
+      const { source, rowKey } = parseId(id);
+      await this.client.updateEntity({ partitionKey: source, rowKey, status }, 'Merge');
+    });
+  }
+
+  /** Assign (or clear, with `''`) the digest topic of an update, optionally with its one-line summary. */
+  async setTopicId(id: string, topicId: string, summary?: string): Promise<void> {
+    const { source, rowKey } = parseId(id);
+    await this.client.updateEntity(
+      { partitionKey: source, rowKey, topicId, ...(summary ? { summary } : {}) },
+      'Merge',
+    );
+  }
+
   async getUpdate(id: string): Promise<Update | null> {
     const { source, rowKey } = parseId(id);
     try {
@@ -247,8 +280,9 @@ export class UpdateStore {
     }
 
     const filter = filters.length > 0 ? filters.join(' and ') : undefined;
+    const select = options.includeContent === false ? LIST_COLUMNS : undefined;
 
-    const iter = this.client.listEntities<UpdateEntity>({ queryOptions: { filter } });
+    const iter = this.client.listEntities<UpdateEntity>({ queryOptions: { filter, select } });
 
     const updates: Update[] = [];
     for await (const entity of iter) {
@@ -270,20 +304,25 @@ export class UpdateStore {
   }
 
   async getStats(): Promise<StatsResponse> {
-    const { updates } = await this.listUpdates({ limit: 100_000 });
+    const iter = this.client.listEntities<UpdateEntity>({
+      queryOptions: { select: ['PartitionKey', 'RowKey', 'status', 'saved'] },
+    });
 
     const byStatus: Record<string, number> = { unread: 0, read: 0 };
     const bySource: Record<string, number> = {};
     let saved = 0;
+    let total = 0;
 
-    for (const u of updates) {
-      byStatus[u.status] = (byStatus[u.status] ?? 0) + 1;
-      bySource[u.source] = (bySource[u.source] ?? 0) + 1;
-      if (u.saved) saved++;
+    for await (const e of iter) {
+      const status = e.status === 'saved' ? 'read' : e.status;
+      byStatus[status] = (byStatus[status] ?? 0) + 1;
+      bySource[e.partitionKey] = (bySource[e.partitionKey] ?? 0) + 1;
+      if (e.saved ?? e.status === 'saved') saved++;
+      total++;
     }
 
     return {
-      total: updates.length,
+      total,
       byStatus: byStatus as Record<Status, number>,
       bySource,
       saved,
@@ -306,6 +345,8 @@ export class UpdateStore {
         status: e.status,
         saved: e.saved ?? false,
         content: e.content ?? '',
+        ...(e.topicId ? { topicId: e.topicId } : {}),
+        ...(e.summary ? { summary: e.summary } : {}),
       });
     }
 
@@ -337,6 +378,8 @@ export class UpdateStore {
           status: e.status,
           saved: e.saved,
           content: e.content,
+          ...(e.topicId ? { topicId: e.topicId } : {}),
+          ...(e.summary ? { summary: e.summary } : {}),
         },
         'Replace',
       );
@@ -382,7 +425,7 @@ export class UpdateStore {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
-function isTableError(err: unknown, statusCode: number): boolean {
+export function isTableError(err: unknown, statusCode: number): boolean {
   return (
     typeof err === 'object' &&
     err !== null &&
@@ -419,13 +462,15 @@ function entityToTodo(e: TodoEntity): Todo {
 
 export class TodoStore {
   private readonly client: TableClient;
+  private readonly canCreateTables: boolean;
 
-  constructor(connectionString: string) {
-    const allowInsecureConnection = connectionString.includes('devstoreaccount1');
-    this.client = TableClient.fromConnectionString(connectionString, TODO_TABLE, { allowInsecureConnection });
+  constructor(conn: StoreConnection) {
+    this.client = createTableClient(conn, TODO_TABLE);
+    this.canCreateTables = !isSasConnection(conn);
   }
 
   async init(): Promise<void> {
+    if (!this.canCreateTables) return;
     await this.client.createTable();
   }
 

@@ -1,8 +1,10 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest';
+
 interface Props {
-  context: 'list' | 'detail' | 'settings';
+  context: HelpContext;
   height: number;
   columns: number;
 }
@@ -11,6 +13,18 @@ interface Section {
   title: string;
   keys: [string, string][];
 }
+
+const DIGEST_KEYS: [string, string][] = [
+  ['↵',    'Expand topic / toggle detail'],
+  ['→/l',  'Expand topic'],
+  ['←',    'Collapse topic'],
+  ['x / r','Mark topic (or update) read & next'],
+  ['n',    'Jump to next topic'],
+  ['s',    'Save / unsave update'],
+  ['o',    'Open in browser (newest in topic)'],
+  ['Esc/⌫','Close detail'],
+  ['q',    'Quit'],
+];
 
 const LIST_KEYS: [string, string][] = [
   ['↵',    'Open detail view'],
@@ -37,8 +51,9 @@ const DETAIL_KEYS: [string, string][] = [
 const GLOBAL_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
+  ['0',    'Digest: unread grouped by topic'],
   ['1–4',  'Filter: all / unread / read / saved'],
-  ['f',    'Fetch new updates'],
+  ['f / F','Fetch latest updates + group with Copilot'],
   ['c',    'Open config'],
   ['.',    'Toggle preview position'],
   ['h',    'Show this help'],
@@ -58,6 +73,9 @@ function buildSections(context: Props['context']): Section[] {
   if (context === 'settings') {
     return [{ title: 'Config', keys: SETTINGS_KEYS }];
   }
+  if (context === 'digest') {
+    return [{ title: 'Digest', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+  }
   return [
     {
       title: context === 'detail' ? 'Detail View' : 'List View',
@@ -71,6 +89,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   list: 'Main View',
   detail: 'Detail View',
   settings: 'Config',
+  digest: 'Digest',
 };
 
 const KEY_W = 8;

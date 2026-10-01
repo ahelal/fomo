@@ -108,7 +108,7 @@ GitHub Actions Job Starts
          │
          ▼
 6. GitHub Actions uses that token to call Azure APIs
-   (deploy, build image, update Container App, etc.)
+   (deploy Bicep, enable the static website, upload the web app)
          │
          ▼
 7. Token expires. Nothing to clean up, nothing to rotate.
@@ -250,19 +250,17 @@ If the token's `sub` field doesn't exactly match one of these patterns, Azure re
 
 | Variable | Value | Why |
 |----------|-------|-----|
-| `AZURE_CLIENT_ID` | `8e2414b5-...` | Tells Azure *which* managed identity to use |
-| `AZURE_TENANT_ID` | `d86f7b32-...` | Tells Azure *which directory* (your org) |
-| `AZURE_SUBSCRIPTION_ID` | `a8eb4484-...` | Tells Azure *which subscription* |
+| `AZURE_CLIENT_ID` | `<client-id>` | Tells Azure *which* managed identity to use |
+| `AZURE_TENANT_ID` | `<tenant-id>` | Tells Azure *which directory* (your org) |
+| `AZURE_SUBSCRIPTION_ID` | `<subscription-id>` | Tells Azure *which subscription* |
 
 These are like a mailing address — they tell Azure where to send the authentication request. They're not secrets.
 
 ### Secrets (sensitive)
 
-| Secret | Why it's still a secret |
-|--------|------------------------|
-| `GOOGLE_CLIENT_ID` | OAuth app credential — not related to Azure |
-| `GOOGLE_CLIENT_SECRET` | OAuth app credential — not related to Azure |
-| `SESSION_SECRET` | Signs user cookies — must stay private |
+None. Since FOMO moved to a storage-only deployment (static website + Table Storage) there are no
+Google OAuth or session secrets any more — the web app authenticates to Table Storage with a SAS token
+created locally by `fomo link`.
 
 **Notice:** No `AZURE_CREDENTIALS` or service principal secret anymore.
 
@@ -316,7 +314,7 @@ When we added the federated credential, we were telling Entra ID: *"Trust GitHub
 
 This step:
 1. Asks GitHub for an OIDC token for this run
-2. Sends it to Azure saying "I want to act as managed identity `8e2414b5-...`"
+2. Sends it to Azure saying "I want to act as managed identity `<client-id>`"
 3. Azure verifies the token and issues a temporary access token
 4. All subsequent `az` CLI commands in the job use that token automatically
 

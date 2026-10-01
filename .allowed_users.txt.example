@@ -1,4 +1,0 @@
-# Allowed Google accounts (one email per line)
-# Users not in this list will be denied access to the web interface.
-# Rebuild and redeploy after editing.
-your-name@gmail.com

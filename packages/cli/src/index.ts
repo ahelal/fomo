@@ -2,6 +2,33 @@
 import { Command } from 'commander';
 import { loadConfig, saveConfig, printConfig } from './config.js';
 import { FomoDirectService } from '@fomo/core/service';
+import type { DigestOptions } from '@fomo/core/digest';
+import { CopilotSummarizer } from './copilot.js';
+
+async function runDigestCommand(
+  svc: FomoDirectService,
+  opts: { model?: string } & Pick<DigestOptions, 'reset' | 'maxItems'>,
+): Promise<void> {
+  const cfg = loadConfig();
+  const summarizer = new CopilotSummarizer({ model: opts.model || cfg.copilotModel });
+  process.stdout.write(`🧠 Summarising unread updates with Copilot (${summarizer.model})…\n`);
+  try {
+    const result = await svc.digest(summarizer, {
+      reset: opts.reset,
+      maxItems: opts.maxItems,
+      interests: cfg.interests,
+      onProgress: (msg) => console.log(`  ${msg}`),
+    });
+    console.log(
+      `✓ Grouped ${result.processed} update(s): ${result.created} new topic(s), ${result.updated} updated` +
+        (result.remaining ? `, ${result.remaining} still pending` : ''),
+    );
+    for (const err of result.errors) console.log(`  ⚠ ${err}`);
+    if (result.errors.length && !result.processed) process.exitCode = 1;
+  } finally {
+    await summarizer.close();
+  }
+}
 
 const program = new Command();
 
@@ -15,10 +42,22 @@ const configCmd = program.command('config').description('Manage connection confi
 
 configCmd
   .command('set')
-  .description('Set Azure Storage connection string')
-  .requiredOption('--connection-string <cs>', 'Azure Storage connection string')
-  .action(({ connectionString }: { connectionString: string }) => {
-    saveConfig({ connectionString });
+  .description('Set local CLI config (merged into ~/.fomo/config.json)')
+  .option('--connection-string <cs>', 'Azure Storage connection string')
+  .option('--web-url <url>', 'Static website URL of the web app (used by `fomo link`)')
+  .option('--copilot-model <model>', 'Copilot model used for digests (e.g. gpt-5-mini)')
+  .option('--interests <text>', 'What matters to you, nudges digest importance ("" to clear)')
+  .action((opts: { connectionString?: string; webUrl?: string; copilotModel?: string; interests?: string }) => {
+    if (
+      !opts.connectionString &&
+      opts.webUrl === undefined &&
+      opts.copilotModel === undefined &&
+      opts.interests === undefined
+    ) {
+      console.error('Nothing to set. Use --connection-string, --web-url, --copilot-model and/or --interests.');
+      process.exit(1);
+    }
+    saveConfig(opts);
   });
 
 configCmd
@@ -78,9 +117,11 @@ configCmd
 // ── fetch ─────────────────────────────────────────────────────────────────────
 program
   .command('fetch')
-  .description('Scrape one or more sources and store results')
+  .description('Scrape sources, store results and group unread updates into topics')
   .option('-s, --source <ids...>', 'Source IDs to fetch (default: all)')
-  .action(async ({ source }: { source?: string[] }) => {
+  .option('--no-digest', 'Skip the Copilot digest step')
+  .option('-m, --model <model>', 'Copilot model for the digest')
+  .action(async ({ source, digest, model }: { source?: string[]; digest: boolean; model?: string }) => {
     const svc = new FomoDirectService(loadConfig().connectionString);
     process.stdout.write('🔄 Fetching updates…\n');
     const resp = await svc.fetch({ sources: source });
@@ -89,6 +130,52 @@ program
       const errPart = result.error ? `  ⚠ ${result.error}` : '';
       console.log(`  ${id}: fetched=${result.fetched} added=${result.added}${errPart}`);
     }
+    if (digest) await runDigestCommand(svc, { model });
+  });
+
+// ── digest ────────────────────────────────────────────────────────────────────
+program
+  .command('digest')
+  .description('Group unread updates into topics with highlights and importance using GitHub Copilot')
+  .option('-m, --model <model>', 'Copilot model (default: config copilotModel or gpt-5-mini)')
+  .option('--max-items <n>', 'Max unread updates to process this run', '300')
+  .option('--reset', 'Regroup all unread updates from scratch')
+  .action(async (opts: { model?: string; maxItems: string; reset?: boolean }) => {
+    const svc = new FomoDirectService(loadConfig().connectionString);
+    await runDigestCommand(svc, { model: opts.model, reset: opts.reset, maxItems: Number(opts.maxItems) });
+  });
+
+// ── link ──────────────────────────────────────────────────────────────────────
+program
+  .command('link')
+  .description('Print a magic link (and QR code) that connects the web app to your storage')
+  .option('-u, --url <url>', 'Web app URL (default: config webUrl)')
+  .option('-d, --days <n>', 'Link validity in days', '365')
+  .option('--no-qr', 'Do not print a QR code')
+  .action(async (opts: { url?: string; days: string; qr: boolean }) => {
+    const { createWebSas } = await import('@fomo/core/store/sas');
+    const { buildConnectLink } = await import('@fomo/core');
+    const cfg = loadConfig();
+    const webUrl = opts.url || cfg.webUrl;
+    if (!webUrl) {
+      console.error('No web URL. Pass --url or run: fomo config set --web-url <url>');
+      process.exit(1);
+    }
+    const days = Number(opts.days);
+    if (!Number.isFinite(days) || days <= 0) {
+      console.error('--days must be a positive number');
+      process.exit(1);
+    }
+    const conn = createWebSas(cfg.connectionString, { days });
+    const link = buildConnectLink(webUrl, conn);
+    console.log('\n🔗 Open this link on your device (keep it private — it grants access to your data):\n');
+    console.log(link);
+    if (opts.qr) {
+      const { default: qrcode } = await import('qrcode-terminal');
+      console.log('');
+      qrcode.generate(link, { small: true });
+    }
+    console.log(`\nExpires ${conn.expiresOn.toISOString().slice(0, 10)}. Revoke all links by rotating the storage account key.\n`);
   });
 
 // ── list ──────────────────────────────────────────────────────────────────────
@@ -205,7 +292,10 @@ program
     const { render } = await import('ink');
     const { createElement } = await import('react');
     const { App } = await import('./ui/App.js');
-    const svc = new FomoDirectService(loadConfig().connectionString);
+    const cfg = loadConfig();
+    const svc = new FomoDirectService(cfg.connectionString);
+    const summarizer = new CopilotSummarizer({ model: cfg.copilotModel });
+    const digest = (onProgress: (msg: string) => void) => svc.digest(summarizer, { onProgress, interests: cfg.interests });
 
     // Alternate screen buffer: preserves primary scrollback on exit.
     const raw = process.stdout.write.bind(process.stdout);
@@ -274,10 +364,11 @@ program
       return changes > 0 ? raw(buf) : true;
     };
 
-    const { waitUntilExit } = render(createElement(App, { service: svc }));
+    const { waitUntilExit } = render(createElement(App, { service: svc, digest }));
     try {
       await waitUntilExit();
     } finally {
+      await summarizer.close();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (process.stdout as any).write = raw;
       raw('\x1b[?25h\x1b[?1049l');
