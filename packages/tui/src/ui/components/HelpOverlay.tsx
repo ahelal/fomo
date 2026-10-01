@@ -54,7 +54,9 @@ const GLOBAL_KEYS: [string, string][] = [
   ['0',    'Digest: unread grouped by topic'],
   ['1–4',  'Filter: all / unread / read / saved'],
   ['f / F','Fetch latest updates + group with Copilot'],
-  ['c',    'Open config'],
+  ['c',    'Config: sources, link a device, backup / restore'],
+  ['t',    'Todos'],
+  ['Esc',  'Clear the source filter (set with v in config)'],
   ['.',    'Toggle preview position'],
   ['h',    'Show this help'],
 ];
@@ -62,10 +64,12 @@ const GLOBAL_KEYS: [string, string][] = [
 const SETTINGS_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
-  ['↵',    'Toggle / cycle option'],
-  ['e',    'Edit source label'],
+  ['↵',    'Run action / toggle source / edit setting'],
+  ['e',    'Edit source label or setting'],
   ['d',    'Cycle source color'],
-  ['Esc/⌫','Close config'],
+  ['f',    'Fetch this source now'],
+  ['v',    'Show only this source’s updates'],
+  ['Esc/⌫','Cancel / close config'],
   ['h',    'Show this help'],
 ];
 

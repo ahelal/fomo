@@ -76,22 +76,19 @@ const builtins: SourcePlugin[] = [
 ];
 ```
 
-That's it. The source is available everywhere — `fomo fetch`, the Copilot digest, the TUI and the web app.
+That's it. The source is available everywhere — fetching, the Copilot digest, the TUI and the web app.
 
 ## 3. Try it
 
 ```bash
 pnpm build
-
-# CLI
-fomo fetch --source mysource
-
-# Web (requires active session — use the browser or curl with a session cookie)
-curl -s -X POST http://localhost:3000/fetch \
-  -H "Content-Type: application/json" \
-  -b "fomo_session=<your-cookie>" \
-  -d '{"sources":["mysource"]}' | jq .
+fomo
 ```
+
+In the TUI press `c`, move to your source under **Sources**, then:
+
+- `f` fetches just that source (even if it is disabled) and shows `+N new` or the error next to it.
+- `v` closes the config and lists only that source's updates (`Esc` clears the filter).
 
 ## Common Patterns
 

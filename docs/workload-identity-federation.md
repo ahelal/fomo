@@ -260,7 +260,7 @@ These are like a mailing address — they tell Azure where to send the authentic
 
 None. Since FOMO moved to a storage-only deployment (static website + Table Storage) there are no
 Google OAuth or session secrets any more — the web app authenticates to Table Storage with a SAS token
-created locally by `fomo link`.
+created locally in the `fomo` TUI (`c` → Link a device).
 
 **Notice:** No `AZURE_CREDENTIALS` or service principal secret anymore.
 

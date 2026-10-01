@@ -12,9 +12,11 @@ const FILTERS = [
 interface Props {
   active: string;
   columns: number;
+  /** Name of the source the list is limited to, if any. */
+  sourceLabel?: string;
 }
 
-export function FilterBar({ active, columns }: Props) {
+export function FilterBar({ active, columns, sourceLabel }: Props) {
   return (
     <Box width={columns} flexShrink={0}>
       {FILTERS.map((f, i) => {
@@ -34,6 +36,13 @@ export function FilterBar({ active, columns }: Props) {
       })}
       <Text color="gray"> </Text>
       <Text color="#8b949e">{` t Todos `}</Text>
+      {sourceLabel && active !== 'digest' && (
+        <>
+          <Text color="gray"> </Text>
+          <Text color="#e3b341" inverse>{` src:${sourceLabel} `}</Text>
+          <Text color="#8b949e">{' Esc clears'}</Text>
+        </>
+      )}
     </Box>
   );
 }

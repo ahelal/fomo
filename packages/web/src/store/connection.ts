@@ -25,7 +25,7 @@ export function clearConnection(): void {
 }
 
 /**
- * If the page was opened via a `fomo link` magic link, remember the connection and
+ * If the page was opened via a magic link (fomo → c → Link a device), remember the connection and
  * strip the fragment so the SAS doesn't linger in the address bar or history.
  */
 export function consumeConnectLink(): SasConnection | undefined {

@@ -1,7 +1,7 @@
 // FOMO infrastructure: a single Storage Account.
 //   • Table Storage  — updates, topics (Copilot digest), settings, todos
 //   • Static website — the installable PWA, served from the $web container
-// Fetching and digesting run locally from the CLI (`fomo fetch`); there is no compute.
+// Fetching and digesting run locally in the `fomo` TUI; there is no compute.
 
 // ─── Parameters ───────────────────────────────────────────────────────────────
 @description('Azure region for all resources')

@@ -11,6 +11,7 @@ export {
   flattenDigest,
   removeFromDigest,
   removeAndAdvance,
+  soloUpdate,
   isSyntheticTopicId,
   importanceRank,
   IMPORTANCE_LABEL,

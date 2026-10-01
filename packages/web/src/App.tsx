@@ -3,6 +3,7 @@ import {
   FomoStorageService,
   flattenDigest,
   removeAndAdvance,
+  soloUpdate,
   type Update,
   type Status,
   type PreviewPosition,
@@ -41,11 +42,11 @@ const FILTER_KEYS: Record<string, FilterStatus> = {
   '0': 'digest', '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'todos', t: 'todos',
 };
 
-/** The update a digest row points at (items and single-item entries), if any. */
+/** The update a digest row points at (items and single-update topics), if any. */
 function rowUpdate(row: DigestRow | undefined): Update | undefined {
   if (!row) return undefined;
   if (row.kind === 'item') return row.update;
-  return row.entry.synthetic ? row.entry.items[0] : undefined;
+  return soloUpdate(row.entry);
 }
 
 function openUrl(url: string) {
@@ -72,7 +73,7 @@ export function App() {
   if (!conn || expired) {
     return (
       <ConnectScreen
-        error={expired ? 'Your access link has expired. Run `fomo link` to create a new one.' : error}
+        error={expired ? 'Your access link has expired. Create a new one in fomo on your computer: press c → Link a device.' : error}
         onConnect={(c) => {
           saveConnection(c);
           setError(undefined);
@@ -118,7 +119,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   const digestRows = useMemo(() => flattenDigest(fomo.digest, expanded), [fomo.digest, expanded]);
   const digestRow = digestKey ? digestRows.find((r) => r.key === digestKey) : undefined;
-  const digestTopic = digestRow?.kind === 'topic' && !digestRow.entry.synthetic ? digestRow.entry : undefined;
+  const digestTopic = digestRow?.kind === 'topic' && digestRow.entry.items.length > 1 ? digestRow.entry : undefined;
   const detailUpdate = isDigest ? rowUpdate(digestRow) : fomo.filter === 'todos' ? undefined : selected;
   const hasSelection = isDigest ? !!digestRow : !!selected;
 
@@ -278,7 +279,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     };
   }, [showHelp, showSettings, hasSelection, goBack]);
 
-  // ── Keyboard shortcuts (aligned with the CLI TUI) ──
+  // ── Keyboard shortcuts (aligned with the TUI) ──
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
@@ -336,18 +337,18 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         if (e.key === 'n') { digestNextTopic(); return; }
         if (e.key === 'Enter') {
           if (!row) { if (digestRows[0]) setDigestKey(digestRows[0].key); return; }
-          if (row.kind === 'topic' && !row.entry.synthetic) setTopicExpanded(row.entry.topic.id, !expanded.has(row.entry.topic.id));
+          if (row.kind === 'topic' && row.entry.items.length > 1) setTopicExpanded(row.entry.topic.id, !expanded.has(row.entry.topic.id));
           else clearSelection();
           return;
         }
         if (!row) return;
         if (e.key === 'ArrowRight' || e.key === 'l') {
-          if (row.kind === 'topic' && !row.entry.synthetic) setTopicExpanded(row.entry.topic.id, true);
+          if (row.kind === 'topic' && row.entry.items.length > 1) setTopicExpanded(row.entry.topic.id, true);
           return;
         }
         if (e.key === 'ArrowLeft') {
           if (row.kind === 'item') setDigestKey(row.entry.topic.id);
-          if (!row.entry.synthetic) setTopicExpanded(row.entry.topic.id, false);
+          if (row.entry.items.length > 1) setTopicExpanded(row.entry.topic.id, false);
           return;
         }
         if (e.key === 'x' || e.key === 'r') { digestMarkRead(row); return; }
@@ -537,7 +538,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         message={fomo.message}
         expiresInDays={expiresInDays}
         onDisconnect={() => {
-          if (window.confirm('Disconnect this device? You will need a new `fomo link` to reconnect.')) onDisconnect();
+          if (window.confirm('Disconnect this device? You will need a new link (fomo → c → Link a device) to reconnect.')) onDisconnect();
         }}
         onHelpClick={() => {
           setHelpContext(isDigest ? 'digest' : selected ? 'detail' : 'list');

@@ -81,12 +81,17 @@ export type DigestRow =
   | { kind: 'topic'; key: string; entry: DigestEntry }
   | { kind: 'item'; key: string; entry: DigestEntry; update: Update };
 
-/** Flatten entries into navigable rows; expanded (non-synthetic) topics list their items beneath. */
+/** A topic with a single update is shown as that update (title + summary) instead of an expandable group. */
+export function soloUpdate(entry: DigestEntry): Update | undefined {
+  return entry.items.length === 1 ? entry.items[0] : undefined;
+}
+
+/** Flatten entries into navigable rows; expanded multi-update topics list their items beneath. */
 export function flattenDigest(entries: DigestEntry[], expanded: ReadonlySet<string>): DigestRow[] {
   const rows: DigestRow[] = [];
   for (const entry of entries) {
     rows.push({ kind: 'topic', key: entry.topic.id, entry });
-    if (!entry.synthetic && expanded.has(entry.topic.id)) {
+    if (entry.items.length > 1 && expanded.has(entry.topic.id)) {
       for (const update of entry.items) {
         rows.push({ kind: 'item', key: `${entry.topic.id}/${update.id}`, entry, update });
       }
@@ -129,11 +134,18 @@ export function removeAndAdvance(
   const nextEntries = removeFromDigest(entries, updateIds);
   const rows = flattenDigest(nextEntries, expanded);
   const alive = new Set(rows.map((r) => r.key));
+  // An item whose topic shrank to one update now lives on the topic row itself.
+  const soloKeys = new Map<string, string>();
+  for (const entry of nextEntries) {
+    const solo = soloUpdate(entry);
+    if (solo) soloKeys.set(`${entry.topic.id}/${solo.id}`, entry.topic.id);
+  }
+  const resolve = (key: string) => (alive.has(key) ? key : soloKeys.get(key));
   const idx = selectedKey ? oldRows.findIndex((r) => r.key === selectedKey) : -1;
   let nextKey: string | undefined;
   if (idx >= 0) {
-    for (let i = idx + 1; i < oldRows.length && !nextKey; i++) if (alive.has(oldRows[i]!.key)) nextKey = oldRows[i]!.key;
-    for (let i = idx; i >= 0 && !nextKey; i--) if (alive.has(oldRows[i]!.key)) nextKey = oldRows[i]!.key;
+    for (let i = idx + 1; i < oldRows.length && !nextKey; i++) nextKey = resolve(oldRows[i]!.key);
+    for (let i = idx; i >= 0 && !nextKey; i--) nextKey = resolve(oldRows[i]!.key);
   }
   return { entries: nextEntries, rows, nextKey: nextKey ?? rows[0]?.key };
 }

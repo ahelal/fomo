@@ -57,8 +57,7 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
         <Box flexGrow={1} alignItems="center" justifyContent="center">
           <Text color="#8b949e">No updates here — press </Text>
           <Text color="#58a6ff" bold>f</Text>
-          <Text color="#8b949e"> or run </Text>
-          <Text color="#58a6ff" bold>fomo fetch</Text>
+          <Text color="#8b949e"> to fetch the latest</Text>
         </Box>
       </Box>
     );

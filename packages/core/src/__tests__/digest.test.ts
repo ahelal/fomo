@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Topic, Update } from '../types.js';
-import { buildDigest, flattenDigest, removeFromDigest, removeAndAdvance } from '../digest/view.js';
+import { buildDigest, flattenDigest, removeFromDigest, removeAndAdvance, soloUpdate } from '../digest/view.js';
 import {
   DIGEST_PLAN_SYSTEM_PROMPT,
   DIGEST_SPLIT_SYSTEM_PROMPT,
@@ -83,11 +83,21 @@ describe('flattenDigest / removeFromDigest', () => {
     expect(rows.map((r) => r.key)).toEqual(['t1', 't1/a__1', 't1/b__2', 'item:c__3']);
   });
 
+  it('never expands a topic with a single update', () => {
+    const solo = buildDigest([upd('a__1', { topicId: 't1' })], new Map([['t1', topic('t1')]]));
+    expect(soloUpdate(solo.entries[0]!)?.id).toBe('a__1');
+    expect(soloUpdate(digest.entries[0]!)).toBeUndefined();
+    expect(flattenDigest(solo.entries, new Set(['t1'])).map((r) => r.key)).toEqual(['t1']);
+  });
+
   it('removeAndAdvance selects the next surviving row', () => {
     const open = new Set(['t1']);
     // rows: t1, t1/a__1, t1/b__2, item:c__3
     expect(removeAndAdvance(digest.entries, open, 't1', new Set(['a__1', 'b__2'])).nextKey).toBe('item:c__3');
-    expect(removeAndAdvance(digest.entries, open, 't1/a__1', new Set(['a__1'])).nextKey).toBe('t1/b__2');
+    // t1 is left with only b__2, which is now shown on the topic row
+    const shrunk = removeAndAdvance(digest.entries, open, 't1/a__1', new Set(['a__1']));
+    expect(shrunk.nextKey).toBe('t1');
+    expect(shrunk.rows.map((r) => r.key)).toEqual(['t1', 'item:c__3']);
     expect(removeAndAdvance(digest.entries, open, 'item:c__3', new Set(['c__3'])).nextKey).toBe('t1/b__2');
     const last = removeAndAdvance(digest.entries, open, 't1/b__2', new Set(['a__1', 'b__2', 'c__3']));
     expect(last.entries).toEqual([]);

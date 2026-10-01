@@ -1,6 +1,7 @@
 {
-  "name": "@fomo/cli",
+  "name": "@fomo/tui",
   "version": "0.1.0",
+  "description": "FOMO terminal UI",
   "private": true,
   "type": "module",
   "bin": {
@@ -16,7 +17,6 @@
   "dependencies": {
     "@fomo/core": "workspace:*",
     "@github/copilot-sdk": "^1.0.15",
-    "commander": "^13.1.0",
     "ink": "^5.1.0",
     "open": "^10.1.0",
     "qrcode-terminal": "^0.12.0",

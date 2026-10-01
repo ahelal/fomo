@@ -17,7 +17,7 @@ export interface FomoState {
   total: number;
   hasMore: boolean;
   digest: DigestEntry[];
-  /** Unread updates not yet grouped by `fomo digest`. */
+  /** Unread updates not yet grouped into topics by the Copilot digest. */
   pending: number;
   stats: StatsResponse | undefined;
   settings: AppSettings;

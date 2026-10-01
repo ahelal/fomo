@@ -41,7 +41,7 @@ export function StatusBar({ stats, loading, message, expiresInDays, onDisconnect
       {message && <span className="statusbar__message">{message}</span>}
 
       {expiresInDays !== undefined && expiresInDays <= 14 && (
-        <span className="statusbar__warning" title="Run `fomo link` to create a new link">
+        <span className="statusbar__warning" title="Create a new link in fomo: press c → Link a device">
           ⚠ link expires {expiresInDays <= 0 ? 'today' : `in ${expiresInDays}d`}
         </span>
       )}
