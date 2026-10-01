@@ -108,7 +108,7 @@ GitHub Actions Job Starts
          │
          ▼
 6. GitHub Actions uses that token to call Azure APIs
-   (deploy, build image, update Container App, etc.)
+   (deploy Bicep, enable the static website, upload the web app)
          │
          ▼
 7. Token expires. Nothing to clean up, nothing to rotate.
@@ -258,11 +258,9 @@ These are like a mailing address — they tell Azure where to send the authentic
 
 ### Secrets (sensitive)
 
-| Secret | Why it's still a secret |
-|--------|------------------------|
-| `GOOGLE_CLIENT_ID` | OAuth app credential — not related to Azure |
-| `GOOGLE_CLIENT_SECRET` | OAuth app credential — not related to Azure |
-| `SESSION_SECRET` | Signs user cookies — must stay private |
+None. Since FOMO moved to a storage-only deployment (static website + Table Storage) there are no
+Google OAuth or session secrets any more — the web app authenticates to Table Storage with a SAS token
+created locally by `fomo link`.
 
 **Notice:** No `AZURE_CREDENTIALS` or service principal secret anymore.
 

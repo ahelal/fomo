@@ -7,7 +7,7 @@ const STATUS_ICON: Record<string, { icon: string; color: string }> = {
   read:   { icon: '○', color: '#8b949e' },
 };
 
-const DEFAULT_SOURCE_COLOR: Record<string, string> = {
+export const DEFAULT_SOURCE_COLOR: Record<string, string> = {
   github:                 '#58a6ff', // blue
   'github-blog':          '#7ee787', // mint
   'github-next':          '#a371f7', // purple
@@ -55,9 +55,10 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
     return (
       <Box flexDirection="column" height={height}>
         <Box flexGrow={1} alignItems="center" justifyContent="center">
-          <Text color="#8b949e">No updates yet — press </Text>
+          <Text color="#8b949e">No updates here — press </Text>
           <Text color="#58a6ff" bold>f</Text>
-          <Text color="#8b949e"> to fetch</Text>
+          <Text color="#8b949e"> or run </Text>
+          <Text color="#58a6ff" bold>fomo fetch</Text>
         </Box>
       </Box>
     );

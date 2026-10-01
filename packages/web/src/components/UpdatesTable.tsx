@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Update } from '@fomo/core';
+import { usePullToRefresh } from '../hooks/usePullToRefresh.js';
 
 const STATUS_ICON: Record<string, { icon: string; cls: string }> = {
   unread: { icon: '●', cls: 'unread' },
@@ -21,9 +22,7 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
   const tableRef = useRef<HTMLDivElement>(null);
   const [swipedId, setSwipedId] = useState<string | null>(null);
 
-  // Pull-to-refresh state
-  const [pullDistance, setPullDistance] = useState(0);
-  const pullRef = useRef({ startY: 0, active: false });
+  const pull = usePullToRefresh(tableRef, onRefresh);
 
   // Row swipe tracking
   const rowTouchRef = useRef({ startX: 0, startY: 0 });
@@ -57,38 +56,11 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
     }
   }
 
-  // ── Pull-to-refresh handlers ──
-  function handlePullStart(e: React.TouchEvent) {
-    const el = tableRef.current;
-    if (el && el.scrollTop <= 0) {
-      pullRef.current = { startY: e.touches[0].clientY, active: true };
-    }
-  }
-
-  function handlePullMove(e: React.TouchEvent) {
-    if (!pullRef.current.active) return;
-    const dy = e.touches[0].clientY - pullRef.current.startY;
-    if (dy > 0 && tableRef.current && tableRef.current.scrollTop <= 0) {
-      setPullDistance(Math.min(dy * 0.4, 80));
-    } else {
-      pullRef.current.active = false;
-      setPullDistance(0);
-    }
-  }
-
-  function handlePullEnd() {
-    if (pullDistance > 50 && onRefresh) {
-      onRefresh();
-    }
-    setPullDistance(0);
-    pullRef.current.active = false;
-  }
-
   if (updates.length === 0) {
     return (
       <div className="updates-table empty">
         <p>No updates found.</p>
-        <p>Press <kbd>f</kbd> to fetch the latest releases.</p>
+        <p>Run <kbd>fomo fetch</kbd> on your computer to pull the latest releases.</p>
       </div>
     );
   }
@@ -97,16 +69,9 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
     <div
       className="updates-table"
       ref={tableRef}
-      onTouchStart={handlePullStart}
-      onTouchMove={handlePullMove}
-      onTouchEnd={handlePullEnd}
+      {...pull.handlers}
     >
-      {/* Pull-to-refresh indicator */}
-      {pullDistance > 0 && (
-        <div className="pull-indicator" style={{ height: pullDistance }}>
-          <span>{pullDistance > 50 ? '↻ Release to refresh' : '↓ Pull to refresh'}</span>
-        </div>
-      )}
+      {pull.indicator}
 
       <div className="updates-header">
         <span>Source</span>

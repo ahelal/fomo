@@ -8,6 +8,8 @@ vi.mock('../store/tables.js', () => {
     listUpdates: vi.fn().mockResolvedValue({ updates: [], total: 0, hasMore: false }),
     getUpdate: vi.fn(),
     setStatus: vi.fn(),
+    setStatusMany: vi.fn().mockResolvedValue(undefined),
+    setTopicId: vi.fn().mockResolvedValue(undefined),
     setSaved: vi.fn(),
     updateContent: vi.fn(),
     insertUpdate: vi.fn().mockResolvedValue(true),
@@ -56,6 +58,19 @@ vi.mock('../store/tables.js', () => {
     }),
     __mockStore: store,
     __mockTodoStore: todoStore,
+  };
+});
+
+vi.mock('../store/topics.js', () => {
+  const topicStore = {
+    init: vi.fn().mockResolvedValue(undefined),
+    getTopics: vi.fn().mockResolvedValue(new Map()),
+    upsertTopic: vi.fn().mockResolvedValue(undefined),
+    deleteTopic: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    TopicStore: vi.fn().mockImplementation(() => topicStore),
+    __mockTopicStore: topicStore,
   };
 });
 
@@ -223,5 +238,58 @@ describe('FomoDirectService', () => {
     const result = await svc.fetch({ sources: ['mock-source'] });
     // Explicit request overrides disabled
     expect(result.added).toBe(1);
+  });
+
+  it('setStatusMany delegates to store', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    await svc.setStatusMany(['a__1', 'b__2'], 'read');
+    expect(__mockStore.setStatusMany).toHaveBeenCalledWith(['a__1', 'b__2'], 'read');
+  });
+
+  it('getDigest groups unread updates by known topic', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const { __mockTopicStore } = await import('../store/topics.js') as any;
+    const base = { url: 'u', dateAdded: '2026-01-01', status: 'unread', saved: false, content: '' };
+    __mockStore.listUpdates.mockResolvedValueOnce({
+      updates: [
+        { ...base, id: 'a__1', source: 'a', title: 'A1', datePublished: '2026-01-02', topicId: 't1' },
+        { ...base, id: 'b__2', source: 'b', title: 'B2', datePublished: '2026-01-03', topicId: 't1' },
+        { ...base, id: 'c__3', source: 'c', title: 'C3', datePublished: '2026-01-01' },
+      ],
+      total: 3,
+      hasMore: false,
+    });
+    __mockTopicStore.getTopics.mockResolvedValueOnce(new Map([
+      ['t1', { id: 't1', title: 'Topic', summary: 's', highlights: ['h'], createdAt: 'x', updatedAt: 'x' }],
+    ]));
+
+    const digest = await svc.getDigest();
+    expect(__mockStore.listUpdates).toHaveBeenCalledWith(expect.objectContaining({ status: 'unread', includeContent: false }));
+    expect(__mockTopicStore.getTopics).toHaveBeenCalledWith(['t1', 't1']);
+    expect(digest.pending).toBe(1);
+    expect(digest.entries.map((e) => e.topic.id)).toEqual(['t1', 'item:c__3']);
+    expect(digest.entries[0].items.map((u) => u.id)).toEqual(['b__2', 'a__1']);
+  });
+
+  it('digest runs the summarizer over pending updates', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const { __mockTopicStore } = await import('../store/topics.js') as any;
+    __mockStore.listUpdates.mockResolvedValueOnce({
+      updates: [
+        { id: 'a__1', source: 'a', title: 'A1', url: 'u', datePublished: '2026-01-02', dateAdded: 'x', status: 'unread', saved: false, content: '' },
+      ],
+      total: 1,
+      hasMore: false,
+    });
+    const summarizer = {
+      generateJson: vi.fn().mockResolvedValue({
+        topics: [{ topic: null, title: 'T', summary: 'S', highlights: ['H'], items: ['i1'] }],
+      }),
+    };
+
+    const result = await svc.digest(summarizer, { newId: () => 'new-topic' });
+    expect(result).toMatchObject({ processed: 1, created: 1, updated: 0, remaining: 0, errors: [] });
+    expect(__mockTopicStore.upsertTopic).toHaveBeenCalledWith(expect.objectContaining({ id: 'new-topic', title: 'T' }));
+    expect(__mockStore.setTopicId).toHaveBeenCalledWith('a__1', 'new-topic');
   });
 });

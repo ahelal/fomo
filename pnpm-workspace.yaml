@@ -4,5 +4,6 @@ onlyBuiltDependencies:
   - esbuild
 allowBuilds:
   esbuild: true
+  koffi: false
 overrides:
   '@fomo/cli': link:packages/cli

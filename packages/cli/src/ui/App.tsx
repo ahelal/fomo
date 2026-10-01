@@ -1,33 +1,46 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Box, useInput, useApp } from 'ink';
-import type { FomoService, Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus } from '@fomo/core';
-import { DEFAULT_SETTINGS } from '@fomo/core';
+import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow } from '@fomo/core';
+import { DEFAULT_SETTINGS, flattenDigest, removeAndAdvance } from '@fomo/core';
+import type { FomoDirectService } from '@fomo/core/service';
+import type { DigestResult } from '@fomo/core/digest';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
+import { DigestTable } from './components/DigestTable.js';
 import { StatusBar } from './components/StatusBar.js';
 import { DetailPane } from './components/DetailPane.js';
-import { HelpOverlay } from './components/HelpOverlay.js';
+import { TopicPane } from './components/TopicPane.js';
+import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/SettingsPane.js';
 import { TodosView, type TodoFormField } from './components/TodosView.js';
 
-type FilterStatus = Status | 'all' | 'saved';
+type FilterStatus = Status | 'all' | 'saved' | 'digest';
 
 interface Props {
-  service: FomoService;
+  service: FomoDirectService;
+  /** Group unread updates with Copilot (runs after an `f`/`F` fetch). */
+  digest?(onProgress: (message: string) => void): Promise<DigestResult>;
+}
+
+/** The update a digest row points at (items and single-item entries), if any. */
+function rowUpdate(row: DigestRow | undefined): Update | undefined {
+  if (!row) return undefined;
+  if (row.kind === 'item') return row.update;
+  return row.entry.synthetic ? row.entry.items[0] : undefined;
 }
 
 // Fixed line counts for chrome
 const STATUSBAR_H = 2; // content + border line
 const FILTERBAR_H = 1;
 
-export function App({ service }: Props) {
+export function App({ service, digest }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
 
   const [updates, setUpdates] = useState<Update[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [filter, setFilter] = useState<FilterStatus>('all');
+  const [filter, setFilter] = useState<FilterStatus>('digest');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
   const [showDetail, setShowDetail] = useState(false);
@@ -40,7 +53,15 @@ export function App({ service }: Props) {
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelBuffer, setLabelBuffer] = useState('');
   const [showHelp, setShowHelp] = useState(false);
-  const [helpContext, setHelpContext] = useState<'list' | 'detail' | 'settings'>('list');
+  const [helpContext, setHelpContext] = useState<HelpContext>('list');
+
+  // ── Digest state ────────────────────────────────────────────────────────────
+  const [digestEntries, setDigestEntries] = useState<DigestEntry[]>([]);
+  const [digestPending, setDigestPending] = useState(0);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  // Digest lists skip `content`; it is loaded on demand for the detail pane.
+  const [contentCache, setContentCache] = useState<Record<string, string>>({});
+  const digestRows = useMemo(() => flattenDigest(digestEntries, expanded), [digestEntries, expanded]);
 
   // ── Todos state ─────────────────────────────────────────────────────────────
   const [showTodos, setShowTodos] = useState(false);
@@ -57,9 +78,20 @@ export function App({ service }: Props) {
   const updatesRef  = useRef(updates);
   const selectedRef = useRef(selectedIndex);
   const filterRef   = useRef(filter);
+  const digestEntriesRef = useRef(digestEntries);
+  const digestRowsRef    = useRef(digestRows);
+  const expandedRef      = useRef(expanded);
   useEffect(() => { updatesRef.current  = updates;      }, [updates]);
   useEffect(() => { selectedRef.current = selectedIndex; }, [selectedIndex]);
   useEffect(() => { filterRef.current   = filter;       }, [filter]);
+  useEffect(() => { digestEntriesRef.current = digestEntries; }, [digestEntries]);
+  useEffect(() => { digestRowsRef.current    = digestRows;    }, [digestRows]);
+  useEffect(() => { expandedRef.current      = expanded;      }, [expanded]);
+
+  const listLength = filter === 'digest' ? digestRows.length : updates.length;
+  useEffect(() => {
+    setSelectedIndex((i) => Math.min(i, Math.max(0, listLength - 1)));
+  }, [listLength]);
 
   // Load remote settings and sources on mount
   useEffect(() => {
@@ -71,15 +103,23 @@ export function App({ service }: Props) {
     service.getSources().then(setSources).catch(() => { /* ignore */ });
   }, [service]);
 
+  const messageTimer = useRef<ReturnType<typeof setTimeout>>();
   const showMessage = useCallback((msg: string, ms = 2500) => {
     setMessage(msg);
-    setTimeout(() => setMessage(undefined), ms);
+    clearTimeout(messageTimer.current);
+    messageTimer.current = setTimeout(() => setMessage(undefined), ms);
   }, []);
 
   const loadUpdates = useCallback(
     async (f: FilterStatus) => {
       setLoading(true);
       try {
+        if (f === 'digest') {
+          const resp = await service.getDigest();
+          setDigestEntries(resp.entries);
+          setDigestPending(resp.pending);
+          return;
+        }
         const opts = f === 'saved'
           ? { saved: true, limit: 200 }
           : { status: f as Status | 'all', limit: 200 };
@@ -132,22 +172,41 @@ export function App({ service }: Props) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Async action handlers ───────────────────────────────────────────────────
+  const currentUpdate = useCallback((): Update | undefined => {
+    if (filterRef.current === 'digest') return rowUpdate(digestRowsRef.current[selectedRef.current]);
+    return updatesRef.current[selectedRef.current];
+  }, []);
+
+  // One fetch + digest at a time; a second run would plan the same items twice.
+  const fetchingRef = useRef(false);
   const doFetch = useCallback(async () => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     setLoading(true);
-    showMessage('Fetching…');
+    showMessage('Fetching latest updates…', 600_000);
     try {
       const resp = await service.fetch();
+      const added = `✓ Added ${resp.added} update${resp.added !== 1 ? 's' : ''}`;
+      if (digest) {
+        showMessage(`${added} · summarising with Copilot…`, 600_000);
+        await refresh();
+        const result = await digest((msg) => showMessage(msg, 600_000));
+        const errs = result.errors.length ? ` · ⚠ ${result.errors.length} failed` : '';
+        showMessage(`${added} · grouped ${result.processed} into topics${errs}`, 5000);
+      } else {
+        showMessage(added);
+      }
       await refresh();
-      showMessage(`✓ Added ${resp.added} update${resp.added !== 1 ? 's' : ''}`);
     } catch (err) {
-      showMessage(`Fetch error: ${err instanceof Error ? err.message : String(err)}`);
+      showMessage(`Fetch error: ${err instanceof Error ? err.message : String(err)}`, 5000);
     } finally {
+      fetchingRef.current = false;
       setLoading(false);
     }
-  }, [service, refresh, showMessage]);
+  }, [service, digest, refresh, showMessage]);
 
   const doFetchContent = useCallback(async () => {
-    const selected = updatesRef.current[selectedRef.current];
+    const selected = currentUpdate();
     if (!selected) return;
     setLoading(true);
     showMessage('Fetching content…');
@@ -156,13 +215,60 @@ export function App({ service }: Props) {
       setUpdates((prev) =>
         prev.map((u) => (u.id === updated.id ? updated : u)),
       );
+      setContentCache((prev) => ({ ...prev, [updated.id]: updated.content }));
       showMessage('✓ Content fetched');
     } catch (err) {
       showMessage(`Fetch error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
-  }, [service, showMessage]);
+  }, [service, currentUpdate, showMessage]);
+
+  // ── Digest actions ──────────────────────────────────────────────────────────
+  /** Mark updates read, drop them from the digest and keep the cursor on the next remaining row. */
+  const doDigestRead = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const selectedKey = digestRowsRef.current[selectedRef.current]?.key;
+    const next = removeAndAdvance(digestEntriesRef.current, expandedRef.current, selectedKey, new Set(ids));
+    setDigestEntries(next.entries);
+    setSelectedIndex(Math.max(0, next.rows.findIndex((r) => r.key === next.nextKey)));
+    showMessage(ids.length > 1 ? `✓ ${ids.length} marked read` : '✓ Marked read');
+
+    try {
+      await service.setStatusMany(ids, 'read');
+      void loadStats();
+    } catch (err) {
+      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await refresh();
+    }
+  }, [service, refresh, loadStats, showMessage]);
+
+  const doDigestToggleSaved = useCallback(async (update: Update) => {
+    const saved = !update.saved;
+    setDigestEntries((prev) => prev.map((e) => (
+      e.items.some((u) => u.id === update.id)
+        ? { ...e, items: e.items.map((u) => (u.id === update.id ? { ...u, saved } : u)) }
+        : e
+    )));
+    showMessage(saved ? '⭐ Saved' : 'Unsaved');
+    try {
+      await service.setSaved(update.id, saved);
+      void loadStats();
+    } catch (err) {
+      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await refresh();
+    }
+  }, [service, refresh, loadStats, showMessage]);
+
+  const setTopicExpanded = useCallback((topicId: string, open: boolean) => {
+    setExpanded((prev) => {
+      if (prev.has(topicId) === open) return prev;
+      const next = new Set(prev);
+      if (open) next.add(topicId);
+      else next.delete(topicId);
+      return next;
+    });
+  }, []);
 
   const doMark = useCallback(async (status: Status) => {
     const selected = updatesRef.current[selectedRef.current];
@@ -250,11 +356,17 @@ export function App({ service }: Props) {
     }
   }, [service, refresh, loadStats, showMessage]);
 
-  // Auto-fetch every hour while UI is open
+  // Lazily load content for the update shown in the digest detail pane
+  const digestSelectedUpdate = filter === 'digest' ? rowUpdate(digestRows[selectedIndex]) : undefined;
   useEffect(() => {
-    const id = setInterval(() => { void doFetch(); }, 60 * 60 * 1000);
-    return () => clearInterval(id);
-  }, [doFetch]);
+    const u = digestSelectedUpdate;
+    if (!showDetail || !u || u.content || u.id in contentCache) return;
+    let cancelled = false;
+    service.getUpdate(u.id)
+      .then((full) => { if (!cancelled) setContentCache((prev) => ({ ...prev, [u.id]: full.content })); })
+      .catch(() => { if (!cancelled) setContentCache((prev) => ({ ...prev, [u.id]: '' })); });
+    return () => { cancelled = true; };
+  }, [service, showDetail, digestSelectedUpdate, contentCache]);
 
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((input, key) => {
@@ -478,7 +590,7 @@ export function App({ service }: Props) {
 
     // Help
     if (input === 'h') {
-      setHelpContext(showDetail ? 'detail' : 'list');
+      setHelpContext(filter === 'digest' ? 'digest' : showDetail ? 'detail' : 'list');
       setShowHelp(true);
       return;
     }
@@ -504,12 +616,11 @@ export function App({ service }: Props) {
     }
 
     // Navigation
-    if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - 1));                                return; }
-    if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.min(updatesRef.current.length - 1, i + 1));     return; }
-    if (key.return)                     { setShowDetail((prev) => !prev);                                              return; }
+    if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - 1));                return; }
+    if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.min(listLength - 1, i + 1));    return; }
 
     // Filters
-    const filterMap: Record<string, FilterStatus> = { '1': 'all', '2': 'unread', '3': 'read', '4': 'saved' };
+    const filterMap: Record<string, FilterStatus> = { '0': 'digest', '1': 'all', '2': 'unread', '3': 'read', '4': 'saved' };
     if (input in filterMap) {
       const f = filterMap[input]!;
       setFilter(f);
@@ -523,6 +634,75 @@ export function App({ service }: Props) {
       setPreviewPosition((prev) => prev === 'bottom' ? 'right' : 'bottom');
       return;
     }
+
+    if (input === 'f' || input === 'F') { void doFetch(); return; }
+    if (input === 'p' && showDetail) {
+      const sel = currentUpdate();
+      if (sel && !sel.content && !contentCache[sel.id]) void doFetchContent();
+      return;
+    }
+
+    // ── Digest view ──
+    if (filter === 'digest') {
+      const row = digestRows[selectedIndex];
+      if (!row) return;
+      const entry = row.entry;
+      const isTopic = row.kind === 'topic' && !entry.synthetic;
+      const update = rowUpdate(row);
+
+      if (key.return) {
+        if (isTopic) {
+          setTopicExpanded(entry.topic.id, !expanded.has(entry.topic.id));
+          setShowDetail(true);
+        } else {
+          setShowDetail((prev) => !prev);
+        }
+        return;
+      }
+      if (key.rightArrow || input === 'l') {
+        if (isTopic) setTopicExpanded(entry.topic.id, true);
+        return;
+      }
+      if (key.leftArrow) {
+        if (row.kind === 'item') {
+          const parent = digestRows.findIndex((r) => r.kind === 'topic' && r.entry.topic.id === entry.topic.id);
+          if (parent >= 0) setSelectedIndex(parent);
+        }
+        if (!entry.synthetic) setTopicExpanded(entry.topic.id, false);
+        return;
+      }
+      if (input === 'x' || input === 'r') {
+        void doDigestRead(row.kind === 'item' ? [row.update.id] : entry.items.map((u) => u.id));
+        return;
+      }
+      if (input === 's') {
+        if (update) void doDigestToggleSaved(update);
+        else showMessage('Expand the topic to save a single update');
+        return;
+      }
+      if (input === 'o') {
+        const target = update ?? entry.items[0];
+        if (target) {
+          void import('open')
+            .then(({ default: open }) => open(target.url))
+            .catch(() => showMessage('Could not open browser'));
+        }
+        return;
+      }
+      if (input === 'n') {
+        let next = -1;
+        for (let i = selectedIndex + 1; i < digestRows.length && next === -1; i++) {
+          if (digestRows[i]!.kind === 'topic') next = i;
+        }
+        if (next === -1 && digestRows.length > 0) next = 0;
+        if (next >= 0) setSelectedIndex(next);
+        return;
+      }
+      if (input === 'u') { showMessage('Digest only shows unread updates'); return; }
+      return;
+    }
+
+    if (key.return) { setShowDetail((prev) => !prev); return; }
 
     // Actions (work in both list and detail)
     if (input === 'r') { void doMark('read');     return; }
@@ -551,18 +731,51 @@ export function App({ service }: Props) {
       return;
     }
     if (input === 'o') { void doOpen();         return; }
-    if (input === 'f') { void doFetch(); return; }
-    if (input === 'p' && showDetail) {
-      const sel = updatesRef.current[selectedRef.current];
-      if (sel && !sel.content) void doFetchContent();
-      return;
-    }
   });
 
   // ── Layout calculations ─────────────────────────────────────────────────────
   const chrome = STATUSBAR_H + FILTERBAR_H;
   const availableH = rows - chrome;
   const selectedUpdate = updates[selectedIndex];
+
+  const renderTable = (height: number, width: number) =>
+    filter === 'digest' ? (
+      <DigestTable
+        rows={digestRows}
+        expanded={expanded}
+        pending={digestPending}
+        selectedIndex={selectedIndex}
+        height={height}
+        columns={width}
+        sourceLabels={appSettings.sourceLabels}
+        sourceColors={appSettings.sourceColors}
+      />
+    ) : (
+      <UpdatesTable
+        updates={updates}
+        selectedIndex={selectedIndex}
+        height={height}
+        columns={width}
+        sourceLabels={appSettings.sourceLabels}
+        sourceColors={appSettings.sourceColors}
+      />
+    );
+
+  const renderDetail = (height: number, width: number, position: 'bottom' | 'right') => {
+    if (filter === 'digest') {
+      const row = digestRows[selectedIndex];
+      if (!row) return null;
+      if (digestSelectedUpdate) {
+        const content = digestSelectedUpdate.content || contentCache[digestSelectedUpdate.id] || '';
+        const loading = !digestSelectedUpdate.content && !(digestSelectedUpdate.id in contentCache);
+        return <DetailPane update={{ ...digestSelectedUpdate, content }} loading={loading} height={height} columns={width} position={position} />;
+      }
+      return (
+        <TopicPane entry={row.entry} height={height} columns={width} position={position} sourceLabels={appSettings.sourceLabels} />
+      );
+    }
+    return selectedUpdate ? <DetailPane update={selectedUpdate} height={height} columns={width} position={position} /> : null;
+  };
 
   // Help overlay — replaces main content area
   if (showHelp) {
@@ -627,25 +840,11 @@ export function App({ service }: Props) {
         <FilterBar active={filter} columns={columns} />
         <Box flexGrow={1} height={availableH}>
           <Box width={tableW}>
-            <UpdatesTable
-              updates={updates}
-              selectedIndex={selectedIndex}
-              height={availableH}
-              columns={tableW}
-              sourceLabels={appSettings.sourceLabels}
-              sourceColors={appSettings.sourceColors}
-            />
+            {renderTable(availableH, tableW)}
           </Box>
           <Box borderStyle="single" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor="gray">
             <Box width={detailW - 2}>
-              {selectedUpdate && (
-                <DetailPane
-                  update={selectedUpdate}
-                  height={availableH}
-                  columns={detailW - 2}
-                  position="right"
-                />
-              )}
+              {renderDetail(availableH, detailW - 2, 'right')}
             </Box>
           </Box>
         </Box>
@@ -661,22 +860,8 @@ export function App({ service }: Props) {
     <Box flexDirection="column" height={rows}>
       <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
       <FilterBar active={filter} columns={columns} />
-      <UpdatesTable
-        updates={updates}
-        selectedIndex={selectedIndex}
-        height={tableH}
-        columns={columns}
-        sourceLabels={appSettings.sourceLabels}
-        sourceColors={appSettings.sourceColors}
-      />
-      {showDetail && selectedUpdate && (
-        <DetailPane
-          update={selectedUpdate}
-          height={detailH}
-          columns={columns}
-          position="bottom"
-        />
-      )}
+      {renderTable(tableH, columns)}
+      {showDetail && renderDetail(detailH, columns, 'bottom')}
     </Box>
   );
 }

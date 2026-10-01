@@ -21,6 +21,18 @@
     "./service": {
       "import": "./dist/service.js",
       "types": "./dist/service.d.ts"
+    },
+    "./digest": {
+      "import": "./dist/digest/index.js",
+      "types": "./dist/digest/index.d.ts"
+    },
+    "./store/topics": {
+      "import": "./dist/store/topics.js",
+      "types": "./dist/store/topics.d.ts"
+    },
+    "./store/sas": {
+      "import": "./dist/store/sas.js",
+      "types": "./dist/store/sas.d.ts"
     }
   },
   "scripts": {

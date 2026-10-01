@@ -76,7 +76,7 @@ const builtins: SourcePlugin[] = [
 ];
 ```
 
-That's it. The source is available everywhere — web, CLI, and scraper job.
+That's it. The source is available everywhere — `fomo fetch`, the Copilot digest, the TUI and the web app.
 
 ## 3. Try it
 
