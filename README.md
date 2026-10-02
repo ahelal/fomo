@@ -108,7 +108,7 @@ Save an empty value to clear it.
 
 How it works:
 
-- `f` in the TUI fetches the sources and then runs the digest. Turn **Group after fetch** off in the config screen to fetch only.
+- `f` in the TUI fetches the sources and then runs the digest in the background; new updates show up ungrouped right away and the status bar shows Copilot's progress. Turn **Group after fetch** off in the config screen to fetch only.
 - Only **unread updates that don't have a topic yet** are sent to Copilot, in two passes:
   1. **Plan:** one call sees every pending update (title and a short excerpt) plus the currently open topics. It assigns each update to an existing or new topic and rates it. Updates the model skips get one more call; oversized new topics get a split call.
   2. **Write:** one small call per touched topic writes the summary, the highlights and a one-sentence summary of each new update. These run 6 at a time with low reasoning effort, and a failed call is retried once.
@@ -260,11 +260,13 @@ Run `fomo`. It opens on the **Digest**. There are no subcommands: `fomo --help` 
 | `c`             | Config: sources, link a device, backup / restore, local settings |
 | `t`             | Todos (`a` add, `Enter` cycle status, `d` delete) |
 | `Esc`           | Clear the source filter                   |
-| `.`             | Toggle preview position                   |
+| `.`             | Show preview / toggle its position        |
 | `h`             | Help                                      |
 | `q`             | Quit                                      |
 
 The status bar shows counts by status; the config screen shows counts per source.
+While a fetch, Copilot digest or restore runs, the status bar shows a spinner, the current step and the elapsed time.
+Fetch errors and Copilot runtime logs are written to `~/.fomo/fomo.log` instead of the screen.
 
 ### Config Screen
 

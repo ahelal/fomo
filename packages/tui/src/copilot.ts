@@ -13,21 +13,34 @@ export interface CopilotSummarizerOptions {
   timeoutMs?: number;
 }
 
+type CopilotSessionLike = {
+  sendAndWait(options: Record<string, unknown>, timeout?: number): Promise<{ data: { content: string } } | undefined>;
+  disconnect(): Promise<void>;
+};
+
 type CopilotClientLike = {
   start(): Promise<void>;
   stop(): Promise<unknown>;
   listModels(): Promise<Array<{ id: string; supportedReasoningEfforts?: string[] }>>;
-  createSession(config: Record<string, unknown>): Promise<{
-    sendAndWait(options: Record<string, unknown>, timeout?: number): Promise<{ data: { content: string } } | undefined>;
-    disconnect(): Promise<void>;
-  }>;
+  createSession(config: Record<string, unknown>): Promise<CopilotSessionLike>;
 };
+
+/**
+ * True when the client's runtime connection has closed (the Copilot CLI process exited or
+ * crashed, e.g. after the machine slept). The SDK doesn't reconnect by itself and has no
+ * public state getter, so this reads its internal `state` field; unknown means "alive".
+ */
+function isClosed(client: CopilotClientLike): boolean {
+  const state = (client as { state?: unknown }).state;
+  return state === 'disconnected' || state === 'error';
+}
 
 /**
  * Summarizer backed by the GitHub Copilot SDK.
  * Uses an isolated, tool-less session per request so the model only sees the prompt.
  */
 export class CopilotSummarizer implements Summarizer {
+  private clientPromise: Promise<CopilotClientLike> | undefined;
   private client: CopilotClientLike | undefined;
   private efforts: Promise<Set<string>> | undefined;
   readonly model: string;
@@ -36,8 +49,19 @@ export class CopilotSummarizer implements Summarizer {
     this.model = options.model || DEFAULT_COPILOT_MODEL;
   }
 
-  private async getClient(): Promise<CopilotClientLike> {
-    if (this.client) return this.client;
+  /** One shared client (concurrent callers wait for the same start); a failed start is retried next time. */
+  private getClient(): Promise<CopilotClientLike> {
+    if (!this.clientPromise) {
+      const starting = this.startClient();
+      this.clientPromise = starting;
+      starting.catch(() => {
+        if (this.clientPromise === starting) this.clientPromise = undefined;
+      });
+    }
+    return this.clientPromise;
+  }
+
+  private async startClient(): Promise<CopilotClientLike> {
     const { CopilotClient } = await import('@github/copilot-sdk');
     const baseDirectory = join(homedir(), '.fomo', 'copilot');
     mkdirSync(baseDirectory, { recursive: true });
@@ -57,6 +81,16 @@ export class CopilotSummarizer implements Summarizer {
     return client;
   }
 
+  /** Drops a dead client so the next request starts a new runtime. */
+  private discard(client: CopilotClientLike): void {
+    if (this.client === client) {
+      this.client = undefined;
+      this.clientPromise = undefined;
+      this.efforts = undefined;
+    }
+    void client.stop().catch(() => undefined);
+  }
+
   /** Reasoning efforts the model accepts (empty when unknown or unsupported). */
   private supportedEfforts(client: CopilotClientLike): Promise<Set<string>> {
     this.efforts ??= client
@@ -66,16 +100,32 @@ export class CopilotSummarizer implements Summarizer {
     return this.efforts;
   }
 
-  async generateJson({ system, prompt, schema, effort, timeoutMs }: ModelRequest): Promise<unknown> {
-    const client = await this.getClient();
+  private async openSession(
+    client: CopilotClientLike,
+    system: string,
+    effort: ModelRequest['effort'],
+  ): Promise<CopilotSessionLike> {
     const reasoningEffort = effort && (await this.supportedEfforts(client)).has(effort) ? effort : undefined;
-    const session = await client.createSession({
+    return client.createSession({
       model: this.model,
       ...(reasoningEffort ? { reasoningEffort } : {}),
       availableTools: [],
       onPermissionRequest: () => ({ kind: 'reject' }),
       systemMessage: { mode: 'append', content: system },
     });
+  }
+
+  async generateJson({ system, prompt, schema, effort, timeoutMs }: ModelRequest): Promise<unknown> {
+    let client = await this.getClient();
+    let session: CopilotSessionLike;
+    try {
+      session = await this.openSession(client, system, effort);
+    } catch (err) {
+      if (!isClosed(client)) throw err;
+      this.discard(client);
+      client = await this.getClient();
+      session = await this.openSession(client, system, effort);
+    }
     try {
       const message = await session.sendAndWait(
         { prompt, responseSchema: schema },
@@ -90,8 +140,10 @@ export class CopilotSummarizer implements Summarizer {
   }
 
   async close(): Promise<void> {
-    const client = this.client;
+    const starting = this.clientPromise;
+    this.clientPromise = undefined;
     this.client = undefined;
+    const client = await starting?.catch(() => undefined);
     if (client) await client.stop().catch(() => undefined);
   }
 }
