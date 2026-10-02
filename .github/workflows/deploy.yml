@@ -1,20 +1,15 @@
-# Deploy FOMO to Azure Container Apps
+# Deploy FOMO to Azure: a single Storage Account (Table Storage + static website)
 #
 # Trigger: push to main  /  manual dispatch
 #
 # Auth: Workload Identity Federation (no secrets needed for Azure login)
-#   Managed Identity: fomo-github-actions (in fomo RG)
+#   Managed Identity: fomo-github-actions (in fomo RG) — needs Contributor on the
+#   resource group (deploys Bicep and lists the storage key to upload the site).
 #
-# Required GitHub secrets:
-#   GOOGLE_CLIENT_ID          — Google OAuth 2.0 Client ID
-#   GOOGLE_CLIENT_SECRET      — Google OAuth 2.0 Client Secret
-#   SESSION_SECRET            — Random string (≥32 chars) for session cookies
-#   ALLOWED_USERS             — Comma-separated allowed emails e.g. "a@b.com,c@d.com"
-#
-# Required GitHub variables (Settings → Variables):
-#   AZURE_CLIENT_ID           — <client-id>
-#   AZURE_TENANT_ID           — <tenant-id>
-#   AZURE_SUBSCRIPTION_ID     — <subscription-id>
+# Required GitHub secrets (or variables):
+#   AZURE_CLIENT_ID
+#   AZURE_TENANT_ID
+#   AZURE_SUBSCRIPTION_ID
 
 name: Deploy
 
@@ -34,7 +29,7 @@ permissions:
 env:
   PROJECT: fomo
   LOCATION: swedencentral
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   # ── Build & Test ────────────────────────────────────────────────────────────
@@ -66,6 +61,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -74,9 +78,4 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy
-        env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          ALLOWED_USERS: ${{ secrets.ALLOWED_USERS }}
-        run: bash deploy.sh fomo ${{ env.LOCATION }} --yes
+        run: bash deploy.sh ${{ env.PROJECT }} ${{ env.LOCATION }} --yes

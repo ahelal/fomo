@@ -20,6 +20,6 @@
     "pnpm": ">=9"
   },
   "dependencies": {
-    "@fomo/cli": "link:packages/cli"
+    "@fomo/tui": "link:packages/tui"
   }
 }

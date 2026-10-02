@@ -22,7 +22,12 @@ export interface Update {
   status: Status;
   /** Whether this update is bookmarked. Independent of read/unread status. */
   saved: boolean;
+  /** Empty when listed with `includeContent: false` — load via `getUpdate()`. */
   content: string;
+  /** Digest topic this update was grouped into (set by the Copilot digest). */
+  topicId?: string;
+  /** One-sentence Copilot summary written when the update joins a topic. */
+  summary?: string;
 }
 
 // ─── Plugin contract ─────────────────────────────────────────────────────────
@@ -74,6 +79,8 @@ export interface ListOptions {
   source?: SourceId;
   limit?: number;
   offset?: number;
+  /** Include the (potentially large) `content` field. Default: true. */
+  includeContent?: boolean;
 }
 
 export interface ListResponse {
@@ -103,6 +110,88 @@ export interface StatsResponse {
   byStatus: Record<Status, number>;
   bySource: Record<SourceId, number>;
   saved: number;
+}
+
+// ─── Digest (AI topic grouping) ──────────────────────────────────────────────
+
+/** How worth reading a topic is, as judged by the digest model. */
+export type TopicImportance = 'high' | 'medium' | 'low';
+
+export const TOPIC_IMPORTANCE: readonly TopicImportance[] = ['high', 'medium', 'low'];
+
+export interface Topic {
+  /** RowKey in the `topics` table. Synthetic entries use `item:<updateId>`. */
+  id: string;
+  title: string;
+  /** One-sentence summary of what happened. */
+  summary: string;
+  /** Short bullet points with the key facts. */
+  highlights: string[];
+  /** Unset for topics not rated yet (and for items not digested yet). */
+  importance?: TopicImportance;
+  /** ISO 8601 */
+  createdAt: string;
+  /** ISO 8601 */
+  updatedAt: string;
+}
+
+export interface DigestEntry {
+  topic: Topic;
+  /** Unread updates in this topic, newest first. */
+  items: Update[];
+  /** Newest `datePublished` among `items`. */
+  latestDate: string;
+  /** Distinct sources across `items`. */
+  sources: SourceId[];
+  /** True when the item has not been summarised yet (topic mirrors the single item). */
+  synthetic: boolean;
+}
+
+export interface DigestResponse {
+  entries: DigestEntry[];
+  /** Unread updates not yet grouped into a topic (press f in the TUI). */
+  pending: number;
+}
+
+// ─── Storage connection ──────────────────────────────────────────────────────
+
+/**
+ * How to reach Azure Table Storage.
+ * - A full connection string (TUI; can create tables).
+ * - A Table endpoint + SAS token (browser/PWA; entity access only).
+ */
+export type StoreConnection = string | SasConnection;
+
+export interface SasConnection {
+  /** e.g. `https://<account>.table.core.windows.net` */
+  tableEndpoint: string;
+  /** SAS token (with or without leading `?`). */
+  sas: string;
+}
+
+// ─── Service contract ────────────────────────────────────────────────────────
+
+/**
+ * Storage-backed operations shared by the web app (SAS) and the TUI (connection string).
+ * Node-only operations (scraping, summarising, backup) live on `FomoDirectService`.
+ */
+export interface FomoService {
+  listUpdates(options?: ListOptions): Promise<ListResponse>;
+  getUpdate(id: string): Promise<Update>;
+  setStatus(id: string, status: Status): Promise<Update>;
+  /** Set status on many updates (e.g. every item in a digest topic). */
+  setStatusMany(ids: string[], status: Status): Promise<void>;
+  setSaved(id: string, saved: boolean): Promise<Update>;
+  getStats(): Promise<StatsResponse>;
+  getDigest(): Promise<DigestResponse>;
+  getSources(): Promise<SourceInfo[]>;
+  getSettings(): Promise<AppSettings>;
+  updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  listTodos(opts?: ListTodosOptions): Promise<ListTodosResponse>;
+  getTodo(id: string): Promise<Todo>;
+  createTodo(req: CreateTodoRequest): Promise<Todo>;
+  updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo>;
+  deleteTodo(id: string): Promise<void>;
 }
 
 // ─── Todos ───────────────────────────────────────────────────────────────────

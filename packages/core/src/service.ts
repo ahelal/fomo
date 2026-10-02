@@ -1,70 +1,22 @@
-import { UpdateStore, TodoStore, type BackupPayload } from './store/tables.js';
+import type { BackupPayload } from './store/tables.js';
 import { getAllSources, getSource, getSourceIds } from './scraper/registry.js';
+import { FomoStorageService } from './storage-service.js';
+import { runDigest, type Summarizer, type DigestOptions, type DigestResult } from './digest/run.js';
 import type {
-  FomoService,
-} from './client.js';
-import type {
+  StoreConnection,
   Update,
-  ListOptions,
-  ListResponse,
   FetchRequest,
   FetchResponse,
-  StatsResponse,
-  Status,
-  SourceInfo,
   SourceFetchResult,
-  AppSettings,
-  Todo,
-  CreateTodoRequest,
-  UpdateTodoRequest,
-  ListTodosOptions,
-  ListTodosResponse,
 } from './types.js';
 
 /**
- * Direct implementation of FomoService — calls store + scrapers locally
- * without going through an HTTP API server.
+ * Node-side service for the TUI: storage access plus scraping, AI digest and backup.
+ * Requires a connection string (or a SAS) with network access to the sources.
  */
-export class FomoDirectService implements FomoService {
-  private readonly store: UpdateStore;
-  private readonly todoStore: TodoStore;
-  private initPromise: Promise<void> | undefined;
-
-  constructor(connectionString: string) {
-    this.store = new UpdateStore(connectionString);
-    this.todoStore = new TodoStore(connectionString);
-  }
-
-  private async ensureInit(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = Promise.all([
-        this.store.init(),
-        this.todoStore.init(),
-      ]).then(() => undefined);
-    }
-    await this.initPromise;
-  }
-
-  async listUpdates(options: ListOptions = {}): Promise<ListResponse> {
-    await this.ensureInit();
-    return this.store.listUpdates(options);
-  }
-
-  async getUpdate(id: string): Promise<Update> {
-    await this.ensureInit();
-    const update = await this.store.getUpdate(id);
-    if (!update) throw new Error(`Update not found: ${id}`);
-    return update;
-  }
-
-  async setStatus(id: string, status: Status): Promise<Update> {
-    await this.ensureInit();
-    return this.store.setStatus(id, status);
-  }
-
-  async setSaved(id: string, saved: boolean): Promise<Update> {
-    await this.ensureInit();
-    return this.store.setSaved(id, saved);
+export class FomoDirectService extends FomoStorageService {
+  constructor(conn: StoreConnection) {
+    super(conn);
   }
 
   async fetchContent(id: string): Promise<Update> {
@@ -83,11 +35,6 @@ export class FomoDirectService implements FomoService {
     if (!content) throw new Error('Could not extract content');
 
     return this.store.updateContent(id, content);
-  }
-
-  async getStats(): Promise<StatsResponse> {
-    await this.ensureInit();
-    return this.store.getStats();
   }
 
   async fetch(req: FetchRequest = {}): Promise<FetchResponse> {
@@ -146,14 +93,6 @@ export class FomoDirectService implements FomoService {
     return { added: totalAdded, results };
   }
 
-  async getSources(): Promise<SourceInfo[]> {
-    return getAllSources().map((s) => ({
-      id: s.id,
-      displayName: s.displayName,
-      capabilities: s.capabilities,
-    }));
-  }
-
   /** Export all updates from remote table storage as a backup payload. */
   async backup(): Promise<BackupPayload> {
     await this.ensureInit();
@@ -166,45 +105,12 @@ export class FomoDirectService implements FomoService {
     return this.store.restore(payload);
   }
 
-  // ─── Settings ──────────────────────────────────────────────────────────────
+  // ─── Digest ────────────────────────────────────────────────────────────────
 
-  async getSettings(): Promise<AppSettings> {
+  /** Group unread, ungrouped updates into topics with highlights using `summarizer`. */
+  async digest(summarizer: Summarizer, options: DigestOptions = {}): Promise<DigestResult> {
     await this.ensureInit();
-    return this.store.getSettings();
-  }
-
-  async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
-    await this.ensureInit();
-    return this.store.updateSettings(patch);
-  }
-
-  // ─── Todos ──────────────────────────────────────────────────────────────────
-
-  async listTodos(opts: ListTodosOptions = {}): Promise<ListTodosResponse> {
-    await this.ensureInit();
-    return this.todoStore.listTodos(opts);
-  }
-
-  async getTodo(id: string): Promise<Todo> {
-    await this.ensureInit();
-    const todo = await this.todoStore.getTodo(id);
-    if (!todo) throw new Error(`Todo not found: ${id}`);
-    return todo;
-  }
-
-  async createTodo(req: CreateTodoRequest): Promise<Todo> {
-    await this.ensureInit();
-    return this.todoStore.createTodo(req);
-  }
-
-  async updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo> {
-    await this.ensureInit();
-    return this.todoStore.updateTodo(id, patch);
-  }
-
-  async deleteTodo(id: string): Promise<void> {
-    await this.ensureInit();
-    return this.todoStore.deleteTodo(id);
+    return runDigest({ updates: this.store, topics: this.topicStore }, summarizer, options);
   }
 }
 
