@@ -11,9 +11,12 @@ export {
   flattenDigest,
   removeFromDigest,
   removeAndAdvance,
+  patchDigest,
+  nextRowKey,
   soloUpdate,
   isSyntheticTopicId,
   importanceRank,
   IMPORTANCE_LABEL,
   type DigestRow,
 } from './digest/view.js';
+export { matchesSearch, searchDigest, searchTerms } from './search.js';

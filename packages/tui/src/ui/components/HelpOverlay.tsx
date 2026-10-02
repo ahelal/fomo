@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { VERSION } from '../../version.js';
 
-export type HelpContext = 'list' | 'detail' | 'settings' | 'digest';
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved';
 
 interface Props {
   context: HelpContext;
@@ -22,6 +22,21 @@ const DIGEST_KEYS: [string, string][] = [
   ['x / r','Mark topic (or update) read & next'],
   ['n',    'Jump to next topic'],
   ['s',    'Save / unsave update'],
+  ['g / G','Summarise update with Copilot / redo'],
+  ['o',    'Open in browser (newest in topic)'],
+  ['Esc/⌫','Close detail'],
+  ['q',    'Quit'],
+];
+
+const SAVED_KEYS: [string, string][] = [
+  ['↵',    'Expand topic / toggle detail'],
+  ['→/l',  'Expand topic'],
+  ['←',    'Collapse topic'],
+  ['r / u','Mark topic (or update) read / unread'],
+  ['x',    'Mark read & next'],
+  ['n',    'Jump to next topic'],
+  ['s',    'Unsave update'],
+  ['g / G','Summarise update with Copilot / redo'],
   ['o',    'Open in browser (newest in topic)'],
   ['Esc/⌫','Close detail'],
   ['q',    'Quit'],
@@ -32,6 +47,7 @@ const LIST_KEYS: [string, string][] = [
   ['r',    'Mark as read'],
   ['u',    'Mark as unread'],
   ['s',    'Save / unsave'],
+  ['g / G','Summarise with Copilot (saved) / redo'],
   ['x',    'Mark read & next unread'],
   ['n',    'Jump to next unread'],
   ['o',    'Open in browser'],
@@ -43,6 +59,7 @@ const DETAIL_KEYS: [string, string][] = [
   ['r',     'Mark as read'],
   ['u',     'Mark as unread'],
   ['s',     'Save / unsave'],
+  ['g / G', 'Summarise with Copilot (saved) / redo'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next unread'],
   ['o',     'Open URL in browser'],
@@ -52,12 +69,13 @@ const DETAIL_KEYS: [string, string][] = [
 const GLOBAL_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
-  ['0',    'Digest: unread grouped by topic'],
-  ['1–4',  'Filter: all / unread / read / saved'],
+  ['1–4',  'All / unread / read / saved'],
+  ['2 / 4','Again: switch Unread / Saved between topics and a list'],
   ['f / F','Fetch latest updates + group with Copilot'],
   ['c',    'Config: sources, link a device, backup / restore'],
   ['t',    'Todos'],
-  ['Esc',  'Clear the source filter (set with v in config)'],
+  ['/',    'Search titles & content in this view (↵ search)'],
+  ['Esc',  'Clear the search, then the source filter (v in config)'],
   ['.',    'Show preview / toggle its position'],
   ['h',    'Show this help'],
 ];
@@ -79,7 +97,10 @@ function buildSections(context: Props['context']): Section[] {
     return [{ title: 'Config', keys: SETTINGS_KEYS }];
   }
   if (context === 'digest') {
-    return [{ title: 'Digest', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+    return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+  }
+  if (context === 'saved') {
+    return [{ title: 'Saved topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   return [
     {
@@ -94,7 +115,8 @@ const CONTEXT_LABEL: Record<string, string> = {
   list: 'Main View',
   detail: 'Detail View',
   settings: 'Config',
-  digest: 'Digest',
+  digest: 'Unread · topics',
+  saved: 'Saved · topics',
 };
 
 const KEY_W = 8;

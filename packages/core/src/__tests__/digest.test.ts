@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Topic, Update } from '../types.js';
-import { buildDigest, flattenDigest, removeFromDigest, removeAndAdvance, soloUpdate } from '../digest/view.js';
+import { buildDigest, flattenDigest, nextRowKey, patchDigest, removeFromDigest, removeAndAdvance, soloUpdate } from '../digest/view.js';
 import {
   DIGEST_PLAN_SYSTEM_PROMPT,
   DIGEST_SPLIT_SYSTEM_PROMPT,
@@ -8,6 +8,7 @@ import {
   buildSplitPrompt,
   buildWritePrompt,
   excerpt,
+  itemText,
   type ModelRequest,
 } from '../digest/prompt.js';
 import { parseItemSummaries, parseTopicText, reconcilePlan, singletonGroup, stripPublishDate } from '../digest/reconcile.js';
@@ -51,6 +52,22 @@ describe('buildDigest', () => {
     expect(digest.entries[0]!.sources).toEqual(['b', 'a']);
     expect(digest.entries[1]!.synthetic).toBe(true);
     expect(digest.entries[1]!.topic.title).toBe('Title c__3');
+  });
+
+  it('groups saved updates, read or unread, in saved mode', () => {
+    const digest = buildDigest(
+      [
+        upd('a__1', { topicId: 't1', saved: true, status: 'read', datePublished: '2026-01-01' }),
+        upd('b__2', { topicId: 't1', saved: true, datePublished: '2026-01-05' }),
+        upd('c__3', { topicId: 't1', datePublished: '2026-01-09' }),
+        upd('d__4', { saved: true, status: 'read', datePublished: '2026-01-03' }),
+      ],
+      new Map([['t1', topic('t1')]]),
+      { saved: true },
+    );
+    expect(digest.entries.map((e) => e.topic.id)).toEqual(['t1', 'item:d__4']);
+    expect(digest.entries[0]!.items.map((u) => u.id)).toEqual(['b__2', 'a__1']);
+    expect(digest.pending).toBe(1);
   });
 
   it('puts important topics first, unrated ones with medium, then newest within a level', () => {
@@ -109,6 +126,23 @@ describe('flattenDigest / removeFromDigest', () => {
     expect(left).toHaveLength(1);
     expect(left[0]!.items.map((u) => u.id)).toEqual(['b__2']);
   });
+
+  it('patchDigest updates items in place and keeps untouched entries', () => {
+    const patched = patchDigest(digest.entries, new Set(['b__2']), { status: 'read' });
+    expect(patched[0]!.items.map((u) => u.status)).toEqual(['unread', 'read']);
+    expect(patched[1]).toBe(digest.entries[1]);
+    expect(digest.entries[0]!.items[1]!.status).toBe('unread');
+  });
+
+  it('nextRowKey moves past an expanded topic and stays on the last row', () => {
+    const rows = flattenDigest(digest.entries, new Set(['t1']));
+    // rows: t1, t1/a__1, t1/b__2, item:c__3
+    expect(nextRowKey(rows, 't1')).toBe('item:c__3');
+    expect(nextRowKey(rows, 't1/a__1')).toBe('t1/b__2');
+    expect(nextRowKey(rows, 'item:c__3')).toBe('item:c__3');
+    expect(nextRowKey(rows, 'gone')).toBe('t1');
+    expect(nextRowKey([], undefined)).toBeUndefined();
+  });
 });
 
 
@@ -137,6 +171,17 @@ describe('buildPlanPrompt', () => {
       '[t1] (1 item) One',
     );
     expect(buildPlanPrompt([upd('a__1')], []).prompt).not.toContain('READER INTERESTS');
+  });
+
+  it('adds reader grouping hints after the interests and a rule that they take priority', () => {
+    const p = buildPlanPrompt([upd('a__1')], [], { interests: 'AKS', groupingHints: ' Keep Copilot CLI\n releases together ' });
+    expect(p.prompt.startsWith('READER INTERESTS: AKS\n\nREADER GROUPING HINTS: Keep Copilot CLI releases together\n\nOPEN TOPICS:')).toBe(true);
+    expect(p.system).toContain('If READER GROUPING HINTS are given, follow them');
+    expect(DIGEST_SPLIT_SYSTEM_PROMPT).toContain('If READER GROUPING HINTS are given, follow them');
+    expect(buildPlanPrompt([upd('a__1')], [], { groupingHints: '   ' }).prompt).not.toContain('GROUPING HINTS:');
+    expect(buildSplitPrompt('X', [upd('a__1')], { groupingHints: 'Split by service' }).prompt).toContain(
+      'READER GROUPING HINTS: Split by service\n\nTOPIC: X',
+    );
   });
 
   it('flags same-source items whose titles differ only in numbers as a release series', () => {
@@ -200,6 +245,17 @@ describe('buildPlanPrompt', () => {
 
   it('truncates long excerpts', () => {
     expect(excerpt('a'.repeat(1000), 10)).toBe(`${'a'.repeat(9)}…`);
+  });
+
+  it('describes items by their saved summary when there is one', () => {
+    const gist = { summary: 'Gist sentence.', points: ['Point one.', 'Point two.'] };
+    expect(itemText(upd('a__1', { content: '<p>Raw preview</p>', gist }), 500)).toBe('Gist sentence. Point one. Point two.');
+    expect(itemText(upd('a__1', { content: '<p>Raw preview</p>' }), 500)).toBe('Raw preview');
+    expect(itemText(upd('a__1', { gist: { summary: ' ', points: [] }, content: 'Fallback' }), 500)).toBe('Fallback');
+    const p = buildPlanPrompt([upd('a__1', { content: 'Raw preview', gist })], []);
+    expect(p.prompt).toContain('Title a__1 — Gist sentence. Point one.');
+    expect(p.prompt).not.toContain('Raw preview');
+    expect(buildWritePrompt('T', [upd('a__1', { content: 'Raw preview', gist })]).prompt).toContain('  Gist sentence. Point one. Point two.');
   });
 });
 
@@ -435,6 +491,7 @@ describe('runDigest', () => {
     let n = 0;
     const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer, {
       interests: 'agents',
+      groupingHints: 'one topic per Copilot surface',
       newId: () => `new-${++n}`,
       now: () => new Date('2026-02-01T00:00:00Z'),
     });
@@ -444,6 +501,7 @@ describe('runDigest', () => {
     const plan = planRequests[0]!;
     expect(plan).toMatchObject({ effort: 'medium', timeoutMs: 480_000 });
     expect(plan.prompt).toContain('READER INTERESTS: agents');
+    expect(plan.prompt).toContain('READER GROUPING HINTS: one topic per Copilot surface');
     expect(plan.prompt).toContain('[t1] (1 item) Topic open-1\n  - Title a__1');
     // oldest pending first
     expect(plan.prompt.indexOf('Title b__2')).toBeLessThan(plan.prompt.indexOf('Title d__4'));
@@ -639,6 +697,22 @@ describe('runDigest', () => {
     const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer, { maxItems: 2 });
     expect(result.processed).toBe(2);
     expect(result.remaining).toBe(1);
+  });
+
+  it('also groups saved items that were read, but not other read items', async () => {
+    const { updateStore, topicStore } = makeStores([
+      upd('a__1'),
+      upd('b__2', { saved: true, status: 'read' }),
+      upd('c__3', { status: 'read' }),
+    ]);
+    const { summarizer, planRequests } = fakeSummarizer([]);
+    let n = 0;
+    const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer, { newId: () => `x${++n}` });
+    expect(updateStore.listUpdates).toHaveBeenCalledWith(expect.objectContaining({ status: 'unread' }));
+    expect(updateStore.listUpdates).toHaveBeenCalledWith(expect.objectContaining({ saved: true }));
+    expect(planRequests[0]!.prompt).toContain('Title b__2');
+    expect(planRequests[0]!.prompt).not.toContain('Title c__3');
+    expect(result.processed).toBe(2);
   });
 
   it('reset ungroups unread items and deletes their topics before regrouping', async () => {

@@ -15,9 +15,11 @@ interface Props {
   sourceColors?: Record<string, string>;
   onSwipeAction?(id: string, action: 'read' | 'unread' | 'save'): void;
   onRefresh?(): void;
+  /** Applied search, for the empty state. */
+  search?: string;
 }
 
-export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {}, sourceColors = {}, onSwipeAction, onRefresh }: Props) {
+export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {}, sourceColors = {}, onSwipeAction, onRefresh, search }: Props) {
   const selectedRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const [swipedId, setSwipedId] = useState<string | null>(null);
@@ -59,8 +61,14 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
   if (updates.length === 0) {
     return (
       <div className="updates-table empty">
-        <p>No updates found.</p>
-        <p>Run <kbd>fomo</kbd> on your computer and press <kbd>f</kbd> to pull the latest releases.</p>
+        {search ? (
+          <p>No updates in this view match “{search}”. Press <kbd>Esc</kbd> or ✕ to clear the search.</p>
+        ) : (
+          <>
+            <p>No updates found.</p>
+            <p>Run <kbd>fomo</kbd> on your computer and press <kbd>f</kbd> to pull the latest releases.</p>
+          </>
+        )}
       </div>
     );
   }

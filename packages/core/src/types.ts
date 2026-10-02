@@ -28,6 +28,16 @@ export interface Update {
   topicId?: string;
   /** One-sentence Copilot summary written when the update joins a topic. */
   summary?: string;
+  /** Copilot summary of the full post, written on request in the TUI (`g`) and kept. */
+  gist?: PostGist;
+}
+
+/** The gist of one post: what the feature or change is, plus its key facts. */
+export interface PostGist {
+  /** One sentence: what the feature or change is and why it matters. */
+  summary: string;
+  /** 3–5 short facts: what it does, who it's for, how to get it, limits or deadlines. */
+  points: string[];
 }
 
 // ─── Plugin contract ─────────────────────────────────────────────────────────
@@ -81,6 +91,8 @@ export interface ListOptions {
   offset?: number;
   /** Include the (potentially large) `content` field. Default: true. */
   includeContent?: boolean;
+  /** Only updates whose title, summary or content contain every word (case-insensitive). */
+  search?: string;
 }
 
 export interface ListResponse {
@@ -137,7 +149,7 @@ export interface Topic {
 
 export interface DigestEntry {
   topic: Topic;
-  /** Unread updates in this topic, newest first. */
+  /** Updates in this topic shown in the view (unread, or saved for the Saved view), newest first. */
   items: Update[];
   /** Newest `datePublished` among `items`. */
   latestDate: string;
@@ -147,9 +159,18 @@ export interface DigestEntry {
   synthetic: boolean;
 }
 
+export interface DigestQuery {
+  /** Only updates (or topics) whose text contains every word (case-insensitive). */
+  search?: string;
+  /** Group saved updates (read or unread) instead of unread ones. */
+  saved?: boolean;
+  /** Only updates from this source. */
+  source?: SourceId;
+}
+
 export interface DigestResponse {
   entries: DigestEntry[];
-  /** Unread updates not yet grouped into a topic (press f in the TUI). */
+  /** Updates in the view not yet grouped into a topic (press f in the TUI). */
   pending: number;
 }
 
@@ -183,7 +204,7 @@ export interface FomoService {
   setStatusMany(ids: string[], status: Status): Promise<void>;
   setSaved(id: string, saved: boolean): Promise<Update>;
   getStats(): Promise<StatsResponse>;
-  getDigest(): Promise<DigestResponse>;
+  getDigest(query?: DigestQuery): Promise<DigestResponse>;
   getSources(): Promise<SourceInfo[]>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;

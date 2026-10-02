@@ -10,11 +10,18 @@ interface Props {
   columns: number;
   position?: 'bottom' | 'right';
   sourceLabels?: Record<string, string>;
+  /** `saved` shows the topic's saved updates, marking the unread ones. */
+  mode?: 'digest' | 'saved';
 }
 
 /** Summary + highlights of a digest topic, followed by the updates it groups. */
-export function TopicPane({ entry, height, columns, position = 'bottom', sourceLabels = {} }: Props) {
+export function TopicPane({ entry, height, columns, position = 'bottom', sourceLabels = {}, mode = 'digest' }: Props) {
   const { topic, items } = entry;
+  const saved = mode === 'saved';
+  const unread = items.filter((u) => u.status === 'unread').length;
+  const count = saved
+    ? `${items.length} saved update${items.length === 1 ? '' : 's'}${unread ? ` (${unread} unread)` : ''}`
+    : `${items.length} update${items.length === 1 ? '' : 's'}`;
   const sources = entry.sources.map((s) => sourceLabels[s] ?? s).join(', ');
   const width = Math.max(columns - 6, 10);
 
@@ -39,7 +46,7 @@ export function TopicPane({ entry, height, columns, position = 'bottom', sourceL
           </Box>
         )}
         <Text color="#8b949e" wrap="truncate">
-          {`${items.length} update${items.length === 1 ? '' : 's'} · ${sources} · latest ${entry.latestDate.slice(0, 10)}`}
+          {`${count} · ${sources} · latest ${entry.latestDate.slice(0, 10)}`}
         </Text>
       </Box>
       <Box paddingX={2} flexShrink={0}>
@@ -59,11 +66,16 @@ export function TopicPane({ entry, height, columns, position = 'bottom', sourceL
       ))}
 
       <Box paddingX={2} flexShrink={0} marginTop={topic.summary || topic.highlights.length ? 1 : 0}>
-        <Text color="#8b949e" dimColor>{'↵ expand/collapse · x mark topic read · o open newest'}</Text>
+        <Text color="#8b949e" dimColor>
+          {saved ? '↵ expand/collapse · r/u mark topic read/unread · o open newest' : '↵ expand/collapse · x mark topic read · o open newest'}
+        </Text>
       </Box>
       {items.map((u) => (
         <Box key={u.id} flexDirection="column" paddingX={2} flexShrink={0}>
           <Box>
+            {saved && (
+              <Box flexShrink={0}><Text color="#58a6ff">{u.status === 'unread' ? '● ' : '  '}</Text></Box>
+            )}
             <Box flexShrink={0}><Text color="#8b949e">{`${u.datePublished.slice(0, 10)}  `}</Text></Box>
             <Text color="#c9d1d9" wrap="truncate">{u.title}</Text>
           </Box>

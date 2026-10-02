@@ -13,6 +13,8 @@ const SHARED_GROUPING_RULES = `- Never make vendor-wide or catch-all topics such
 - Deprecations, retirements and end-of-support notices (see LIKELY RETIREMENTS) go into one retirements topic per vendor (e.g. "Azure retirements", "GitHub deprecations"); never mix them with launches.
 - Items listed together under RELEASE SERIES belong in the same topic. Items with the same title are the same story: same topic.`;
 
+const HINTS_RULE = `- If READER GROUPING HINTS are given, follow them: they take priority over the other grouping rules, but every item still goes into exactly one topic.`;
+
 /**
  * Pass 1 — plan: sees every pending item at once (titles + short excerpts) and
  * assigns them to product-area topics with an importance rating.
@@ -28,6 +30,7 @@ ${SHARED_GROUPING_RULES}
 - A new product, a major launch or a revamp of a widely used developer tool gets its own topic so it is not buried.
 - If an item fits an OPEN topic, set "topic" to that id (e.g. "t2") and keep its title; otherwise set "topic" to null.
 - Every new item id (e.g. "i3") must appear in exactly one topic. Never invent ids.
+${HINTS_RULE}
 
 ${TITLE_RULE}
 
@@ -43,6 +46,7 @@ GROUPING
 ${SHARED_GROUPING_RULES}
 - If items belong to one of the OTHER TOPICS, put them in a topic with exactly that title instead of making a similar one.
 - Set "topic" to null. Every item id (e.g. "i3") must appear in exactly one topic. Never invent ids.
+${HINTS_RULE}
 
 ${TITLE_RULE}
 
@@ -131,8 +135,31 @@ export interface PlanPrompt extends ModelRequest {
 const EXCERPT_CHARS = 500;
 const PLAN_EXCERPT_CHARS = 140;
 const MAX_INTERESTS_CHARS = 500;
+const MAX_HINTS_CHARS = 1000;
 const OPEN_TOPIC_SAMPLES = 3;
 const MAX_WRITE_ITEMS = 30;
+
+/** Reader settings shared by the plan and split prompts. */
+export interface ReaderOptions {
+  /** Nudges importance by at most one level. */
+  interests?: string;
+  /** Free-text grouping instructions that take priority over the default grouping rules. */
+  groupingHints?: string;
+}
+
+function oneLine(text: string | undefined, max: number): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+/** READER INTERESTS / READER GROUPING HINTS lines (each followed by a blank line) when set. */
+function readerLines({ interests, groupingHints }: ReaderOptions): string[] {
+  const lines: string[] = [];
+  const i = oneLine(interests, MAX_INTERESTS_CHARS);
+  if (i) lines.push(`READER INTERESTS: ${i}`, '');
+  const h = oneLine(groupingHints, MAX_HINTS_CHARS);
+  if (h) lines.push(`READER GROUPING HINTS: ${h}`, '');
+  return lines;
+}
 
 export function excerpt(content: string, max = EXCERPT_CHARS): string {
   const text = content
@@ -148,6 +175,15 @@ export function excerpt(content: string, max = EXCERPT_CHARS): string {
     .replace(/\s+/g, ' ')
     .trim();
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * What the model reads about an item: its saved Copilot summary (gist) when there is one — written from the
+ * full page, so it says more in fewer words — otherwise the start of the feed preview.
+ */
+export function itemText(u: Update, max: number): string {
+  const gist = u.gist ? [u.gist.summary, ...u.gist.points].join(' ') : '';
+  return excerpt(gist.trim() || (u.content ?? ''), max);
 }
 
 /** Items whose titles differ only in numbers (versions, dates) are likely one release stream. */
@@ -170,7 +206,7 @@ function itemSection(items: Update[], aliases: Map<string, Update>): string[] {
   items.forEach((u, i) => {
     const alias = `i${i + 1}`;
     aliases.set(alias, u);
-    const text = excerpt(u.content ?? '', PLAN_EXCERPT_CHARS);
+    const text = itemText(u, PLAN_EXCERPT_CHARS);
     lines.push(`${itemLine(alias, u)}${text ? ` — ${text}` : ''}`);
     const key = seriesKey(u);
     series.set(key, [...(series.get(key) ?? []), alias]);
@@ -191,18 +227,15 @@ function itemSection(items: Update[], aliases: Map<string, Update>): string[] {
 
 export interface OpenTopic {
   topic: Topic;
-  /** Unread item titles already in the topic (newest first), used as scope samples. */
+  /** Unread or saved item titles already in the topic (newest first), used as scope samples. */
   itemTitles?: string[];
 }
 
 /** Pass 1 prompt. Short aliases (i1, t1) keep the model from echoing long ids. */
-export function buildPlanPrompt(items: Update[], open: OpenTopic[], options: { interests?: string } = {}): PlanPrompt {
+export function buildPlanPrompt(items: Update[], open: OpenTopic[], options: ReaderOptions = {}): PlanPrompt {
   const itemAliases = new Map<string, Update>();
   const topicAliases = new Map<string, Topic>();
-  const lines: string[] = [];
-
-  const interests = options.interests?.replace(/\s+/g, ' ').trim().slice(0, MAX_INTERESTS_CHARS);
-  if (interests) lines.push(`READER INTERESTS: ${interests}`, '');
+  const lines = readerLines(options);
 
   lines.push('OPEN TOPICS:');
   if (open.length === 0) lines.push('(none)');
@@ -234,12 +267,10 @@ export function buildPlanPrompt(items: Update[], open: OpenTopic[], options: { i
 export function buildSplitPrompt(
   title: string,
   items: Update[],
-  options: { interests?: string; otherTopics?: string[] } = {},
+  options: ReaderOptions & { otherTopics?: string[] } = {},
 ): PlanPrompt {
   const itemAliases = new Map<string, Update>();
-  const lines: string[] = [];
-  const interests = options.interests?.replace(/\s+/g, ' ').trim().slice(0, MAX_INTERESTS_CHARS);
-  if (interests) lines.push(`READER INTERESTS: ${interests}`, '');
+  const lines = readerLines(options);
   const others = options.otherTopics ?? [];
   if (others.length > 0) lines.push('OTHER TOPICS:', ...others.map((t) => `- ${t}`), '');
   lines.push(`TOPIC: ${title} (${items.length} items)`, '', ...itemSection(items, itemAliases));
@@ -276,7 +307,7 @@ export function buildWritePrompt(title: string, items: Update[], existing?: Topi
     const alias = `i${i + 1}`;
     aliases.set(alias, u);
     lines.push(itemLine(alias, u));
-    const text = excerpt(u.content ?? '', chars);
+    const text = itemText(u, chars);
     if (text) lines.push(`  ${text}`);
   });
   return {

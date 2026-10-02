@@ -3,8 +3,8 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult } from '@fomo/core';
-import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, removeAndAdvance, soloUpdate } from '@fomo/core';
-import { FomoDirectService } from '@fomo/core/service';
+import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, nextRowKey, patchDigest, removeAndAdvance, soloUpdate } from '@fomo/core';
+import { FomoDirectService, type PostGistResult } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, tildify, type LocalConfig } from '../config.js';
 import { buildSettingsRows, editStartValue, findRow, firstFocusable, moveFocus, parseConfigEdit, type SettingsRow } from './settings.js';
@@ -22,10 +22,15 @@ import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/SettingsPane.js';
 import { TodosView, type TodoFormField } from './components/TodosView.js';
 
-type FilterStatus = Status | 'all' | 'saved' | 'digest';
+type FilterStatus = Status | 'all' | 'saved';
+/** Views that can be listed as topics; pressing the view's key again toggles it. */
+type GroupableView = 'unread' | 'saved';
+type GroupedViews = Record<GroupableView, boolean>;
+const canGroup = (f: FilterStatus): f is GroupableView => f === 'unread' || f === 'saved';
+const isGrouped = (f: FilterStatus, g: GroupedViews) => canGroup(f) && g[f];
 
 export interface DigestRunOptions {
-  /** Forget all topics and regroup every unread update. */
+  /** Forget all topics and regroup every unread and saved update. */
   reset?: boolean;
 }
 
@@ -35,8 +40,10 @@ interface Props {
   config: LocalConfig;
   /** Save a local config change; returns an error message on failure. */
   onConfigChange(patch: Partial<LocalConfig>): string | undefined;
-  /** Group unread updates with Copilot (runs after an `f`/`F` fetch). */
+  /** Group unread and saved updates with Copilot (runs after an `f`/`F` fetch). */
   digest?(onProgress: (message: string) => void, options?: DigestRunOptions): Promise<DigestResult>;
+  /** Summarise a post with Copilot and save it (`g`); `force` regenerates a saved one (`G`). */
+  summarize?(id: string, force?: boolean): Promise<PostGistResult>;
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -52,13 +59,16 @@ function rowUpdate(row: DigestRow | undefined): Update | undefined {
 const STATUSBAR_H = 2; // content + border line
 const FILTERBAR_H = 1;
 
-export function App({ service, config, onConfigChange, digest }: Props) {
+export function App({ service, config, onConfigChange, digest, summarize }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
 
   const [updates, setUpdates] = useState<Update[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [filter, setFilter] = useState<FilterStatus>('digest');
+  const [filter, setFilter] = useState<FilterStatus>('unread');
+  /** Unread and Saved start grouped by topic. */
+  const [groupedViews, setGroupedViews] = useState<GroupedViews>({ unread: true, saved: true });
+  const groupedViewsRef = useRef(groupedViews);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
   /** Background job (fetch / Copilot digest / restore) shown with a spinner until it ends. */
@@ -85,6 +95,13 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   /** Only show updates from this source (list views). */
   const [sourceFilter, setSourceFilter] = useState<string | undefined>();
   const sourceFilterRef = useRef<string | undefined>();
+  /** Applied search; it narrows whichever view is shown. */
+  const [search, setSearch] = useState('');
+  const searchRef = useRef('');
+  /** Search prompt being typed (opened with /). */
+  const [searchDraft, setSearchDraft] = useState<string | undefined>();
+  /** Updates in the current list view, before the 200-row limit. */
+  const [listTotal, setListTotal] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
   const [helpContext, setHelpContext] = useState<HelpContext>('list');
 
@@ -94,6 +111,9 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   // Digest lists skip `content`; it is loaded on demand for the detail pane.
   const [contentCache, setContentCache] = useState<Record<string, string>>({});
+  /** Posts being summarised with Copilot (g / G). */
+  const [summarizing, setSummarizing] = useState<ReadonlySet<string>>(new Set());
+  const summarizingRef = useRef(new Set<string>());
   const digestRows = useMemo(() => flattenDigest(digestEntries, expanded), [digestEntries, expanded]);
 
   // ── Todos state ─────────────────────────────────────────────────────────────
@@ -121,7 +141,8 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   useEffect(() => { digestRowsRef.current    = digestRows;    }, [digestRows]);
   useEffect(() => { expandedRef.current      = expanded;      }, [expanded]);
 
-  const listLength = filter === 'digest' ? digestRows.length : updates.length;
+  const grouped = isGrouped(filter, groupedViews);
+  const listLength = grouped ? digestRows.length : updates.length;
   useEffect(() => {
     setSelectedIndex((i) => Math.min(i, Math.max(0, listLength - 1)));
   }, [listLength]);
@@ -143,27 +164,34 @@ export function App({ service, config, onConfigChange, digest }: Props) {
     messageTimer.current = setTimeout(() => setMessage(undefined), ms);
   }, []);
 
+  const loadSeq = useRef(0);
   const loadUpdates = useCallback(
     async (f: FilterStatus) => {
+      // Searches are slower full scans; drop responses superseded by a newer load.
+      const seq = ++loadSeq.current;
       setLoading(true);
       try {
-        if (f === 'digest') {
-          const resp = await service.getDigest();
+        const search = searchRef.current || undefined;
+        const source = sourceFilterRef.current;
+        if (isGrouped(f, groupedViewsRef.current)) {
+          const resp = await service.getDigest({ search, source, saved: f === 'saved' });
+          if (seq !== loadSeq.current) return;
           setDigestEntries(resp.entries);
           setDigestPending(resp.pending);
           return;
         }
-        const source = sourceFilterRef.current;
-        const opts = f === 'saved'
-          ? { saved: true, source, limit: 200 }
-          : { status: f as Status | 'all', source, limit: 200 };
-        const resp = await service.listUpdates(opts);
+        const resp = await service.listUpdates(f === 'saved'
+          ? { saved: true, source, search, limit: 200 }
+          : { status: f, source, search, limit: 200 });
+        if (seq !== loadSeq.current) return;
         setUpdates(resp.updates);
+        setListTotal(resp.total);
         setSelectedIndex((i) => Math.min(i, Math.max(0, resp.updates.length - 1)));
       } catch (err) {
+        if (seq !== loadSeq.current) return;
         showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
-        setLoading(false);
+        if (seq === loadSeq.current) setLoading(false);
       }
     },
     [service, showMessage],
@@ -207,7 +235,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
 
   // ── Async action handlers ───────────────────────────────────────────────────
   const currentUpdate = useCallback((): Update | undefined => {
-    if (filterRef.current === 'digest') return rowUpdate(digestRowsRef.current[selectedRef.current]);
+    if (isGrouped(filterRef.current, groupedViewsRef.current)) return rowUpdate(digestRowsRef.current[selectedRef.current]);
     return updatesRef.current[selectedRef.current];
   }, []);
 
@@ -284,9 +312,9 @@ export function App({ service, config, onConfigChange, digest }: Props) {
     }
   }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy]);
 
-  /** Forget all topics and regroup every unread update. */
+  /** Forget all topics and regroup every unread and saved update. */
   const doRegroup = useCallback(async () => {
-    if (!digest || !claimBusy('Copilot: regrouping all unread updates…')) return;
+    if (!digest || !claimBusy('Copilot: regrouping all unread and saved updates…')) return;
     setDigesting(true);
     try {
       const result = await digest((msg) => updatePhase(`Copilot: ${msg}`), { reset: true });
@@ -388,6 +416,16 @@ export function App({ service, config, onConfigChange, digest }: Props) {
     void refresh(f);
   }, [refresh]);
 
+  /** Search the current view (and any view switched to) for `query`; empty clears it. */
+  const applySearch = useCallback((query: string) => {
+    const q = query.trim();
+    searchRef.current = q;
+    setSearch(q);
+    setSelectedIndex(0);
+    setShowDetail(false);
+    void loadUpdates(filterRef.current);
+  }, [loadUpdates]);
+
   const doFetchContent = useCallback(async () => {
     const selected = currentUpdate();
     if (!selected) return;
@@ -406,6 +444,46 @@ export function App({ service, config, onConfigChange, digest }: Props) {
       setLoading(false);
     }
   }, [service, currentUpdate, showMessage]);
+
+  /** Change one update wherever it is shown (list and digest). */
+  const patchUpdate = useCallback((id: string, patch: Partial<Update>) => {
+    setUpdates((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
+    setDigestEntries((prev) => patchDigest(prev, new Set([id]), patch));
+  }, []);
+
+  /** Summarise the selected post with Copilot and save it; a saved summary is reused unless `force`. */
+  const doSummarize = useCallback(async (force: boolean) => {
+    const selected = currentUpdate();
+    if (!selected) {
+      showMessage(isGrouped(filterRef.current, groupedViewsRef.current) ? 'Expand the topic to summarise a single update' : 'Nothing selected');
+      return;
+    }
+    setShowDetail(true);
+    if (selected.gist && !force) { showMessage('Summary already saved · G regenerates it'); return; }
+    if (!summarize) { showMessage('Copilot is not available'); return; }
+    const { id } = selected;
+    if (summarizingRef.current.has(id)) { showMessage('⏳ Already summarising this post'); return; }
+    const track = (on: boolean) => {
+      if (on) summarizingRef.current.add(id); else summarizingRef.current.delete(id);
+      setSummarizing(new Set(summarizingRef.current));
+    };
+    track(true);
+    showMessage('Copilot: summarising post…', 120_000);
+    try {
+      const result = await summarize(id, force);
+      if (result.outcome === 'short') {
+        showMessage('Short post (under 1,000 characters) — nothing to summarise', 5000);
+        return;
+      }
+      patchUpdate(id, { gist: result.update.gist });
+      const from = result.from === 'page' ? ' (from the full page)' : result.from === 'preview' ? ' (from the preview)' : '';
+      showMessage(result.outcome === 'cached' ? 'Summary already saved · G regenerates it' : `✓ Summary saved${from}`, 4000);
+    } catch (err) {
+      showMessage(`⚠ Summary failed: ${errorText(err)}`, 10_000);
+    } finally {
+      track(false);
+    }
+  }, [currentUpdate, summarize, patchUpdate, showMessage]);
 
   // ── Digest actions ──────────────────────────────────────────────────────────
   /** Mark updates read, drop them from the digest and keep the cursor on the next remaining row. */
@@ -428,14 +506,44 @@ export function App({ service, config, onConfigChange, digest }: Props) {
 
   const doDigestToggleSaved = useCallback(async (update: Update) => {
     const saved = !update.saved;
-    setDigestEntries((prev) => prev.map((e) => (
-      e.items.some((u) => u.id === update.id)
-        ? { ...e, items: e.items.map((u) => (u.id === update.id ? { ...u, saved } : u)) }
-        : e
-    )));
+    setDigestEntries((prev) => patchDigest(prev, new Set([update.id]), { saved }));
     showMessage(saved ? '⭐ Saved' : 'Unsaved');
     try {
       await service.setSaved(update.id, saved);
+      void loadStats();
+    } catch (err) {
+      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await refresh();
+    }
+  }, [service, refresh, loadStats, showMessage]);
+
+  /** Saved view: change the read state of updates in place; with `advance`, move to the next row. */
+  const doSavedStatus = useCallback(async (ids: string[], status: Status, advance = false) => {
+    if (ids.length === 0) return;
+    if (advance) {
+      const key = nextRowKey(digestRowsRef.current, digestRowsRef.current[selectedRef.current]?.key);
+      setSelectedIndex(Math.max(0, digestRowsRef.current.findIndex((r) => r.key === key)));
+    }
+    setDigestEntries((prev) => patchDigest(prev, new Set(ids), { status }));
+    showMessage(`✓ ${ids.length > 1 ? `${ids.length} marked` : 'Marked'} ${status}${advance ? ' → next' : ''}`);
+    try {
+      await service.setStatusMany(ids, status);
+      void loadStats();
+    } catch (err) {
+      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      await refresh();
+    }
+  }, [service, refresh, loadStats, showMessage]);
+
+  /** Saved view: unsave an update, drop it from the list and keep the cursor on the next remaining row. */
+  const doUnsave = useCallback(async (id: string) => {
+    const selectedKey = digestRowsRef.current[selectedRef.current]?.key;
+    const next = removeAndAdvance(digestEntriesRef.current, expandedRef.current, selectedKey, new Set([id]));
+    setDigestEntries(next.entries);
+    setSelectedIndex(Math.max(0, next.rows.findIndex((r) => r.key === next.nextKey)));
+    showMessage('Unsaved');
+    try {
+      await service.setSaved(id, false);
       void loadStats();
     } catch (err) {
       showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -540,7 +648,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   }, [service, refresh, loadStats, showMessage]);
 
   // Lazily load content for the update shown in the digest detail pane
-  const digestSelectedUpdate = filter === 'digest' ? rowUpdate(digestRows[selectedIndex]) : undefined;
+  const digestSelectedUpdate = grouped ? rowUpdate(digestRows[selectedIndex]) : undefined;
   useEffect(() => {
     const u = digestSelectedUpdate;
     if (!showDetail || !u || u.content || u.id in contentCache) return;
@@ -609,7 +717,22 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((input, key) => {
     // ── Quit from any screen (but not while typing) ──
-    if (input === 'q' && !editingKey && !todosAddMode) { exit(); return; }
+    if (input === 'q' && !editingKey && !todosAddMode && searchDraft === undefined) { exit(); return; }
+
+    // ── Search prompt (opened with /) ──
+    if (searchDraft !== undefined) {
+      if (key.escape) { setSearchDraft(undefined); return; }
+      if (key.return) { setSearchDraft(undefined); applySearch(searchDraft); return; }
+      if (key.backspace || key.delete) { setSearchDraft((d) => (d ?? '').slice(0, -1)); return; }
+      if (key.ctrl && input === 'u') { setSearchDraft(''); return; }
+      if (!input || key.ctrl || key.meta) return;
+      // Pasted (or fast-typed) text arrives in one chunk; a line break in it submits.
+      const brk = input.search(/[\r\n]/);
+      if (brk === -1) { setSearchDraft((d) => (d ?? '') + input); return; }
+      setSearchDraft(undefined);
+      applySearch(searchDraft + input.slice(0, brk));
+      return;
+    }
 
     // ── Help overlay — Esc or h to close, consume all other input ──
     if (showHelp) {
@@ -796,7 +919,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
           void doFetch([sourceId]);
         } else if (input === 'v') {
           setShowSettings(false);
-          applySourceFilter(sourceId, filterRef.current === 'digest' ? 'all' : filterRef.current);
+          applySourceFilter(sourceId);
         }
         return;
       }
@@ -839,14 +962,27 @@ export function App({ service, config, onConfigChange, digest }: Props) {
 
     // Help
     if (input === 'h') {
-      setHelpContext(filter === 'digest' ? 'digest' : showDetail ? 'detail' : 'list');
+      setHelpContext(grouped ? (filter === 'saved' ? 'saved' : 'digest') : showDetail ? 'detail' : 'list');
       setShowHelp(true);
+      return;
+    }
+
+    // Search the current view (starts from the applied query)
+    if (input === '/') {
+      setSearchDraft(search);
       return;
     }
 
     // Detail-specific: Esc or q to close
     if (showDetail && (key.escape || key.backspace || key.delete)) {
       setShowDetail(false);
+      return;
+    }
+
+    // Esc clears the search, then a source filter
+    if (key.escape && search) {
+      applySearch('');
+      showMessage('Search cleared');
       return;
     }
 
@@ -877,11 +1013,16 @@ export function App({ service, config, onConfigChange, digest }: Props) {
     if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.min(listLength - 1, i + 1));    return; }
 
     // Filters
-    const filterMap: Record<string, FilterStatus> = { '0': 'digest', '1': 'all', '2': 'unread', '3': 'read', '4': 'saved' };
+    const filterMap: Record<string, FilterStatus> = { '1': 'all', '2': 'unread', '3': 'read', '4': 'saved' };
     if (input in filterMap) {
       const f = filterMap[input]!;
-      // The digest covers every source, so it drops a source filter
-      if (f === 'digest' && sourceFilterRef.current) { applySourceFilter(undefined, f); return; }
+      // Pressing the current view's key again switches it between topics and a plain list
+      if (f === filter && canGroup(f)) {
+        const next = { ...groupedViewsRef.current, [f]: !groupedViewsRef.current[f] };
+        groupedViewsRef.current = next;
+        setGroupedViews(next);
+        showMessage(`${f === 'unread' ? 'Unread' : 'Saved'}: ${next[f] ? 'grouped by topic' : 'list'}`);
+      }
       setFilter(f);
       setSelectedIndex(0);
       void refresh(f);
@@ -898,14 +1039,16 @@ export function App({ service, config, onConfigChange, digest }: Props) {
     }
 
     if (input === 'f' || input === 'F') { void doFetch(); return; }
+    if (input === 'g' || input === 'G') { void doSummarize(input === 'G'); return; }
     if (input === 'p' && showDetail) {
       const sel = currentUpdate();
       if (sel && !sel.content && !contentCache[sel.id]) void doFetchContent();
       return;
     }
 
-    // ── Digest view ──
-    if (filter === 'digest') {
+    // ── Digest and Saved views (grouped by topic) ──
+    if (grouped) {
+      const savedView = filter === 'saved';
       const row = digestRows[selectedIndex];
       if (!row) return;
       const entry = row.entry;
@@ -934,8 +1077,18 @@ export function App({ service, config, onConfigChange, digest }: Props) {
         if (isGroup) setTopicExpanded(entry.topic.id, false);
         return;
       }
+      const rowIds = row.kind === 'item' ? [row.update.id] : entry.items.map((u) => u.id);
+      if (savedView) {
+        if (input === 'r' || input === 'u') { void doSavedStatus(rowIds, input === 'r' ? 'read' : 'unread'); return; }
+        if (input === 'x') { void doSavedStatus(rowIds, 'read', true); return; }
+        if (input === 's') {
+          if (update) void doUnsave(update.id);
+          else showMessage('Expand the topic to unsave a single update');
+          return;
+        }
+      }
       if (input === 'x' || input === 'r') {
-        void doDigestRead(row.kind === 'item' ? [row.update.id] : entry.items.map((u) => u.id));
+        void doDigestRead(rowIds);
         return;
       }
       if (input === 's') {
@@ -961,7 +1114,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
         if (next >= 0) setSelectedIndex(next);
         return;
       }
-      if (input === 'u') { showMessage('Digest only shows unread updates'); return; }
+      if (input === 'u') { showMessage('Everything here is unread — press 2 for a list'); return; }
       return;
     }
 
@@ -1003,13 +1156,25 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   const statusBar = (
     <StatusBar stats={stats} loading={loading} message={message} activity={activity} columns={columns} />
   );
+  const searchMatches = grouped
+    ? digestEntries.reduce((n, e) => n + e.items.length, 0)
+    : listTotal;
   const filterBar = (
-    <FilterBar active={filter} columns={columns} sourceLabel={sourceFilter ? sourceName(sourceFilter) : undefined} />
+    <FilterBar
+      active={filter}
+      grouped={grouped}
+      columns={columns}
+      sourceLabel={sourceFilter ? sourceName(sourceFilter) : undefined}
+      search={!showTodos && search ? search : undefined}
+      matches={!showTodos && search ? searchMatches : undefined}
+      searchDraft={searchDraft}
+    />
   );
 
   const renderTable = (height: number, width: number) =>
-    filter === 'digest' ? (
+    grouped ? (
       <DigestTable
+        mode={filter === 'saved' ? 'saved' : 'digest'}
         rows={digestRows}
         expanded={expanded}
         pending={digestPending}
@@ -1019,10 +1184,12 @@ export function App({ service, config, onConfigChange, digest }: Props) {
         columns={width}
         sourceLabels={appSettings.sourceLabels}
         sourceColors={appSettings.sourceColors}
+        search={search || undefined}
       />
     ) : (
       <UpdatesTable
         updates={updates}
+        search={search || undefined}
         selectedIndex={selectedIndex}
         height={height}
         columns={width}
@@ -1032,19 +1199,43 @@ export function App({ service, config, onConfigChange, digest }: Props) {
     );
 
   const renderDetail = (height: number, width: number, position: 'bottom' | 'right') => {
-    if (filter === 'digest') {
+    if (grouped) {
       const row = digestRows[selectedIndex];
       if (!row) return null;
       if (digestSelectedUpdate) {
         const content = digestSelectedUpdate.content || contentCache[digestSelectedUpdate.id] || '';
         const loading = !digestSelectedUpdate.content && !(digestSelectedUpdate.id in contentCache);
-        return <DetailPane update={{ ...digestSelectedUpdate, content }} loading={loading} height={height} columns={width} position={position} />;
+        return (
+          <DetailPane
+            update={{ ...digestSelectedUpdate, content }}
+            loading={loading}
+            summarizing={summarizing.has(digestSelectedUpdate.id)}
+            height={height}
+            columns={width}
+            position={position}
+          />
+        );
       }
       return (
-        <TopicPane entry={row.entry} height={height} columns={width} position={position} sourceLabels={appSettings.sourceLabels} />
+        <TopicPane
+          entry={row.entry}
+          mode={filter === 'saved' ? 'saved' : 'digest'}
+          height={height}
+          columns={width}
+          position={position}
+          sourceLabels={appSettings.sourceLabels}
+        />
       );
     }
-    return selectedUpdate ? <DetailPane update={selectedUpdate} height={height} columns={width} position={position} /> : null;
+    return selectedUpdate ? (
+      <DetailPane
+        update={selectedUpdate}
+        summarizing={summarizing.has(selectedUpdate.id)}
+        height={height}
+        columns={width}
+        position={position}
+      />
+    ) : null;
   };
 
   // Help overlay — replaces main content area

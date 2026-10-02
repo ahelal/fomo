@@ -12,6 +12,7 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
 
 - [Architecture](#architecture)
 - [Copilot Digest](#copilot-digest)
+  - [Post Summaries](#post-summaries)
 - [Installation](#installation)
   - [Azure Deployment](#azure-deployment)
   - [TUI Setup](#tui-setup)
@@ -69,8 +70,8 @@ packages/
 
 ## Copilot Digest
 
-Instead of reading 200 separate updates, the **Digest** view (the default, key `0`) shows one line per product area,
-usually 20–30 topics:
+Instead of reading 200 separate updates, the **Unread** view (the default, key `2`) is grouped by topic: one line per product area,
+usually 20–30 topics. Press `2` again to switch to a plain list of unread updates, and once more to go back to topics:
 
 ```
 ▸ ▲ Copilot CLI releases                          6   github, github-blog   2h ago
@@ -82,6 +83,10 @@ usually 20–30 topics:
 Open a topic to see a one-sentence summary and up to six highlights (most important first). Each update in the topic also gets its own one-line summary, so you can decide which ones to open.
 A topic with only one update doesn't expand: its row shows that update's title and summary directly, and `Enter` opens the update.
 Mark the whole topic read with `x`, which makes skipping a low-value area a single key press.
+
+The **Saved** view (key `4`) is grouped the same way (press `4` again for a plain list), so saved posts sit together by product area. Reading a saved post
+keeps it there: `r` / `u` mark a topic or update read / unread (a blue `●` marks unread ones), `x` marks it read and
+moves on, and `s` unsaves an update, which removes it from the view.
 
 **Grouping.** Each topic is one **product or feature area**, such as "Copilot code review", "GitHub Actions", "VS Code releases", "Azure SRE Agent" or "Anthropic news":
 
@@ -106,18 +111,33 @@ To steer the rating toward what you care about, add an optional interests note (
 `Copilot CLI and agents, VS Code; not SAP or billing`. It moves a topic up or down by at most one level and never changes the grouping.
 Save an empty value to clear it.
 
+To steer the **grouping** itself, add **Grouping hints** (`c` → **Grouping hints**, or `FOMO_GROUPING_HINTS`), for example
+`one topic per Copilot surface (CLI, VS Code, code review); keep all Azure AI Foundry news together`.
+Hints take priority over the built-in grouping rules, but every update still lands in exactly one topic. They apply to new runs; use **Regroup all topics** to apply them to existing topics.
+
 How it works:
 
 - `f` in the TUI fetches the sources and then runs the digest in the background; new updates show up ungrouped right away and the status bar shows Copilot's progress. Turn **Group after fetch** off in the config screen to fetch only.
-- Only **unread updates that don't have a topic yet** are sent to Copilot, in two passes:
-  1. **Plan:** one call sees every pending update (title and a short excerpt) plus the currently open topics. It assigns each update to an existing or new topic and rates it. Updates the model skips get one more call; oversized new topics get a split call.
+- Only **unread or saved updates that don't have a topic yet** are sent to Copilot (saved ones even after you've read them, so the Saved view is grouped too), in two passes:
+  1. **Plan:** one call sees every pending update (title and a short excerpt, or its [post summary](#post-summaries) when it has one) plus the currently open topics. It assigns each update to an existing or new topic and rates it. Updates the model skips get one more call; oversized new topics get a split call.
   2. **Write:** one small call per touched topic writes the summary, the highlights and a one-sentence summary of each new update. These run 6 at a time with low reasoning effort, and a failed call is retried once.
 - Topics are stored in the `topics` table, and each update points to its topic (`topicId`), so the web app and TUI only read.
-- Updates that haven't been digested yet still appear in the digest as single-item entries.
+- Updates that haven't been digested yet still appear in the grouped Unread and Saved views as single-item entries.
 - About 220 updates take roughly 2 minutes. **Max items per run** (default 300) caps a run; the rest are grouped next time.
 - The default model is `gpt-5-mini`. Change it with **Copilot model** in the config screen or `FOMO_COPILOT_MODEL`.
-- Existing topics keep their grouping and rating. **Regroup all topics** in the config screen regroups and re-rates all unread updates (read and saved status is untouched). This also fills in per-update summaries for updates digested before they existed.
+- Existing topics keep their grouping and rating. **Regroup all topics** in the config screen regroups and re-rates all unread and saved updates (read and saved status is untouched). This also fills in per-update summaries for updates digested before they existed.
 - Authentication uses your logged-in Copilot CLI user, or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`.
+
+### Post Summaries
+
+Press `g` on an update in the TUI to have Copilot summarise it: one sentence with the gist, then 3–5 short points (what it does, who it's for, how to get or enable it, limits or deadlines).
+
+- FOMO fetches the linked page and summarises whichever is longer: the page text or the stored preview. The page is only used if it mentions the post's title, so sign-in walls and pages that only render with JavaScript fall back to the preview.
+- Azure Updates pages render with JavaScript and the feed cuts their descriptions to about 250 characters, so their full text comes from the Azure release communications API instead (with status and preview / GA dates).
+- Posts with less than 1,000 characters of text aren't summarised, because a summary wouldn't be any shorter.
+- The summary is saved on the update, so pressing `g` again shows it without calling Copilot. `G` regenerates it.
+- Summaries appear at the top of the detail pane in the TUI and the web app, and search matches them too. The web app only shows saved summaries; it can't create them.
+- When Copilot groups a post or writes its topic, it reads the post's summary instead of the start of the feed preview. Summarise posts before they're grouped (or before **Regroup all topics**) to have it take effect.
 
 ---
 
@@ -206,7 +226,7 @@ Earlier versions ran a Hono server and an hourly scraper job on Azure Container 
 
 1. Run `bash deploy.sh fomo swedencentral --cleanup-legacy`. This deploys the static site and deletes `fomo-app`, `fomo-scraper`, `fomo-env`, `fomo-env-logs` and the Container Registry.
 2. Run `fomo`, press `c`, set **Web app URL** to the printed URL, then choose **Link a device**.
-3. Choose **Regroup all topics** once to group your existing unread updates.
+3. Choose **Regroup all topics** once to group your existing unread and saved updates.
 4. Remove the old secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_USERS`) from GitHub and your `.env`, and delete the Google OAuth client.
 
 ---
@@ -217,54 +237,61 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 
 | Key             | Action                                    |
 |-----------------|-------------------------------------------|
-| `0`             | Digest: unread updates grouped by topic   |
-| `1` `2` `3` `4` | Filter: All / Unread / Read / Saved       |
+| `1` `2` `3` `4` | All / Unread / Read / Saved               |
+| `2` / `4` again | Switch Unread / Saved between topics and a list (or click the active tab) |
 | `5` / `t`       | Todos                                     |
+| `/`             | Search titles & content in the current view (`Enter` searches, `Esc` clears) |
 | `j` / `↓`       | Next row                                  |
 | `k` / `↑`       | Previous row                              |
-| `Enter`         | Digest: expand topic · Lists: toggle detail |
-| `→` / `l`, `←`  | Digest: expand / collapse topic           |
-| `x`             | Mark read (the whole topic in the digest) & next |
-| `r` / `u`       | Mark read / unread                        |
+| `Enter`         | Topics: expand topic · Lists: toggle detail |
+| `→` / `l`, `←`  | Topics: expand / collapse topic           |
+| `x`             | Mark read (the whole topic when grouped) & next |
+| `r` / `u`       | Mark read / unread (a whole topic in grouped Saved) |
 | `n`             | Next topic / next unread                  |
-| `s`             | Save / unsave                             |
+| `s`             | Save / unsave (unsave in the Saved view)  |
 | `o`             | Open URL in a new tab                     |
 | `.`             | Toggle preview position (right / bottom)  |
 | `c`             | Config                                    |
 | `h`             | Help (also shows the version)             |
 
 Fetching isn't done in the browser. Run `fomo` on your computer and press `f`, then pull to refresh.
+Post summaries made in the TUI (`g`) show at the top of the detail pane.
+
+**Search** only looks inside the view you're in: searching under Unread only finds unread updates (or unread topics when grouped), and under Saved only saved updates. Every word must appear in the title, summary, [post summary](#post-summaries) or content (case-insensitive). The query stays applied when you switch views until you clear it with `Esc` or ✕. On a phone, tap the search box in the filter bar.
 
 ---
 
 ## Using the TUI
 
-Run `fomo`. It opens on the **Digest**. There are no subcommands: `fomo --help` and `fomo --version` are the only flags.
+Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: `fomo --help` and `fomo --version` are the only flags.
 
 ### Keys
 
 | Key             | Action                                    |
 |-----------------|-------------------------------------------|
-| `0`             | Digest: unread grouped by topic           |
-| `1`–`4`         | Filter: All / Unread / Read / Saved       |
+| `1`–`4`         | All / Unread / Read / Saved               |
+| `2` / `4` again | Switch Unread / Saved between topics and a list |
 | `j`/`↓`, `k`/`↑`| Move                                      |
 | `Enter`         | Expand topic and open it / toggle detail  |
 | `→`/`l`, `←`    | Expand / collapse topic                   |
-| `x` / `r`       | Mark topic (or update) read & next        |
-| `u`             | Mark unread (lists)                       |
+| `x` / `r`       | Mark topic (or update) read & next (grouped Saved: `r` marks read in place) |
+| `u`             | Mark unread (lists, and topics or updates in grouped Saved) |
 | `n`             | Next topic / next unread                  |
-| `s`             | Save / unsave                             |
+| `s`             | Save / unsave (unsave in Saved)           |
 | `o`             | Open in browser (newest update of a topic)|
 | `p`             | Fetch full content (detail view)          |
+| `g` / `G`       | [Summarise the update with Copilot](#post-summaries) (saved) / regenerate |
 | `f` / `F`       | Fetch latest updates + Copilot digest     |
 | `c`             | Config: sources, link a device, backup / restore, local settings |
 | `t`             | Todos (`a` add, `Enter` cycle status, `d` delete) |
-| `Esc`           | Clear the source filter                   |
+| `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |
+| `Esc`           | Clear the search, then the source filter  |
 | `.`             | Show preview / toggle its position        |
 | `h`             | Help (also shows the version)             |
 | `q`             | Quit                                      |
 
 The status bar shows counts by status; the config screen shows counts per source.
+Search (`/`) works like the web app: it's scoped to the current view, matches every word against the title, summary and content, and shows the query and match count in the filter bar until `Esc` clears it.
 While a fetch, Copilot digest or restore runs, the status bar shows a spinner, the current step and the elapsed time.
 Fetch errors and Copilot runtime logs are written to `~/.fomo/fomo.log` instead of the screen.
 
@@ -275,11 +302,11 @@ Press `c`. The bottom line shows the keys for the selected row.
 | Section | Row | Keys |
 |---------|-----|------|
 | **Actions** | Link a device | `Enter`: magic link + QR code for the web app (`o` open, `y` copy) |
-| | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread update |
+| | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread and saved update |
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
 | **Sources** (shared with the web app) | One row per source, with its item count and last fetch result | `Enter` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
-| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Interests, Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Group after fetch). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. |
+| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Interests, Grouping hints, Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Group after fetch). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. |
 
 ### Backup & Restore
 
@@ -396,6 +423,7 @@ All are optional. The TUI config screen (`c` → **This computer**) stores the s
 | `FOMO_WEB_URL`                    | Web app URL for **Link a device** (overrides config)         |
 | `FOMO_COPILOT_MODEL`              | Copilot model for the digest (overrides config)              |
 | `FOMO_INTERESTS`                  | Interests note for digest importance (overrides config)      |
+| `FOMO_GROUPING_HINTS`             | Grouping hints for the digest (overrides config)             |
 | `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` | Token for the Copilot SDK (default: logged-in Copilot CLI user) |
 
 ---
@@ -422,7 +450,7 @@ Fetching isn't scheduled in CI. Run `fomo` and press `f` whenever you want fresh
 
 | Table      | PartitionKey                       | RowKey                       | Contents                              |
 |------------|------------------------------------|------------------------------|---------------------------------------|
-| `updates`  | Source ID (e.g. `azure`, `github`) | `sha256(url).slice(0, 32)`   | Updates, status, saved, `topicId`, Copilot `summary` |
+| `updates`  | Source ID (e.g. `azure`, `github`) | `sha256(url).slice(0, 32)`   | Updates, status, saved, `topicId`, Copilot `summary` and `gist` (post summary, JSON) |
 | `topics`   | `topic`                            | Topic id                     | Copilot title, summary, highlights    |
 | `settings` | —                                  | —                            | Shared UI/source settings             |
 | `todos`    | —                                  | —                            | Personal todos                        |

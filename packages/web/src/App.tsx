@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   FomoStorageService,
   flattenDigest,
+  nextRowKey,
   removeAndAdvance,
   soloUpdate,
   type Update,
@@ -18,7 +19,7 @@ import {
   clearConnection,
   daysUntilExpiry,
 } from './store/connection.js';
-import { useFomo, type FilterStatus } from './hooks/useFomo.js';
+import { useFomo, canGroup, isGroupedView, type FilterStatus, type GroupableView } from './hooks/useFomo.js';
 import { StatusBar } from './components/StatusBar.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
 import { DigestList } from './components/DigestList.js';
@@ -28,9 +29,9 @@ import { SettingsPanel } from './components/SettingsPanel.js';
 import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { TodosPane } from './components/TodosPane.js';
 import { ConnectScreen } from './components/ConnectScreen.js';
+import { SearchBox } from './components/SearchBox.js';
 
 const FILTERS: { label: string; value: FilterStatus }[] = [
-  { label: '0 Digest', value: 'digest' },
   { label: '1 All', value: 'all' },
   { label: '2 Unread', value: 'unread' },
   { label: '3 Read', value: 'read' },
@@ -39,7 +40,7 @@ const FILTERS: { label: string; value: FilterStatus }[] = [
 ];
 
 const FILTER_KEYS: Record<string, FilterStatus> = {
-  '0': 'digest', '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'todos', t: 'todos',
+  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'todos', t: 'todos',
 };
 
 /** The update a digest row points at (items and single-update topics), if any. */
@@ -47,6 +48,15 @@ function rowUpdate(row: DigestRow | undefined): Update | undefined {
   if (!row) return undefined;
   if (row.kind === 'item') return row.update;
   return soloUpdate(row.entry);
+}
+
+/** The updates a row stands for: one for an item, all of them for a topic. */
+function rowItems(row: DigestRow): Update[] {
+  return row.kind === 'item' ? [row.update] : row.entry.items;
+}
+
+function rowIds(row: DigestRow): string[] {
+  return rowItems(row).map((u) => u.id);
 }
 
 function openUrl(url: string) {
@@ -115,15 +125,19 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const [sources, setSources] = useState<SourceInfo[]>([]);
 
   const previewPosition = fomo.settings.previewPosition;
-  const isDigest = fomo.filter === 'digest';
+  /** Unread and Saved list topics unless switched to a plain list. */
+  const isGrouped = isGroupedView(fomo.filter, fomo.grouped);
+  const isSaved = fomo.filter === 'saved';
+  const viewHelp: HelpContext = isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
 
   const digestRows = useMemo(() => flattenDigest(fomo.digest, expanded), [fomo.digest, expanded]);
   const digestRow = digestKey ? digestRows.find((r) => r.key === digestKey) : undefined;
   const digestTopic = digestRow?.kind === 'topic' && digestRow.entry.items.length > 1 ? digestRow.entry : undefined;
-  const detailUpdate = isDigest ? rowUpdate(digestRow) : fomo.filter === 'todos' ? undefined : selected;
-  const hasSelection = isDigest ? !!digestRow : !!selected;
+  const detailUpdate = isGrouped ? rowUpdate(digestRow) : fomo.filter === 'todos' ? undefined : selected;
+  const hasSelection = isGrouped ? !!digestRow : !!selected;
 
   const swipeBackRef = useRef({ startX: 0, startY: 0 });
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     service.getSources().then(setSources).catch(() => { /* ignore */ });
@@ -146,9 +160,18 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     setDigestKey(undefined);
   }, []);
 
+  /** Selecting the current Unread or Saved view again switches it between topics and a plain list. */
   const setFilter = useCallback((f: FilterStatus) => {
     clearSelection();
-    fomo.setFilter(f);
+    if (f === fomo.filter && canGroup(f)) fomo.toggleGrouped();
+    else fomo.setFilter(f);
+  }, [fomo, clearSelection]);
+
+  /** Search the current view (the query stays applied across view switches until cleared). */
+  const setSearch = useCallback((q: string) => {
+    if (q.trim() === fomo.search) return;
+    clearSelection();
+    fomo.setSearch(q);
   }, [fomo, clearSelection]);
 
   // ── Digest actions ──
@@ -163,15 +186,37 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     });
   }, []);
 
-  /** Mark a digest row read (a topic marks all its updates) and advance the selection if it was selected. */
+  /**
+   * Mark a row read (a topic marks all its updates). The digest drops it and advances the selection if it was
+   * selected; the Saved view keeps it in place.
+   */
   const digestMarkRead = useCallback((row: DigestRow) => {
-    const ids = row.kind === 'item' ? [row.update.id] : row.entry.items.map((u) => u.id);
+    const ids = rowIds(row);
+    if (isSaved) { void fomo.setStatusMany(ids, 'read'); return; }
     const next = removeAndAdvance(fomo.digest, expanded, row.key, new Set(ids));
     if (digestKey === row.key || (row.kind === 'topic' && digestKey?.startsWith(`${row.key}/`))) {
       setDigestKey(next.nextKey);
     }
     void fomo.markRead(ids);
+  }, [fomo, isSaved, expanded, digestKey]);
+
+  /** Saved view: mark a row read and select the next one. */
+  const savedReadAndNext = useCallback((row: DigestRow) => {
+    setDigestKey(nextRowKey(digestRows, row.key));
+    void fomo.setStatusMany(rowIds(row), 'read');
+  }, [fomo, digestRows]);
+
+  /** Saved view: unsave the selected update, which leaves the list; select the next remaining row. */
+  const savedUnsave = useCallback((update: Update) => {
+    if (digestKey) setDigestKey(removeAndAdvance(fomo.digest, expanded, digestKey, new Set([update.id])).nextKey);
+    void fomo.setSaved(update.id, false);
   }, [fomo, expanded, digestKey]);
+
+  /** Save or unsave from a grouped view (unsaving removes the update from the Saved view). */
+  const groupedToggleSaved = useCallback((update: Update) => {
+    if (isSaved && update.saved) savedUnsave(update);
+    else void fomo.setSaved(update.id, !update.saved);
+  }, [fomo, isSaved, savedUnsave]);
 
   const digestNextTopic = useCallback(() => {
     const idx = digestKey ? digestRows.findIndex((r) => r.key === digestKey) : -1;
@@ -186,12 +231,12 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   /** Mobile back: from an update inside a topic return to the topic, otherwise close. */
   const goBack = useCallback(() => {
-    if (isDigest && digestRow?.kind === 'item') {
+    if (isGrouped && digestRow?.kind === 'item') {
       setDigestKey(digestRow.entry.topic.id);
       return;
     }
     clearSelection();
-  }, [isDigest, digestRow, clearSelection]);
+  }, [isGrouped, digestRow, clearSelection]);
 
   // ── List actions ──
 
@@ -304,8 +349,19 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         return;
       }
 
+      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && fomo.filter !== 'todos') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      if (e.key === 'Escape' && fomo.search && fomo.filter !== 'todos') {
+        setSearch('');
+        return;
+      }
+
       if (e.key === 'h') {
-        setHelpContext(isDigest ? 'digest' : selected ? 'detail' : 'list');
+        setHelpContext(viewHelp);
         setShowHelp(true);
         return;
       }
@@ -319,7 +375,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
       if (fomo.filter === 'todos') return;
 
-      if (isDigest) {
+      if (isGrouped) {
         const idx = digestKey ? digestRows.findIndex((r) => r.key === digestKey) : -1;
         const row = idx >= 0 ? digestRows[idx] : undefined;
         if (e.key === 'j' || e.key === 'ArrowDown') {
@@ -351,9 +407,16 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           if (row.entry.items.length > 1) setTopicExpanded(row.entry.topic.id, false);
           return;
         }
-        if (e.key === 'x' || e.key === 'r') { digestMarkRead(row); return; }
         const update = rowUpdate(row);
-        if (e.key === 's' && update) { void fomo.setSaved(update.id, !update.saved); return; }
+        if (isSaved) {
+          if (e.key === 'r') { digestMarkRead(row); return; }
+          if (e.key === 'u') { void fomo.setStatusMany(rowIds(row), 'unread'); return; }
+          if (e.key === 'x') { savedReadAndNext(row); return; }
+        } else if (e.key === 'x' || e.key === 'r') {
+          digestMarkRead(row);
+          return;
+        }
+        if (e.key === 's' && update) { groupedToggleSaved(update); return; }
         if (e.key === 'o') {
           const target = update ?? row.entry.items[0];
           if (target) openUrl(target.url);
@@ -394,9 +457,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    fomo, selected, isDigest, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp, previewPosition,
-    setFilter, clearSelection, setTopicExpanded, digestMarkRead, digestNextTopic, handleNextUnread, handleReadAndNext,
-    handleSetStatus, handleToggleSaved,
+    fomo, selected, isGrouped, isSaved, viewHelp, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
+    previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, savedReadAndNext, groupedToggleSaved,
+    digestNextTopic, handleNextUnread, handleReadAndNext, handleSetStatus, handleToggleSaved,
   ]);
 
   // ── Settings callbacks ──
@@ -439,17 +502,22 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   const showPreview = hasSelection && fomo.filter !== 'todos' && previewPosition !== 'off';
   const mainClass = `main main--preview-${showPreview ? previewPosition : 'none'}`;
+  const searchMatches = !fomo.search || fomo.loading
+    ? undefined
+    : isGrouped ? fomo.digest.reduce((n, e) => n + e.items.length, 0) : fomo.total;
 
   function renderDetail() {
     if (!showPreview) return null;
-    if (isDigest && digestRow) {
+    if (isGrouped && digestRow) {
       if (digestTopic) {
         return (
           <TopicPane
             entry={digestTopic}
+            mode={isSaved ? 'saved' : 'digest'}
             sourceLabels={fomo.settings.sourceLabels}
             onOpenItem={(u) => openTopicItem(digestTopic.topic.id, u)}
             onMarkRead={() => digestMarkRead(digestRow)}
+            onMarkUnread={isSaved ? () => void fomo.setStatusMany(rowIds(digestRow), 'unread') : undefined}
             onClose={clearSelection}
           />
         );
@@ -461,8 +529,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           update={withContent(update)}
           contentLoading={!update.content && !(update.id in fomo.content)}
           onSetStatus={(id, status) => (status === 'read' ? digestMarkRead(digestRow) : void fomo.setStatus(id, status))}
-          onToggleSaved={(id, saved) => void fomo.setSaved(id, saved)}
-          onReadAndNext={() => digestMarkRead(digestRow)}
+          onToggleSaved={() => groupedToggleSaved(update)}
+          onReadAndNext={() => (isSaved ? savedReadAndNext(digestRow) : digestMarkRead(digestRow))}
           onNextUnread={digestNextTopic}
           onOpen={() => openUrl(update.url)}
           onClose={goBack}
@@ -485,18 +553,24 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   }
 
   function renderMobileActions() {
-    if (isDigest && digestRow) {
+    if (isGrouped && digestRow) {
       const update = rowUpdate(digestRow);
+      // The Saved view keeps read updates, so its button toggles between read and unread.
+      const markUnread = isSaved && !rowItems(digestRow).some((u) => u.status === 'unread');
+      const what = digestTopic ? 'Topic ' : '';
       return (
         <div className="mobile-actions">
           <button className="mobile-actions__btn" onClick={goBack}>
             <span>←</span><span>Back</span>
           </button>
-          <button className="mobile-actions__btn" onClick={() => digestMarkRead(digestRow)}>
-            <span>✓</span><span>{digestTopic ? 'Topic read' : 'Read'}</span>
+          <button
+            className="mobile-actions__btn"
+            onClick={() => (markUnread ? void fomo.setStatusMany(rowIds(digestRow), 'unread') : digestMarkRead(digestRow))}
+          >
+            <span>{markUnread ? '●' : '✓'}</span><span>{markUnread ? `${what}unread` : `${what}read`}</span>
           </button>
           {update ? (
-            <button className="mobile-actions__btn" onClick={() => void fomo.setSaved(update.id, !update.saved)}>
+            <button className="mobile-actions__btn" onClick={() => groupedToggleSaved(update)}>
               <span>{update.saved ? '★' : '☆'}</span><span>{update.saved ? 'Unsave' : 'Save'}</span>
             </button>
           ) : (
@@ -507,7 +581,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         </div>
       );
     }
-    if (!isDigest && selected) {
+    if (!isGrouped && selected) {
       return (
         <div className="mobile-actions">
           <button className="mobile-actions__btn" onClick={() => setSelected(undefined)}>
@@ -541,30 +615,44 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           if (window.confirm('Disconnect this device? You will need a new link (fomo → c → Link a device) to reconnect.')) onDisconnect();
         }}
         onHelpClick={() => {
-          setHelpContext(isDigest ? 'digest' : selected ? 'detail' : 'list');
+          setHelpContext(viewHelp);
           setShowHelp(true);
         }}
         onSettingsClick={() => setShowSettings(true)}
       />
 
       <div className="filters">
-        {FILTERS.map((f) => (
-          <button
-            key={f.value}
-            className={['filter-pill', fomo.filter === f.value ? 'filter-pill--active' : ''].join(' ')}
-            onClick={() => setFilter(f.value)}
-          >
-            {f.label}
-          </button>
-        ))}
+        <div className="filters__pills">
+          {FILTERS.map((f) => {
+            const active = fomo.filter === f.value;
+            const toggles = canGroup(f.value);
+            return (
+              <button
+                key={f.value}
+                className={['filter-pill', active ? 'filter-pill--active' : ''].join(' ')}
+                onClick={() => setFilter(f.value)}
+                title={active && toggles ? `Show as ${fomo.grouped[f.value as GroupableView] ? 'a list' : 'topics'}` : undefined}
+              >
+                {f.label}
+                {active && toggles && (
+                  <span className="filter-pill__mode">{fomo.grouped[f.value as GroupableView] ? ' · topics' : ' · list'}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {fomo.filter !== 'todos' && (
+          <SearchBox ref={searchInputRef} value={fomo.search} matches={searchMatches} onSearch={setSearch} />
+        )}
       </div>
 
       <div className={mainClass}>
         {fomo.filter === 'todos' ? (
           <TodosPane client={service} />
-        ) : isDigest ? (
+        ) : isGrouped ? (
           <>
             <DigestList
+              mode={isSaved ? 'saved' : 'digest'}
               rows={digestRows}
               expanded={expanded}
               selectedKey={digestRow?.key}
@@ -575,6 +663,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
               sourceLabels={fomo.settings.sourceLabels}
               sourceColors={fomo.settings.sourceColors}
               onRefresh={handleRefresh}
+              search={fomo.search}
             />
             {renderDetail()}
           </>
@@ -588,6 +677,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
               sourceColors={fomo.settings.sourceColors}
               onSwipeAction={handleSwipeAction}
               onRefresh={handleRefresh}
+              search={fomo.search}
             />
             {renderDetail()}
           </>
