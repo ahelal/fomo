@@ -7,6 +7,8 @@ interface Props {
   rows: DigestRow[];
   expanded: ReadonlySet<string>;
   pending: number;
+  /** A Copilot digest run is in progress. */
+  grouping?: boolean;
   selectedIndex: number;
   height: number;
   columns: number;
@@ -36,6 +38,7 @@ export function DigestTable({
   rows,
   expanded,
   pending,
+  grouping = false,
   selectedIndex,
   height,
   columns,
@@ -53,7 +56,13 @@ export function DigestTable({
     for (let i = from; i <= to; i++) n += lineCost(rows[i]!, i === from);
     return n;
   };
-  while (offset < selectedIndex && linesBetween(offset, selectedIndex) > budget) offset++;
+  // Keep an expanded topic's updates in view too (as far as the selected row stays visible).
+  let target = selectedIndex;
+  const sel = rows[selectedIndex];
+  if (sel?.kind === 'topic') {
+    while (rows[target + 1]?.kind === 'item' && rows[target + 1]!.entry.topic.id === sel.entry.topic.id) target++;
+  }
+  while (offset < selectedIndex && linesBetween(offset, target) > budget) offset++;
   scrollOffsetRef.current = offset;
 
   const visible: { row: DigestRow; index: number }[] = [];
@@ -94,7 +103,9 @@ export function DigestTable({
           {'LATEST'.padEnd(DATE_W)}
           {'#'.padEnd(COUNT_W)}
           {'TOPIC'}
-          {pending > 0 ? `   · ${pending} not grouped yet — press f to group them` : ''}
+          {grouping
+            ? `   · ${pending > 0 ? `${pending} not grouped yet — ` : ''}Copilot is grouping in the background…`
+            : pending > 0 ? `   · ${pending} not grouped yet — press f to group them` : ''}
         </Text>
       </Box>
 
