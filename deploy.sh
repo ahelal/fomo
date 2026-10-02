@@ -10,28 +10,23 @@
 # Prerequisites: az login, jq, node + pnpm
 #
 # Usage:
-#   ./deploy.sh <resource-group> [location] [-y|--yes] [--cleanup-legacy]
+#   ./deploy.sh <resource-group> [location] [-y|--yes]
 #
 #   --yes             Skip the what-if confirmation prompt
-#   --cleanup-legacy  Delete the Container Apps, Container Apps environment,
-#                     Log Analytics workspace and Container Registry created by
-#                     earlier FOMO releases (the storage account and its data stay)
 # =============================================================================
 set -euo pipefail
 
 YES=false
-CLEANUP_LEGACY=false
 ARGS=()
 for arg in "$@"; do
   case "$arg" in
     -y|--yes) YES=true ;;
-    --cleanup-legacy) CLEANUP_LEGACY=true ;;
     -*) echo "Unknown option: $arg" >&2; exit 1 ;;
     *) ARGS+=("$arg") ;;
   esac
 done
 
-RG="${ARGS[0]:?Usage: ./deploy.sh <resource-group> [location] [-y] [--cleanup-legacy]}"
+RG="${ARGS[0]:?Usage: ./deploy.sh <resource-group> [location] [-y]}"
 LOCATION="${ARGS[1]:-swedencentral}"
 PROJECT="fomo"
 PNPM="${PNPM:-pnpm}"
@@ -127,39 +122,6 @@ for blob in $STALE; do
   az storage blob delete --container-name '$web' --name "$blob" --only-show-errors --output none
 done
 echo "✓ Web app uploaded"
-
-# ── 6. Legacy Container Apps resources ────────────────────────────────────────
-LEGACY=(
-  "Microsoft.App/containerApps:${PROJECT}-app"
-  "Microsoft.App/jobs:${PROJECT}-scraper"
-  "Microsoft.App/managedEnvironments:${PROJECT}-env"
-  "Microsoft.OperationalInsights/workspaces:${PROJECT}-env-logs"
-  "Microsoft.ContainerRegistry/registries:${ACCOUNT}"
-)
-FOUND=()
-for entry in "${LEGACY[@]}"; do
-  type="${entry%%:*}"; name="${entry#*:}"
-  if az resource show -g "$RG" -n "$name" --resource-type "$type" --output none 2>/dev/null; then
-    FOUND+=("$entry")
-  fi
-done
-
-if [[ ${#FOUND[@]} -gt 0 ]]; then
-  if [[ "$CLEANUP_LEGACY" == "true" ]]; then
-    echo "▶ Removing legacy Container Apps resources…"
-    for entry in "${FOUND[@]}"; do
-      type="${entry%%:*}"; name="${entry#*:}"
-      echo "  - $name ($type)"
-      az resource delete -g "$RG" -n "$name" --resource-type "$type" --output none
-    done
-    echo "✓ Legacy resources removed"
-  else
-    echo ""
-    echo "ℹ Legacy resources from the Container Apps deployment are still running:"
-    for entry in "${FOUND[@]}"; do echo "  - ${entry#*:} (${entry%%:*})"; done
-    echo "  Re-run with --cleanup-legacy to delete them (your data in Table Storage is kept)."
-  fi
-fi
 
 echo ""
 echo "✅ Deployment complete!"

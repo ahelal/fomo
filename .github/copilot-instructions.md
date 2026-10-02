@@ -36,7 +36,7 @@
 - Local web: `pnpm --filter @fomo/web dev`, then open the link from the TUI (`c` → Link a device) (use Azurite with `UseDevelopmentStorage=true` for local data).
 
 ## Deployment
-- `az login`, then: `bash deploy.sh fomo swedencentral -y` (add `--cleanup-legacy` to remove old Container Apps resources).
+- `az login`, then: `bash deploy.sh fomo swedencentral -y`.
 - The deploy script builds the web app, deploys the storage Bicep, enables the static website and uploads the PWA.
 - The devcontainer uses `.devcontainer/postCreate_pre_hook.sh` to invoke `.devcontainer/install-az-cli.sh`; `az login` is still required before deployment.
 

@@ -19,7 +19,6 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
   - [Connect the Web App](#connect-the-web-app)
   - [Install on Android](#install-on-android)
   - [Local Development](#local-development)
-  - [Migrating from Container Apps](#migrating-from-container-apps)
 - [Using the Web App](#using-the-web-app)
 - [Using the TUI](#using-the-tui)
   - [Keys](#keys)
@@ -28,7 +27,6 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
 - [Sources](#sources)
 - [Security](#security)
 - [Environment Variables](#environment-variables)
-- [CI/CD](#cicd)
 - [Storage](#storage)
 - [License](#license)
 
@@ -219,15 +217,6 @@ fomo
 ```
 
 With Azurite, **Link a device** creates a SAS token that also allows `http`. The `az storage cors add` command lets the browser call Azurite from the dev server; it mirrors the CORS rule that Bicep sets in Azure.
-
-### Migrating from Container Apps
-
-Earlier versions ran a Hono server and an hourly scraper job on Azure Container Apps with Google sign-in. The Storage Account and your data stay the same.
-
-1. Run `bash deploy.sh fomo swedencentral --cleanup-legacy`. This deploys the static site and deletes `fomo-app`, `fomo-scraper`, `fomo-env`, `fomo-env-logs` and the Container Registry.
-2. Run `fomo`, press `c`, set **Web app URL** to the printed URL, then choose **Link a device**.
-3. Choose **Regroup all topics** once to group your existing unread and saved updates.
-4. Remove the old secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_USERS`) from GitHub and your `.env`, and delete the Google OAuth client.
 
 ---
 
@@ -427,22 +416,6 @@ All are optional. The TUI config screen (`c` → **This computer**) stores the s
 | `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` | Token for the Copilot SDK (default: logged-in Copilot CLI user) |
 
 ---
-
-## CI/CD
-
-The GitHub Actions workflow (`.github/workflows/deploy.yml`) builds and tests every push to `main`, then runs `deploy.sh` to update the storage account and static website.
-It signs in to Azure with OIDC (Workload Identity Federation), so it needs no Azure secrets beyond these IDs:
-
-| Secret                  | Value                                   |
-|-------------------------|-----------------------------------------|
-| `AZURE_CLIENT_ID`       | Client ID of the federated identity     |
-| `AZURE_TENANT_ID`       | Tenant ID                               |
-| `AZURE_SUBSCRIPTION_ID` | Subscription ID                         |
-
-The identity needs **Contributor** on the resource group. `deploy.sh` lists the storage key to upload the site.
-See [docs/workload-identity-federation.md](docs/workload-identity-federation.md) for the setup.
-
-Fetching isn't scheduled in CI. Run `fomo` and press `f` whenever you want fresh updates.
 
 ---
 
