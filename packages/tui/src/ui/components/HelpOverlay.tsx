@@ -57,7 +57,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['c',    'Config: sources, link a device, backup / restore'],
   ['t',    'Todos'],
   ['Esc',  'Clear the source filter (set with v in config)'],
-  ['.',    'Toggle preview position'],
+  ['.',    'Show preview / toggle its position'],
   ['h',    'Show this help'],
 ];
 
