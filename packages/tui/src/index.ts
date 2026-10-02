@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { render } from 'ink';
 import { createElement } from 'react';
-import { CONFIG_FILE, loadConfig } from './config.js';
+import { CONFIG_FILE, LOG_FILE, loadConfig } from './config.js';
 import { SummarizerCache } from './copilot.js';
 import { Root } from './ui/Root.js';
 import { enterFullScreen } from './ui/screen.js';
@@ -19,6 +19,7 @@ Everything happens inside the UI:
   h   keyboard help
 
 Local config: ${CONFIG_FILE}
+Log file:     ${LOG_FILE}
 `;
 
 async function main(): Promise<void> {
@@ -38,9 +39,12 @@ async function main(): Promise<void> {
 
   const config = loadConfig();
   const summarizers = new SummarizerCache();
-  const restoreScreen = enterFullScreen();
+  const restoreScreen = enterFullScreen(LOG_FILE);
   try {
-    const { waitUntilExit } = render(createElement(Root, { initialConfig: config, summarizers }));
+    // Console output goes to LOG_FILE (see enterFullScreen); Ink's console patch would print it over the UI.
+    const { waitUntilExit } = render(createElement(Root, { initialConfig: config, summarizers }), {
+      patchConsole: false,
+    });
     await waitUntilExit();
   } finally {
     restoreScreen();

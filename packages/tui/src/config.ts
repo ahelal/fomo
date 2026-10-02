@@ -5,6 +5,8 @@ import { join } from 'node:path';
 export const CONFIG_DIR = join(homedir(), '.fomo');
 export const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 export const DEFAULT_BACKUP_DIR = join(CONFIG_DIR, 'backups');
+/** Console and stderr output while the UI is open (scraper errors, Copilot runtime logs). */
+export const LOG_FILE = join(CONFIG_DIR, 'fomo.log');
 export const DEFAULT_LINK_DAYS = 365;
 export const DEFAULT_DIGEST_MAX_ITEMS = 300;
 

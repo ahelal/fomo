@@ -14,7 +14,7 @@ import { RestorePicker, type BackupFile } from './components/RestorePicker.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
 import { DigestTable } from './components/DigestTable.js';
-import { StatusBar } from './components/StatusBar.js';
+import { StatusBar, type Activity } from './components/StatusBar.js';
 import { DetailPane } from './components/DetailPane.js';
 import { TopicPane } from './components/TopicPane.js';
 import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
@@ -61,6 +61,9 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   const [filter, setFilter] = useState<FilterStatus>('digest');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
+  /** Background job (fetch / Copilot digest / restore) shown with a spinner until it ends. */
+  const [activity, setActivity] = useState<Activity | undefined>();
+  const [digesting, setDigesting] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [stats, setStats] = useState<StatsResponse | undefined>();
   const [previewPosition, setPreviewPosition] = useState<PreviewPosition>('bottom');
@@ -214,64 +217,89 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   );
 
   // One fetch / regroup / restore at a time; a second digest run would plan the same items twice.
+  // The job shows in the status bar (spinner, label, elapsed time) until it is released, so
+  // transient messages and list reloads in the meantime can't hide that it's still running.
   const busyRef = useRef(false);
-  const claimBusy = useCallback(() => {
+  const claimBusy = useCallback((label: string) => {
     if (busyRef.current) {
       showMessage('⏳ Still busy — wait for the current run to finish');
       return false;
     }
     busyRef.current = true;
-    setLoading(true);
+    setActivity({ label, startedAt: Date.now() });
     return true;
   }, [showMessage]);
+  /** Starts a new phase of the current job (restarts its timer). */
+  const startPhase = useCallback((label: string) => setActivity({ label, startedAt: Date.now() }), []);
+  /** Updates the current phase's label (keeps its timer). */
+  const updatePhase = useCallback((label: string) => {
+    setActivity((a) => ({ label, startedAt: a?.startedAt ?? Date.now() }));
+  }, []);
   const releaseBusy = useCallback(() => {
     busyRef.current = false;
-    setLoading(false);
+    setActivity(undefined);
+    setDigesting(false);
   }, []);
 
   /** Fetch every enabled source, or only `only` (even if disabled), then group with Copilot. */
   const doFetch = useCallback(async (only?: string[]) => {
-    if (!claimBusy()) return;
-    showMessage(`Fetching ${only ? only.map(sourceName).join(', ') : 'latest updates'}…`, 600_000);
+    if (!claimBusy(`Fetching ${only ? only.map(sourceName).join(', ') : 'latest updates'}…`)) return;
     try {
-      const resp = await service.fetch(only ? { sources: only } : {});
+      let resp: Awaited<ReturnType<typeof service.fetch>>;
+      try {
+        resp = await service.fetch(only ? { sources: only } : {});
+      } catch (err) {
+        showMessage(`Fetch error: ${errorText(err)}`, 8000);
+        return;
+      }
       setLastFetch((prev) => ({ ...prev, ...resp.results }));
       const failed = Object.entries(resp.results).filter(([, r]) => r.error).map(([id]) => sourceName(id));
       const failedNote = failed.length ? ` · ⚠ ${failed.join(', ')} failed` : '';
       const added = `✓ Added ${resp.added} update${resp.added !== 1 ? 's' : ''}${failedNote}`;
-      if (digest && config.autoDigest !== false) {
-        showMessage(`${added} · summarising with Copilot…`, 600_000);
+      if (!digest || config.autoDigest === false) {
+        showMessage(added, failed.length ? 6000 : 3000);
         await refresh();
-        const result = await digest((msg) => showMessage(msg, 600_000));
-        const errs = result.errors.length ? ` · ⚠ ${result.errors.length} failed` : '';
-        showMessage(`${added} · grouped ${result.processed} into topics${errs}`, 5000);
-      } else {
-        showMessage(added, failed.length ? 5000 : 2500);
+        return;
+      }
+
+      // Show the new updates (ungrouped) right away, then group them in the background.
+      showMessage(added, 6000);
+      startPhase('Copilot: grouping new updates…');
+      setDigesting(true);
+      await refresh();
+      try {
+        const result = await digest((msg) => updatePhase(`Copilot: ${msg}`));
+        const grouped = result.processed
+          ? `grouped ${result.processed} into topics`
+          : 'nothing new to group';
+        const left = result.remaining ? ` · ${result.remaining} left for next run` : '';
+        const errs = result.errors.length ? ` · ⚠ ${result.errors.length} Copilot call${result.errors.length !== 1 ? 's' : ''} failed` : '';
+        showMessage(`${added} · ${grouped}${left}${errs}`, 8000);
+      } catch (err) {
+        showMessage(`⚠ Copilot grouping failed: ${errorText(err)}`, 10_000);
       }
       await refresh();
-    } catch (err) {
-      showMessage(`Fetch error: ${errorText(err)}`, 5000);
     } finally {
       releaseBusy();
     }
-  }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, releaseBusy]);
+  }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy]);
 
   /** Forget all topics and regroup every unread update. */
   const doRegroup = useCallback(async () => {
-    if (!digest || !claimBusy()) return;
-    showMessage('Regrouping all unread updates with Copilot…', 600_000);
+    if (!digest || !claimBusy('Copilot: regrouping all unread updates…')) return;
+    setDigesting(true);
     try {
-      const result = await digest((msg) => showMessage(msg, 600_000), { reset: true });
+      const result = await digest((msg) => updatePhase(`Copilot: ${msg}`), { reset: true });
       const errs = result.errors.length ? ` · ⚠ ${result.errors.length} failed` : '';
       const left = result.remaining ? ` · ${result.remaining} left for next time` : '';
-      showMessage(`✓ Regrouped ${result.processed} update${result.processed !== 1 ? 's' : ''} into ${result.created} topics${left}${errs}`, 6000);
+      showMessage(`✓ Regrouped ${result.processed} update${result.processed !== 1 ? 's' : ''} into ${result.created} topics${left}${errs}`, 8000);
       await refresh();
     } catch (err) {
-      showMessage(`Regroup error: ${errorText(err)}`, 6000);
+      showMessage(`Regroup error: ${errorText(err)}`, 10_000);
     } finally {
       releaseBusy();
     }
-  }, [digest, refresh, showMessage, claimBusy, releaseBusy]);
+  }, [digest, refresh, showMessage, claimBusy, updatePhase, releaseBusy]);
 
   const backupDir = config.backupDir ?? DEFAULT_BACKUP_DIR;
 
@@ -316,10 +344,9 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   }, [backupDir, showMessage]);
 
   const doRestore = useCallback(async (file: BackupFile) => {
-    if (!claimBusy()) return;
+    if (!claimBusy(`Restoring ${file.name}…`)) return;
     setRestoreFiles(undefined);
     setRestoreConfirm(false);
-    showMessage(`Restoring ${file.name}…`, 600_000);
     try {
       const payload = JSON.parse(await readFile(file.path, 'utf-8'));
       if (!payload?.version || !Array.isArray(payload.entities)) throw new Error('not a FOMO backup file');
@@ -861,9 +888,12 @@ export function App({ service, config, onConfigChange, digest }: Props) {
       return;
     }
 
-    // Toggle preview position
+    // Toggle preview position (and show the preview, otherwise the key seems to do nothing)
     if (input === '.') {
-      setPreviewPosition((prev) => prev === 'bottom' ? 'right' : 'bottom');
+      const next = previewPosition === 'bottom' ? 'right' : 'bottom';
+      setPreviewPosition(next);
+      setShowDetail(true);
+      showMessage(`Preview on the ${next}`);
       return;
     }
 
@@ -970,6 +1000,9 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   const chrome = STATUSBAR_H + FILTERBAR_H;
   const availableH = rows - chrome;
   const selectedUpdate = updates[selectedIndex];
+  const statusBar = (
+    <StatusBar stats={stats} loading={loading} message={message} activity={activity} columns={columns} />
+  );
   const filterBar = (
     <FilterBar active={filter} columns={columns} sourceLabel={sourceFilter ? sourceName(sourceFilter) : undefined} />
   );
@@ -980,6 +1013,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
         rows={digestRows}
         expanded={expanded}
         pending={digestPending}
+        grouping={digesting}
         selectedIndex={selectedIndex}
         height={height}
         columns={width}
@@ -1017,7 +1051,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   if (showHelp) {
     return (
       <Box flexDirection="column" height={rows}>
-        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        {statusBar}
         {filterBar}
         <HelpOverlay context={helpContext} height={availableH} columns={columns} />
       </Box>
@@ -1027,7 +1061,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   if (linkView) {
     return (
       <Box flexDirection="column" height={rows}>
-        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        {statusBar}
         {filterBar}
         <LinkOverlay link={linkView} height={availableH} columns={columns} />
       </Box>
@@ -1037,7 +1071,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   if (restoreFiles) {
     return (
       <Box flexDirection="column" height={rows}>
-        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        {statusBar}
         {filterBar}
         <RestorePicker
           dir={backupDir}
@@ -1055,7 +1089,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   if (showTodos) {
     return (
       <Box flexDirection="column" height={rows}>
-        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        {statusBar}
         {filterBar}
         <TodosView
           todos={todosList}
@@ -1077,7 +1111,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
   if (showSettings) {
     return (
       <Box flexDirection="column" height={rows}>
-        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        {statusBar}
         {filterBar}
         <SettingsPane
           rows={settingsRows}
@@ -1102,7 +1136,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
 
     return (
       <Box flexDirection="column" height={rows}>
-        <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+        {statusBar}
         {filterBar}
         <Box flexGrow={1} height={availableH}>
           <Box width={tableW}>
@@ -1124,7 +1158,7 @@ export function App({ service, config, onConfigChange, digest }: Props) {
 
   return (
     <Box flexDirection="column" height={rows}>
-      <StatusBar stats={stats} loading={loading} message={message} columns={columns} />
+      {statusBar}
       {filterBar}
       {renderTable(tableH, columns)}
       {showDetail && renderDetail(detailH, columns, 'bottom')}
