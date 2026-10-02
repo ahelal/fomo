@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { VERSION } from '../../version.js';
 
 export type HelpContext = 'list' | 'detail' | 'settings' | 'digest';
 
@@ -108,7 +109,7 @@ export function HelpOverlay({ context, height, columns }: Props) {
         <Text color="#f0f6fc" bold>{'⌨  Keyboard Shortcuts'}</Text>
       </Box>
       <Box justifyContent="center">
-        <Text color="#8b949e">{CONTEXT_LABEL[context]}</Text>
+        <Text color="#8b949e">{`${CONTEXT_LABEL[context]} · FOMO v${VERSION}`}</Text>
       </Box>
       <Box height={1} />
 
