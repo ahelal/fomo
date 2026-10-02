@@ -5,13 +5,14 @@ interface Props {
   stats: StatsResponse | undefined;
   loading: boolean;
   message: string | undefined;
-  userEmail?: string;
-  onLogout(): void;
+  /** Days until the access link expires. */
+  expiresInDays?: number;
+  onDisconnect(): void;
   onHelpClick(): void;
   onSettingsClick(): void;
 }
 
-export function StatusBar({ stats, loading, message, userEmail, onLogout, onHelpClick, onSettingsClick }: Props) {
+export function StatusBar({ stats, loading, message, expiresInDays, onDisconnect, onHelpClick, onSettingsClick }: Props) {
   return (
     <div className="statusbar">
       <span className="statusbar__brand">📰 FOMO</span>
@@ -39,16 +40,20 @@ export function StatusBar({ stats, loading, message, userEmail, onLogout, onHelp
       {loading && <span className="statusbar__loading">⟳</span>}
       {message && <span className="statusbar__message">{message}</span>}
 
+      {expiresInDays !== undefined && expiresInDays <= 14 && (
+        <span className="statusbar__warning" title="Create a new link in fomo: press c → Link a device">
+          ⚠ link expires {expiresInDays <= 0 ? 'today' : `in ${expiresInDays}d`}
+        </span>
+      )}
+
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
         <button className="btn" onClick={onSettingsClick}>⚙️</button>
         <button className="btn btn--primary" onClick={onHelpClick}>
           [h] help
         </button>
-        {userEmail && (
-          <>
-            <button className="btn" onClick={onLogout}>Logout</button>
-          </>
-        )}
+        <button className="btn" onClick={onDisconnect} title="Forget the access link on this device">
+          Disconnect
+        </button>
       </div>
     </div>
   );

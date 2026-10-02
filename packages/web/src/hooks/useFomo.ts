@@ -1,201 +1,228 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { FomoClient, type Update, type Status, type StatsResponse, type AppSettings, DEFAULT_SETTINGS } from '@fomo/core';
+import {
+  DEFAULT_SETTINGS,
+  removeFromDigest,
+  type FomoService,
+  type Update,
+  type Status,
+  type StatsResponse,
+  type AppSettings,
+  type DigestEntry,
+} from '@fomo/core';
 
-type FilterStatus = Status | 'all' | 'saved';
+export type FilterStatus = Status | 'all' | 'saved' | 'digest' | 'todos';
 
 export interface FomoState {
   updates: Update[];
   total: number;
   hasMore: boolean;
+  digest: DigestEntry[];
+  /** Unread updates not yet grouped into topics by the Copilot digest. */
+  pending: number;
   stats: StatsResponse | undefined;
   settings: AppSettings;
   loading: boolean;
   message: string | undefined;
-  selectedId: string | undefined;
   filter: FilterStatus;
+  /** Lazily loaded update bodies (lists are fetched without content). */
+  content: Record<string, string>;
 }
 
 export interface FomoActions {
   setFilter(f: FilterStatus): void;
-  setSelectedId(id: string | undefined): void;
   setStatus(id: string, status: Status): Promise<void>;
+  markRead(ids: string[]): Promise<void>;
   setSaved(id: string, saved: boolean): Promise<void>;
-  triggerFetch(sources?: string[]): Promise<void>;
-  fetchContent(id: string): Promise<Update | undefined>;
+  loadContent(id: string): Promise<void>;
   updateSettings(patch: Partial<AppSettings>): Promise<void>;
   refresh(): Promise<void>;
 }
 
-export function useFomo(client: FomoClient): FomoState & FomoActions {
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export function useFomo(service: FomoService): FomoState & FomoActions {
   const [updates, setUpdates] = useState<Update[]>([]);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [digest, setDigest] = useState<DigestEntry[]>([]);
+  const [pending, setPending] = useState(0);
   const [stats, setStats] = useState<StatsResponse | undefined>();
   const [settings, setSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
-  const [selectedId, setSelectedId] = useState<string | undefined>();
-  const [filter, setFilterState] = useState<FilterStatus>('all');
+  const [filter, setFilterState] = useState<FilterStatus>('digest');
+  const [content, setContent] = useState<Record<string, string>>({});
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const contentRequested = useRef(new Set<string>());
 
+  const messageTimer = useRef<ReturnType<typeof setTimeout>>();
   const showMessage = useCallback((msg: string, ms = 2500) => {
     setMessage(msg);
-    setTimeout(() => setMessage(undefined), ms);
+    clearTimeout(messageTimer.current);
+    messageTimer.current = setTimeout(() => setMessage(undefined), ms);
   }, []);
 
-  const loadUpdates = useCallback(
+  const loadView = useCallback(
     async (f: FilterStatus) => {
+      if (f === 'todos') return;
       setLoading(true);
       try {
+        if (f === 'digest') {
+          const resp = await service.getDigest();
+          setDigest(resp.entries);
+          setPending(resp.pending);
+          return;
+        }
         const opts = f === 'saved'
-          ? { saved: true, limit: 200 }
-          : { status: f as Status | 'all', limit: 200 };
-        const resp = await client.listUpdates(opts);
+          ? { saved: true, limit: 200, includeContent: false }
+          : { status: f, limit: 200, includeContent: false };
+        const resp = await service.listUpdates(opts);
         setUpdates(resp.updates);
         setTotal(resp.total);
         setHasMore(resp.hasMore);
       } catch (err) {
-        showMessage(`Error loading updates: ${err instanceof Error ? err.message : String(err)}`);
+        showMessage(`Error loading updates: ${errorText(err)}`, 6000);
       } finally {
         setLoading(false);
       }
     },
-    [client, showMessage],
+    [service, showMessage],
   );
 
   const loadStats = useCallback(async () => {
     try {
-      const s = await client.getStats();
-      setStats(s);
+      setStats(await service.getStats());
     } catch {
       // non-critical
     }
-  }, [client]);
+  }, [service]);
 
   const loadSettings = useCallback(async () => {
     try {
-      const s = await client.getSettings();
-      setSettings(s);
+      setSettings(await service.getSettings());
     } catch {
       // non-critical — use defaults
     }
-  }, [client]);
+  }, [service]);
 
   const refresh = useCallback(async () => {
-    await Promise.all([loadUpdates(filterRef.current), loadStats(), loadSettings()]);
-  }, [loadUpdates, loadStats, loadSettings]);
+    await Promise.all([loadView(filterRef.current), loadStats(), loadSettings()]);
+  }, [loadView, loadStats, loadSettings]);
 
   useEffect(() => {
     void refresh();
-  }, []); // Run once on mount — refresh is stable but not needed in deps
+  }, [refresh]);
 
   const setFilter = useCallback(
     (f: FilterStatus) => {
       setFilterState(f);
       filterRef.current = f;
-      void loadUpdates(f);
+      void loadView(f);
     },
-    [loadUpdates],
+    [loadView],
   );
 
   const setStatus = useCallback(
     async (id: string, status: Status) => {
-      // Optimistic update (matches CLI behavior)
       setUpdates((prev) => prev.map((u) => (u.id === id ? { ...u, status } : u)));
+      if (status === 'read') setDigest((prev) => removeFromDigest(prev, new Set([id])));
       showMessage(`Marked ${status}`);
       try {
-        await client.setStatus(id, status);
+        await service.setStatus(id, status);
         void loadStats();
       } catch (err) {
-        showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        showMessage(`Error: ${errorText(err)}`);
         await refresh();
       }
     },
-    [client, showMessage, loadStats, refresh],
+    [service, showMessage, loadStats, refresh],
+  );
+
+  const markRead = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      setUpdates((prev) => prev.map((u) => (idSet.has(u.id) ? { ...u, status: 'read' as Status } : u)));
+      setDigest((prev) => removeFromDigest(prev, idSet));
+      showMessage(ids.length > 1 ? `✓ ${ids.length} marked read` : '✓ Marked read');
+      try {
+        await service.setStatusMany(ids, 'read');
+        void loadStats();
+      } catch (err) {
+        showMessage(`Error: ${errorText(err)}`);
+        await refresh();
+      }
+    },
+    [service, showMessage, loadStats, refresh],
   );
 
   const setSaved = useCallback(
     async (id: string, saved: boolean) => {
-      // Optimistic update (matches CLI behavior)
       setUpdates((prev) => prev.map((u) => (u.id === id ? { ...u, saved } : u)));
+      setDigest((prev) => prev.map((e) => (
+        e.items.some((u) => u.id === id)
+          ? { ...e, items: e.items.map((u) => (u.id === id ? { ...u, saved } : u)) }
+          : e
+      )));
       showMessage(saved ? '⭐ Saved' : 'Unsaved');
       try {
-        await client.setSaved(id, saved);
+        await service.setSaved(id, saved);
         void loadStats();
       } catch (err) {
-        showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+        showMessage(`Error: ${errorText(err)}`);
         await refresh();
       }
     },
-    [client, showMessage, loadStats, refresh],
+    [service, showMessage, loadStats, refresh],
   );
 
-  const fetchContent = useCallback(
-    async (id: string): Promise<Update | undefined> => {
-      setLoading(true);
-      showMessage('Fetching content…');
+  const loadContent = useCallback(
+    async (id: string) => {
+      if (contentRequested.current.has(id)) return;
+      contentRequested.current.add(id);
       try {
-        const updated = await client.fetchContent(id);
-        setUpdates((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
-        showMessage('✓ Content fetched');
-        return updated;
-      } catch (err) {
-        showMessage(`Fetch error: ${err instanceof Error ? err.message : String(err)}`);
-        return undefined;
-      } finally {
-        setLoading(false);
+        const full = await service.getUpdate(id);
+        setContent((prev) => ({ ...prev, [id]: full.content }));
+      } catch {
+        contentRequested.current.delete(id);
+        setContent((prev) => ({ ...prev, [id]: '' }));
       }
     },
-    [client, showMessage],
-  );
-
-  const triggerFetch = useCallback(
-    async (sources?: string[]) => {
-      setLoading(true);
-      showMessage('Fetching updates…');
-      try {
-        const resp = await client.fetch({ sources });
-        showMessage(`✓ Added ${resp.added} new update${resp.added !== 1 ? 's' : ''}`);
-        await refresh();
-      } catch (err) {
-        showMessage(`Fetch error: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [client, showMessage, refresh],
+    [service],
   );
 
   const updateSettings = useCallback(
     async (patch: Partial<AppSettings>) => {
       try {
-        const updated = await client.updateSettings(patch);
-        setSettings(updated);
+        setSettings(await service.updateSettings(patch));
         showMessage('✓ Settings saved');
       } catch (err) {
-        showMessage(`Settings error: ${err instanceof Error ? err.message : String(err)}`);
+        showMessage(`Settings error: ${errorText(err)}`);
       }
     },
-    [client, showMessage],
+    [service, showMessage],
   );
 
   return {
     updates,
     total,
     hasMore,
+    digest,
+    pending,
     stats,
     settings,
     loading,
     message,
-    selectedId,
     filter,
+    content,
     setFilter,
-    setSelectedId,
     setStatus,
+    markRead,
     setSaved,
-    triggerFetch,
-    fetchContent,
+    loadContent,
     updateSettings,
     refresh,
   };

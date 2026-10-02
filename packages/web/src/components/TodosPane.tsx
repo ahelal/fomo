@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { FomoClient } from '@fomo/core';
+import type { FomoService } from '@fomo/core';
 import type { Todo, TodoStatus, CreateTodoRequest } from '@fomo/core';
 
 interface Props {
-  client: FomoClient;
+  client: FomoService;
 }
 
 const STATUS_LABELS: Record<TodoStatus, string> = {

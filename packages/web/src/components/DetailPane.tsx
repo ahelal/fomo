@@ -5,7 +5,8 @@ interface Props {
   update: Update;
   onSetStatus(id: string, status: Status): void;
   onToggleSaved(id: string, saved: boolean): void;
-  onFetchContent(id: string): void;
+  /** Content is still being loaded (lists are fetched without it). */
+  contentLoading?: boolean;
   onReadAndNext?(): void;
   onNextUnread?(): void;
   onOpen?(): void;
@@ -25,7 +26,7 @@ function stripHtml(html: string): string {
     .slice(0, 1000);
 }
 
-export function DetailPane({ update, onSetStatus, onToggleSaved, onFetchContent, onReadAndNext, onNextUnread, onOpen, onClose }: Props) {
+export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading, onReadAndNext, onNextUnread, onOpen, onClose }: Props) {
   const hasContent = !!update.content;
   const content = hasContent ? stripHtml(update.content) : '';
 
@@ -96,19 +97,14 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, onFetchContent,
 
       {hasContent ? (
         <pre className="detail-pane__content">{content}</pre>
+      ) : contentLoading ? (
+        <p className="detail-pane__no-preview">Loading…</p>
       ) : (
         <p className="detail-pane__no-preview">
-          No preview — press <kbd>p</kbd> to fetch content or <kbd>o</kbd> to{' '}
+          No preview — press <kbd>o</kbd> to{' '}
           <a href={update.url} target="_blank" rel="noreferrer noopener">
             open in browser ↗
           </a>
-          <button
-            className="btn"
-            style={{ marginLeft: 8 }}
-            onClick={() => onFetchContent(update.id)}
-          >
-            Fetch content
-          </button>
         </p>
       )}
     </div>
