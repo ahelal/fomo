@@ -25,9 +25,11 @@ interface Props {
   columns: number;
   sourceLabels?: Record<string, string>;
   sourceColors?: Record<string, string>;
+  /** Applied search, for the empty state. */
+  search?: string;
 }
 
-export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLabels = {}, sourceColors = {} }: Props) {
+export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLabels = {}, sourceColors = {}, search }: Props) {
   // Reserve lines for header(1) + bottom scroll indicator(1)
   // Each row takes 2 lines (content + separator), except last row takes 1
   const viewportRows = Math.max(1, Math.floor((height - 1) / 2));
@@ -55,9 +57,15 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
     return (
       <Box flexDirection="column" height={height}>
         <Box flexGrow={1} alignItems="center" justifyContent="center">
-          <Text color="#8b949e">No updates here — press </Text>
-          <Text color="#58a6ff" bold>f</Text>
-          <Text color="#8b949e"> to fetch the latest</Text>
+          {search ? (
+            <Text color="#8b949e">{`No updates here match “${search}” — Esc clears the search`}</Text>
+          ) : (
+            <>
+              <Text color="#8b949e">No updates here — press </Text>
+              <Text color="#58a6ff" bold>f</Text>
+              <Text color="#8b949e"> to fetch the latest</Text>
+            </>
+          )}
         </Box>
       </Box>
     );

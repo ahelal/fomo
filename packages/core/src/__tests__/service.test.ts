@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FomoDirectService } from '../service.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { FomoDirectService, extractText } from '../service.js';
 
 // Mock the store and scrapers
 vi.mock('../store/tables.js', () => {
@@ -10,6 +10,7 @@ vi.mock('../store/tables.js', () => {
     setStatus: vi.fn(),
     setStatusMany: vi.fn().mockResolvedValue(undefined),
     setTopicId: vi.fn().mockResolvedValue(undefined),
+    setGist: vi.fn().mockResolvedValue(undefined),
     setSaved: vi.fn(),
     updateContent: vi.fn(),
     insertUpdate: vi.fn().mockResolvedValue(true),
@@ -271,6 +272,32 @@ describe('FomoDirectService', () => {
     expect(digest.entries[0].items.map((u) => u.id)).toEqual(['b__2', 'a__1']);
   });
 
+  it('getDigest searches unread updates with their content and returns them without it', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const { __mockTopicStore } = await import('../store/topics.js') as any;
+    const base = { url: 'u', dateAdded: '2026-01-01', status: 'unread', saved: false };
+    __mockStore.listUpdates.mockResolvedValueOnce({
+      updates: [
+        { ...base, id: 'a__1', source: 'a', title: 'A1', datePublished: '2026-01-02', topicId: 't1', content: 'mentions agents' },
+        { ...base, id: 'b__2', source: 'b', title: 'B2', datePublished: '2026-01-03', topicId: 't1', content: '' },
+        { ...base, id: 'c__3', source: 'c', title: 'Agents C3', datePublished: '2026-01-01', content: '' },
+        { ...base, id: 'd__4', source: 'd', title: 'D4', datePublished: '2026-01-04', content: '' },
+      ],
+      total: 4,
+      hasMore: false,
+    });
+    __mockTopicStore.getTopics.mockResolvedValueOnce(new Map([
+      ['t1', { id: 't1', title: 'Topic', summary: 's', highlights: [], createdAt: 'x', updatedAt: 'x' }],
+    ]));
+
+    const digest = await svc.getDigest({ search: 'AGENTS' });
+    expect(__mockStore.listUpdates).toHaveBeenCalledWith(expect.objectContaining({ status: 'unread', includeContent: true }));
+    expect(digest.entries.map((e) => e.topic.id)).toEqual(['t1', 'item:c__3']);
+    expect(digest.entries[0].items.map((u) => u.id)).toEqual(['a__1']);
+    expect(digest.entries[0].items[0].content).toBe('');
+    expect(digest.pending).toBe(1);
+  });
+
   it('digest runs the summarizer over pending updates', async () => {
     const { __mockStore } = await import('../store/tables.js') as any;
     const { __mockTopicStore } = await import('../store/topics.js') as any;
@@ -291,5 +318,131 @@ describe('FomoDirectService', () => {
     expect(result).toMatchObject({ processed: 1, created: 1, updated: 0, remaining: 0, errors: [] });
     expect(__mockTopicStore.upsertTopic).toHaveBeenCalledWith(expect.objectContaining({ id: 'new-topic', title: 'T' }));
     expect(__mockStore.setTopicId).toHaveBeenCalledWith('a__1', 'new-topic');
+  });
+
+  describe('summarizePost', () => {
+    const post = {
+      id: 'github__1',
+      source: 'github',
+      title: 'Copilot code review gets agentic tools',
+      url: 'https://example.com/post',
+      datePublished: '2026-10-01T00:00:00Z',
+      dateAdded: 'x',
+      status: 'unread',
+      saved: false,
+      content: '<p>Short preview.</p>',
+    };
+    const page = (body: string) =>
+      `<html><body><nav>Menu</nav><article><h1>Copilot code review gets agentic tools</h1><p>${body}</p></article></body></html>`;
+    const gistJson = { summary: 'Code review can now call tools.', points: ['- Pro+ plans', 'Preview'] };
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    async function mockStore(update: Record<string, unknown>) {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      __mockStore.getUpdate.mockResolvedValue(update);
+      return __mockStore;
+    }
+
+    it('returns a saved gist without fetching or calling the model', async () => {
+      await mockStore({ ...post, gist: { summary: 'Saved', points: [] } });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const summarizer = { generateJson: vi.fn() };
+      const result = await svc.summarizePost('github__1', summarizer);
+      expect(result.outcome).toBe('cached');
+      expect(result.update.gist).toEqual({ summary: 'Saved', points: [] });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(summarizer.generateJson).not.toHaveBeenCalled();
+    });
+
+    it('summarises the fetched page when it says more than the preview, and saves the gist', async () => {
+      const store = await mockStore(post);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(page('Agentic tools. '.repeat(100)))));
+      const summarizer = { generateJson: vi.fn().mockResolvedValue(gistJson) };
+      const result = await svc.summarizePost('github__1', summarizer);
+      const expected = { summary: 'Code review can now call tools.', points: ['Pro+ plans', 'Preview'] };
+      expect(result).toMatchObject({ outcome: 'created', from: 'page', update: { gist: expected } });
+      expect(store.setGist).toHaveBeenCalledWith('github__1', expected);
+      const req = summarizer.generateJson.mock.calls[0][0];
+      expect(req.prompt).toContain('TITLE: Copilot code review gets agentic tools');
+      expect(req.prompt).toContain('Agentic tools.');
+      expect(req.prompt).not.toContain('Menu');
+      expect(req.effort).toBe('low');
+    });
+
+    it('regenerates a saved gist when forced', async () => {
+      await mockStore({ ...post, gist: { summary: 'Old', points: [] } });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(page('Agentic tools. '.repeat(100)))));
+      const summarizer = { generateJson: vi.fn().mockResolvedValue(gistJson) };
+      const result = await svc.summarizePost('github__1', summarizer, { force: true });
+      expect(result.outcome).toBe('created');
+      expect(summarizer.generateJson).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips posts too short to condense', async () => {
+      const store = await mockStore(post);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(page('Just a little more.'))));
+      const summarizer = { generateJson: vi.fn() };
+      const result = await svc.summarizePost('github__1', summarizer);
+      expect(result.outcome).toBe('short');
+      expect(summarizer.generateJson).not.toHaveBeenCalled();
+      expect(store.setGist).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a long preview when the page is unrelated or fails', async () => {
+      const long = { ...post, content: `<p>${'Preview text. '.repeat(100)}</p>` };
+      await mockStore(long);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(`<main>${'Generic updates shell. '.repeat(200)}</main>`)));
+      const summarizer = { generateJson: vi.fn().mockResolvedValue(gistJson) };
+      expect((await svc.summarizePost('github__1', summarizer)).from).toBe('preview');
+
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 403 })));
+      expect((await svc.summarizePost('github__1', summarizer)).from).toBe('preview');
+    });
+
+    it('reads Azure Updates posts from the release communications API', async () => {
+      await mockStore({ ...post, source: 'azure', title: 'Public Preview: Live Reports for Azure SRE Agent', url: 'https://azure.microsoft.com/updates?id=569690' });
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        title: 'Public Preview: Live Reports for Azure SRE Agent',
+        status: 'In preview',
+        previewAvailabilityDate: '2026-08',
+        generalAvailabilityDate: null,
+        description: `Live Reports <br>${'keep views up to date. '.repeat(60)}`,
+      })));
+      vi.stubGlobal('fetch', fetchMock);
+      const summarizer = { generateJson: vi.fn().mockResolvedValue(gistJson) };
+      const result = await svc.summarizePost('github__1', summarizer);
+      expect(fetchMock.mock.calls[0][0]).toBe('https://www.microsoft.com/releasecommunications/api/v2/azure/569690');
+      expect(result).toMatchObject({ outcome: 'created', from: 'page' });
+      const prompt: string = summarizer.generateJson.mock.calls[0][0].prompt;
+      expect(prompt).toContain('Status: In preview. Preview: 2026-08 Live Reports keep views');
+      expect(prompt).not.toContain('General availability');
+      expect(prompt).not.toContain('<br>');
+    });
+
+    it('reports the fetch error when the preview is too short to summarise', async () => {
+      await mockStore(post);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 403 })));
+      await expect(svc.summarizePost('github__1', { generateJson: vi.fn() })).rejects.toThrow(/HTTP 403/);
+    });
+  });
+});
+
+describe('extractText', () => {
+  it('prefers the longest article and skips tiny ones like author cards', () => {
+    const html = `<body><article>By Jane</article><article class="[&>p]:mt-2"><p>${'Real post. '.repeat(30)}</p></article></body>`;
+    expect(extractText(html)).toBe('Real post. '.repeat(30).trim());
+  });
+
+  it('falls through to <main> or the body when no container has enough text', () => {
+    expect(extractText(`<article>tiny</article><main>${'Main text. '.repeat(30)}</main>`)).toMatch(/^Main text\./);
+    expect(extractText('<body><div>Only body</div></body>')).toBe('Only body');
+  });
+
+  it('drops scripts and quoted ">" in attributes, decodes entities and caps the length', () => {
+    const html = `<body><script>x()</script><div class="a>b">we&#x27;d &amp; &lt;3 &#8212; ok&nbsp;</div></body>`;
+    expect(extractText(html)).toBe("we'd & <3 — ok");
+    expect(extractText(`<body>${'a'.repeat(50)}</body>`, 10)).toBe('a'.repeat(10));
   });
 });

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   DEFAULT_SETTINGS,
+  patchDigest,
   removeFromDigest,
   type FomoService,
   type Update,
@@ -10,27 +11,43 @@ import {
   type DigestEntry,
 } from '@fomo/core';
 
-export type FilterStatus = Status | 'all' | 'saved' | 'digest' | 'todos';
+export type FilterStatus = Status | 'all' | 'saved' | 'todos';
+/** Views that can be listed as topics; selecting the view again toggles it. */
+export type GroupableView = 'unread' | 'saved';
+export type GroupedViews = Record<GroupableView, boolean>;
+export const canGroup = (f: FilterStatus): f is GroupableView => f === 'unread' || f === 'saved';
+export const isGroupedView = (f: FilterStatus, g: GroupedViews) => canGroup(f) && g[f];
 
 export interface FomoState {
   updates: Update[];
   total: number;
   hasMore: boolean;
+  /** Topics of the Unread or Saved view when it is grouped. */
   digest: DigestEntry[];
-  /** Unread updates not yet grouped into topics by the Copilot digest. */
+  /** Updates in that view not yet grouped into topics by the Copilot digest. */
   pending: number;
   stats: StatsResponse | undefined;
   settings: AppSettings;
   loading: boolean;
   message: string | undefined;
   filter: FilterStatus;
+  /** Whether Unread and Saved are grouped by topic (both start grouped). */
+  grouped: GroupedViews;
+  /** Applied search query, scoped to the current view ('' when off). */
+  search: string;
   /** Lazily loaded update bodies (lists are fetched without content). */
   content: Record<string, string>;
 }
 
 export interface FomoActions {
   setFilter(f: FilterStatus): void;
+  /** Switch the current Unread or Saved view between topics and a plain list. */
+  toggleGrouped(): void;
+  /** Search titles, summaries and content within the current view. */
+  setSearch(q: string): void;
   setStatus(id: string, status: Status): Promise<void>;
+  /** Grouped Unread: read updates leave the list. Grouped Saved: they stay, with their new status. */
+  setStatusMany(ids: string[], status: Status): Promise<void>;
   markRead(ids: string[]): Promise<void>;
   setSaved(id: string, saved: boolean): Promise<void>;
   loadContent(id: string): Promise<void>;
@@ -52,10 +69,15 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
   const [settings, setSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
-  const [filter, setFilterState] = useState<FilterStatus>('digest');
+  const [filter, setFilterState] = useState<FilterStatus>('unread');
+  const [grouped, setGrouped] = useState<GroupedViews>({ unread: true, saved: true });
+  const groupedRef = useRef(grouped);
   const [content, setContent] = useState<Record<string, string>>({});
   const filterRef = useRef(filter);
   filterRef.current = filter;
+  const [search, setSearchState] = useState('');
+  const searchRef = useRef(search);
+  const loadSeq = useRef(0);
   const contentRequested = useRef(new Set<string>());
 
   const messageTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -68,25 +90,30 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
   const loadView = useCallback(
     async (f: FilterStatus) => {
       if (f === 'todos') return;
+      // Searches are slower full scans; drop responses superseded by a newer load.
+      const seq = ++loadSeq.current;
       setLoading(true);
       try {
-        if (f === 'digest') {
-          const resp = await service.getDigest();
+        const search = searchRef.current || undefined;
+        if (isGroupedView(f, groupedRef.current)) {
+          const resp = await service.getDigest({ search, saved: f === 'saved' });
+          if (seq !== loadSeq.current) return;
           setDigest(resp.entries);
           setPending(resp.pending);
           return;
         }
-        const opts = f === 'saved'
-          ? { saved: true, limit: 200, includeContent: false }
-          : { status: f, limit: 200, includeContent: false };
-        const resp = await service.listUpdates(opts);
+        const resp = await service.listUpdates(f === 'saved'
+          ? { saved: true, search, limit: 200, includeContent: false }
+          : { status: f, search, limit: 200, includeContent: false });
+        if (seq !== loadSeq.current) return;
         setUpdates(resp.updates);
         setTotal(resp.total);
         setHasMore(resp.hasMore);
       } catch (err) {
+        if (seq !== loadSeq.current) return;
         showMessage(`Error loading updates: ${errorText(err)}`, 6000);
       } finally {
-        setLoading(false);
+        if (seq === loadSeq.current) setLoading(false);
       }
     },
     [service, showMessage],
@@ -125,13 +152,37 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     [loadView],
   );
 
-  const setStatus = useCallback(
-    async (id: string, status: Status) => {
-      setUpdates((prev) => prev.map((u) => (u.id === id ? { ...u, status } : u)));
-      if (status === 'read') setDigest((prev) => removeFromDigest(prev, new Set([id])));
-      showMessage(`Marked ${status}`);
+  const toggleGrouped = useCallback(() => {
+    const f = filterRef.current;
+    if (!canGroup(f)) return;
+    const next = { ...groupedRef.current, [f]: !groupedRef.current[f] };
+    groupedRef.current = next;
+    setGrouped(next);
+    showMessage(`${f === 'unread' ? 'Unread' : 'Saved'}: ${next[f] ? 'grouped by topic' : 'list'}`);
+    void loadView(f);
+  }, [loadView, showMessage]);
+
+  const setSearch = useCallback(
+    (q: string) => {
+      const next = q.trim();
+      if (next === searchRef.current) return;
+      searchRef.current = next;
+      setSearchState(next);
+      void loadView(filterRef.current);
+    },
+    [loadView],
+  );
+
+  const setStatusMany = useCallback(
+    async (ids: string[], status: Status) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      setUpdates((prev) => prev.map((u) => (idSet.has(u.id) ? { ...u, status } : u)));
+      if (filterRef.current === 'saved') setDigest((prev) => patchDigest(prev, idSet, { status }));
+      else if (status === 'read') setDigest((prev) => removeFromDigest(prev, idSet));
+      showMessage(`✓ ${ids.length > 1 ? `${ids.length} marked` : 'Marked'} ${status}`);
       try {
-        await service.setStatus(id, status);
+        await service.setStatusMany(ids, status);
         void loadStats();
       } catch (err) {
         showMessage(`Error: ${errorText(err)}`);
@@ -141,32 +192,15 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     [service, showMessage, loadStats, refresh],
   );
 
-  const markRead = useCallback(
-    async (ids: string[]) => {
-      if (ids.length === 0) return;
-      const idSet = new Set(ids);
-      setUpdates((prev) => prev.map((u) => (idSet.has(u.id) ? { ...u, status: 'read' as Status } : u)));
-      setDigest((prev) => removeFromDigest(prev, idSet));
-      showMessage(ids.length > 1 ? `✓ ${ids.length} marked read` : '✓ Marked read');
-      try {
-        await service.setStatusMany(ids, 'read');
-        void loadStats();
-      } catch (err) {
-        showMessage(`Error: ${errorText(err)}`);
-        await refresh();
-      }
-    },
-    [service, showMessage, loadStats, refresh],
-  );
+  const setStatus = useCallback((id: string, status: Status) => setStatusMany([id], status), [setStatusMany]);
+  const markRead = useCallback((ids: string[]) => setStatusMany(ids, 'read'), [setStatusMany]);
 
   const setSaved = useCallback(
     async (id: string, saved: boolean) => {
       setUpdates((prev) => prev.map((u) => (u.id === id ? { ...u, saved } : u)));
-      setDigest((prev) => prev.map((e) => (
-        e.items.some((u) => u.id === id)
-          ? { ...e, items: e.items.map((u) => (u.id === id ? { ...u, saved } : u)) }
-          : e
-      )));
+      setDigest((prev) => (
+        !saved && filterRef.current === 'saved' ? removeFromDigest(prev, new Set([id])) : patchDigest(prev, new Set([id]), { saved })
+      ));
       showMessage(saved ? '⭐ Saved' : 'Unsaved');
       try {
         await service.setSaved(id, saved);
@@ -217,9 +251,14 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     loading,
     message,
     filter,
+    grouped,
+    search,
     content,
     setFilter,
+    toggleGrouped,
+    setSearch,
     setStatus,
+    setStatusMany,
     markRead,
     setSaved,
     loadContent,

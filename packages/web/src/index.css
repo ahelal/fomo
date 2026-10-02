@@ -20,6 +20,7 @@
   --unread-color: #f0f6fc;
   --read-color: #8b949e;
   --saved-color: #e3b341;
+  --purple: #d2a8ff;
 }
 
 /* ─── Reset ──────────────────────────────────────────────────────────────────── */
@@ -66,13 +67,20 @@ body {
 /* ─── Filter pills ───────────────────────────────────────────────────────────── */
 .filters {
   display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  align-items: center;
+  gap: 8px;
   padding: 6px 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+.filters__pills {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .filter-pill {
   flex-shrink: 0;
@@ -88,6 +96,60 @@ body {
 }
 .filter-pill:hover { border-color: var(--blue-bright); color: var(--text); }
 .filter-pill--active { background: var(--blue-dim); border-color: var(--blue); color: var(--text-bright); }
+.filter-pill__mode { color: var(--text-dim); }
+
+/* ─── Search (scoped to the current view) ───────────────────────────────────── */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 260px;
+  min-width: 140px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text-dim);
+  transition: border-color 0.1s, flex-basis 0.15s;
+}
+.search:focus-within { border-color: var(--blue-bright); }
+.search--active { border-color: var(--yellow); }
+.search__icon { flex-shrink: 0; }
+.search__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-bright);
+  font: inherit;
+  font-size: 12px;
+}
+.search__input::placeholder { color: var(--text-dim); }
+.search__input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
+.search__hint {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 14px;
+}
+.search__count { flex-shrink: 0; color: var(--yellow); font-size: 11px; white-space: nowrap; }
+.search__clear {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+.search__clear:hover { color: var(--text); }
 
 /* ─── StatusBar interactive elements ─────────────────────────────────────────── */
 .statusbar__settings-btn,
@@ -280,6 +342,8 @@ body {
 .digest-row__read:hover { border-color: var(--green); color: var(--green); }
 .digest-row__imp { color: var(--orange); margin-right: 6px; }
 .digest-row--imp-low .digest-row__title { color: var(--text-dim); font-weight: normal; }
+.digest-row__unread { color: var(--cyan); }
+.digest-row--read .digest-row__title { color: var(--text-dim); font-weight: normal; }
 
 /* ─── Topic pane ─────────────────────────────────────────────────────────────── */
 .topic-pane__importance { font-weight: 600; }
@@ -394,6 +458,37 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* Copilot summary saved by the TUI (g) */
+.detail-pane__gist {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--purple);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.detail-pane__gist-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--purple);
+}
+.detail-pane__gist-summary { color: var(--text-bright); font-size: 13px; line-height: 1.5; }
+.detail-pane__gist-points {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.detail-pane__gist-points li::marker { color: var(--purple); }
 .detail-pane__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .detail-pane__mobile-actions { display: none; }
 .detail-pane__no-preview {
@@ -420,6 +515,7 @@ body {
 .btn:hover { border-color: var(--blue); color: var(--text-bright); }
 .btn--primary { background: var(--blue-dim); border-color: var(--blue); }
 .btn--primary:hover { background: var(--blue); }
+.btn:disabled { opacity: 0.5; cursor: default; pointer-events: none; }
 
 /* ─── Empty state ────────────────────────────────────────────────────────────── */
 .empty { padding: 32px; text-align: center; color: var(--text-dim); }
@@ -709,6 +805,15 @@ body {
   .statusbar { gap: 6px; padding: 6px 8px; flex-wrap: wrap; }
   .statusbar__counts { display: none; }
   .statusbar__filter { margin-left: auto; }
+
+  /* Compact search that widens while typing */
+  .search { flex: 0 0 120px; min-width: 0; height: 30px; }
+  .search:focus-within,
+  .search--active { flex-basis: 55%; }
+  .search__hint,
+  .search__count-label { display: none; }
+  /* 16px stops iOS Safari from zooming into the field on focus */
+  .search__input { font-size: 16px; }
 
   /* Full width detail pane */
   .main--preview-right .detail-pane,

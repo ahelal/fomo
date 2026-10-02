@@ -31,7 +31,7 @@ export interface DigestTopicStore {
 }
 
 export interface DigestOptions {
-  /** Max unread items to digest per run (newest first). Default 300. */
+  /** Max items to digest per run (newest first). Default 300. */
   maxItems?: number;
   /** Items per planning call. Default 300 (one call, so the model sees everything at once). */
   planBatchSize?: number;
@@ -45,10 +45,12 @@ export interface DigestOptions {
   planTimeoutMs?: number;
   /** Timeout per topic-writing attempt in ms (one retry on failure). Default 120000. */
   writeTimeoutMs?: number;
-  /** Ungroup all unread items and regroup from scratch. */
+  /** Ungroup all unread and saved items and regroup from scratch. */
   reset?: boolean;
   /** Free-text reader interests; nudges importance by at most one level. */
   interests?: string;
+  /** Free-text grouping instructions; take priority over the default grouping rules. */
+  groupingHints?: string;
   onProgress?(message: string): void;
   /** Injectable for tests. */
   now?(): Date;
@@ -58,7 +60,7 @@ export interface DigestOptions {
 export interface DigestResult {
   /** Items grouped in this run. */
   processed: number;
-  /** Unread items still ungrouped (over `maxItems` or failed planning calls). */
+  /** Unread or saved items still ungrouped (over `maxItems` or failed planning calls). */
   remaining: number;
   created: number;
   updated: number;
@@ -84,7 +86,8 @@ function capImportance(value: TopicImportance | undefined, cap: TopicImportance 
 }
 
 /**
- * Group unread, ungrouped updates into product-area topics in two passes:
+ * Group ungrouped unread and saved updates (saved ones also when read, so the Saved view is grouped too)
+ * into product-area topics in two passes:
  * 1. plan — the model sees all pending items (titles + short excerpts) and the open topics at once,
  *    and assigns items to topics with an importance rating; items it skips get one more planning call,
  *    and new topics over `maxTopicItems` get a call to split them into narrower areas;
@@ -106,15 +109,21 @@ export async function runDigest(
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => globalThis.crypto.randomUUID());
   const log = options.onProgress ?? (() => undefined);
+  const reader = { interests: options.interests, groupingHints: options.groupingHints };
 
-  const { updates: unread } = await stores.updates.listUpdates({
-    status: 'unread',
-    limit: Number.MAX_SAFE_INTEGER,
-    includeContent: true,
-  });
+  const lists = await Promise.all(
+    [{ status: 'unread' as const }, { saved: true }].map((filter) =>
+      stores.updates.listUpdates({ ...filter, limit: Number.MAX_SAFE_INTEGER, includeContent: true }),
+    ),
+  );
+  const activeById = new Map<string, Update>();
+  for (const u of lists.flatMap((l) => l.updates)) {
+    if (u.status === 'unread' || u.saved) activeById.set(u.id, u);
+  }
+  const active = [...activeById.values()];
 
   if (options.reset) {
-    const grouped = unread.filter((u) => u.topicId);
+    const grouped = active.filter((u) => u.topicId);
     const topicIds = [...new Set(grouped.map((u) => u.topicId!))];
     log(`Resetting ${grouped.length} item(s) across ${topicIds.length} topic(s)…`);
     await mapLimit(grouped, 8, (u) => stores.updates.setTopicId(u.id, ''));
@@ -122,9 +131,9 @@ export async function runDigest(
     for (const u of grouped) delete u.topicId;
   }
 
-  const open = await stores.topics.getTopics(unread.map((u) => u.topicId ?? '').filter(Boolean));
+  const open = await stores.topics.getTopics(active.map((u) => u.topicId ?? '').filter(Boolean));
   const topicTitles = new Map<string, string[]>();
-  const newestFirst = [...unread].sort((a, b) => b.datePublished.localeCompare(a.datePublished));
+  const newestFirst = [...active].sort((a, b) => b.datePublished.localeCompare(a.datePublished));
   for (const u of newestFirst) {
     if (u.topicId && open.has(u.topicId)) topicTitles.set(u.topicId, [...(topicTitles.get(u.topicId) ?? []), u.title]);
   }
@@ -162,7 +171,7 @@ export async function runDigest(
       .map((topic) => ({ topic, itemTitles: topicTitles.get(topic.id) ?? [] }));
     log(`${label} ${batch.length} item(s), ${context.length} open topic(s)…`);
     try {
-      const prompt = buildPlanPrompt(batch, context, { interests: options.interests });
+      const prompt = buildPlanPrompt(batch, context, reader);
       const groups = reconcilePlan(
         await summarizer.generateJson({ ...prompt, timeoutMs: planTimeoutMs }),
         prompt,
@@ -204,7 +213,7 @@ export async function runDigest(
     const { topic, items } = entry;
     log(`Splitting "${topic.title}" (${items.length})…`);
     try {
-      const prompt = buildSplitPrompt(topic.title, items, { interests: options.interests, otherTopics });
+      const prompt = buildSplitPrompt(topic.title, items, { ...reader, otherTopics });
       const groups = reconcilePlan(await summarizer.generateJson({ ...prompt, timeoutMs: planTimeoutMs }), prompt);
       if (groups.length < 2) return;
       const placed = new Set(groups.flatMap((g) => g.itemIds));

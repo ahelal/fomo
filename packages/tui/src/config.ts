@@ -19,9 +19,11 @@ export interface LocalConfig {
   copilotModel?: string;
   /** Reader interests that nudge digest importance. */
   interests?: string;
+  /** Free-text instructions for how the digest groups updates into topics. */
+  groupingHints?: string;
   /** Group new updates with Copilot after each fetch. Default true. */
   autoDigest?: boolean;
-  /** Most unread updates one digest run sends to Copilot; the rest wait for the next run. Default 300. */
+  /** Most updates one digest run sends to Copilot; the rest wait for the next run. Default 300. */
   digestMaxItems?: number;
   /** Magic link validity in days. Default 365. */
   linkDays?: number;
@@ -38,6 +40,7 @@ export const CONFIG_ENV: Partial<Record<keyof LocalConfig, string>> = {
   webUrl: 'FOMO_WEB_URL',
   copilotModel: 'FOMO_COPILOT_MODEL',
   interests: 'FOMO_INTERESTS',
+  groupingHints: 'FOMO_GROUPING_HINTS',
 };
 
 export function readConfigFile(): LocalConfig {
@@ -49,7 +52,7 @@ export function readConfigFile(): LocalConfig {
     throw new Error(`Failed to parse ${CONFIG_FILE}: ${err instanceof Error ? err.message : String(err)}`);
   }
   const out: LocalConfig = {};
-  for (const key of ['connectionString', 'webUrl', 'copilotModel', 'interests', 'backupDir'] as const) {
+  for (const key of ['connectionString', 'webUrl', 'copilotModel', 'interests', 'groupingHints', 'backupDir'] as const) {
     if (typeof raw[key] === 'string' && raw[key]) out[key] = raw[key] as string;
   }
   if (typeof raw.autoDigest === 'boolean') out.autoDigest = raw.autoDigest;
@@ -80,6 +83,7 @@ export function loadConfig(): LocalConfig {
     webUrl: env('webUrl') || file.webUrl,
     copilotModel: env('copilotModel') || file.copilotModel,
     interests: env('interests') || file.interests,
+    groupingHints: env('groupingHints') || file.groupingHints,
   };
 }
 

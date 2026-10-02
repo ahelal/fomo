@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { FomoDirectService } from '@fomo/core/service';
+import { FomoDirectService, type PostGistResult } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { connectionStringProblem, saveConfig, type LocalConfig } from '../config.js';
 import type { SummarizerCache } from '../copilot.js';
@@ -41,11 +41,20 @@ export function Root({ initialConfig, summarizers }: Props) {
       return service.digest(summarizers.get(config.copilotModel), {
         onProgress,
         interests: config.interests,
+        groupingHints: config.groupingHints,
         maxItems: config.digestMaxItems,
         reset: options.reset,
       });
     },
-    [service, summarizers, config.copilotModel, config.interests, config.digestMaxItems],
+    [service, summarizers, config.copilotModel, config.interests, config.groupingHints, config.digestMaxItems],
+  );
+
+  const summarize = useCallback(
+    (id: string, force = false): Promise<PostGistResult> => {
+      if (!service) return Promise.reject(new Error('Not connected to storage'));
+      return service.summarizePost(id, summarizers.get(config.copilotModel), { force });
+    },
+    [service, summarizers, config.copilotModel],
   );
 
   const connect = useCallback(
@@ -75,6 +84,7 @@ export function Root({ initialConfig, summarizers }: Props) {
       config={config}
       onConfigChange={updateConfig}
       digest={digest}
+      summarize={summarize}
     />
   );
 }

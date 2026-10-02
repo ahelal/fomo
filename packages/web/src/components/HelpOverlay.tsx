@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type HelpContext = 'list' | 'detail' | 'settings' | 'digest';
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved';
 
 interface Props {
   context: HelpContext;
@@ -19,6 +19,18 @@ const DIGEST_KEYS: [string, string][] = [
   ['x / r', 'Mark topic (or update) read & next'],
   ['n',     'Jump to next topic'],
   ['s',     'Save / unsave update'],
+  ['o',     'Open in browser (newest in topic)'],
+  ['Esc/⌫', 'Close detail'],
+];
+
+const SAVED_KEYS: [string, string][] = [
+  ['↵',     'Expand / collapse topic'],
+  ['→/l',   'Expand topic'],
+  ['←',     'Collapse topic'],
+  ['r / u', 'Mark topic (or update) read / unread'],
+  ['x',     'Mark read & next'],
+  ['n',     'Jump to next topic'],
+  ['s',     'Unsave update'],
   ['o',     'Open in browser (newest in topic)'],
   ['Esc/⌫', 'Close detail'],
 ];
@@ -46,9 +58,11 @@ const DETAIL_KEYS: [string, string][] = [
 const GLOBAL_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
-  ['0',    'Digest: unread grouped by topic'],
-  ['1–4',  'Filter: all / unread / read / saved'],
+  ['1–4',  'All / unread / read / saved'],
+  ['2 / 4','Again: switch Unread / Saved between topics and a list'],
   ['5/t',  'Todos'],
+  ['/',    'Search titles & content in this view (↵ search)'],
+  ['Esc',  'Clear the search'],
   ['c',    'Open config'],
   ['.',    'Toggle preview position'],
   ['h',    'Show this help'],
@@ -64,7 +78,10 @@ function buildSections(context: Props['context']): Section[] {
     return [{ title: 'Config', keys: SETTINGS_KEYS }];
   }
   if (context === 'digest') {
-    return [{ title: 'Digest', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+    return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+  }
+  if (context === 'saved') {
+    return [{ title: 'Saved topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   return [
     {
@@ -79,7 +96,8 @@ const CONTEXT_LABEL: Record<string, string> = {
   list: 'Main View',
   detail: 'Detail View',
   settings: 'Config',
-  digest: 'Digest',
+  digest: 'Unread · topics',
+  saved: 'Saved · topics',
 };
 
 export function HelpOverlay({ context, onClose }: Props) {

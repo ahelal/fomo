@@ -1,11 +1,14 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { Update } from '@fomo/core';
+import { textWidth } from '../text.js';
 
 interface Props {
   update: Update;
   /** Content is still being loaded. */
   loading?: boolean;
+  /** Copilot is summarising this post (g / G). */
+  summarizing?: boolean;
   height: number;
   columns: number;
   position?: 'bottom' | 'right';
@@ -22,7 +25,23 @@ const SOURCE_COLOR: Record<string, string> = {
   vscode: '#3fb950',
 };
 
-export function DetailPane({ update, loading = false, height, columns, position = 'bottom' }: Props) {
+const GIST_COLOR = '#d2a8ff';
+
+/** Rows `text` takes when word-wrapped to `width` columns. */
+function wrappedRows(text: string, width: number): number {
+  let rows = 1;
+  let used = 0;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const w = textWidth(word);
+    if (used === 0) used = w;
+    else if (used + 1 + w <= width) used += 1 + w;
+    else { rows++; used = w; }
+    while (used > width) { rows++; used -= width; }
+  }
+  return rows;
+}
+
+export function DetailPane({ update, loading = false, summarizing = false, height, columns, position = 'bottom' }: Props) {
   const badge = STATUS_BADGE[update.status] ?? { label: '???', color: 'white' };
   const sourceColor = SOURCE_COLOR[update.source] ?? '#58a6ff';
 
@@ -35,8 +54,24 @@ export function DetailPane({ update, loading = false, height, columns, position 
 
   const hasContent = content.length > 0;
 
-  const contentLines = Math.max(1, height - 6);
-  const maxContentLen = columns * contentLines;
+  // Title, source, status, URL and divider (+ the top divider at the bottom); the rest is the body.
+  const bodyRows = Math.max(1, height - (position === 'bottom' ? 6 : 5));
+  const gist = update.gist;
+  // The saved summary goes first: its sentence, then as many bullets as fit above a divider and a line of preview.
+  const gistWidth = Math.max(columns - 6, 10);
+  const points: string[] = [];
+  let gistRows = 0;
+  if (gist) {
+    gistRows = wrappedRows(gist.summary, gistWidth);
+    for (const point of gist.points) {
+      const n = wrappedRows(point, gistWidth);
+      if (gistRows + n > bodyRows - 2) break;
+      points.push(point);
+      gistRows += n;
+    }
+  }
+  const contentLines = gist ? bodyRows - gistRows - 1 : bodyRows;
+  const maxContentLen = columns * Math.max(1, contentLines);
   const truncatedContent = content.length > maxContentLen
     ? content.slice(0, maxContentLen - 1) + '…'
     : content;
@@ -45,61 +80,93 @@ export function DetailPane({ update, loading = false, height, columns, position 
     <Box flexDirection="column" height={height} overflowY="hidden">
       {/* Top divider */}
       {position === 'bottom' && (
-        <Box paddingX={1}>
+        <Box paddingX={1} flexShrink={0}>
           <Text color="#30363d">{'─'.repeat(Math.max(columns - 2, 10))}</Text>
         </Box>
       )}
 
       {/* Title */}
-      <Box paddingX={2}>
+      <Box paddingX={2} flexShrink={0}>
         <Text bold color="#f0f6fc" wrap="truncate">
           {update.title}
         </Text>
       </Box>
 
       {/* Meta: source + date */}
-      <Box paddingX={2}>
-        <Text color="#8b949e">{'Source '}</Text>
-        <Text color={sourceColor} bold>{update.source}</Text>
-        <Text color="#8b949e">{'   Published '}</Text>
-        <Text color="#c9d1d9">{update.datePublished.slice(0, 10)}</Text>
+      <Box paddingX={2} flexShrink={0}>
+        <Text color="#8b949e" wrap="truncate">
+          {'Source '}
+          <Text color={sourceColor} bold>{update.source}</Text>
+          {'   Published '}
+          <Text color="#c9d1d9">{update.datePublished.slice(0, 10)}</Text>
+        </Text>
       </Box>
 
       {/* Meta: status + saved */}
-      <Box paddingX={2}>
+      <Box paddingX={2} flexShrink={0}>
         <Text color="#8b949e">{'Status '}</Text>
         <Text color={badge.color} bold>{badge.label.toLowerCase()}</Text>
         {update.saved && <Text color="#e3b341" bold>{' ⭐'}</Text>}
+        {summarizing ? (
+          <Text color={GIST_COLOR} wrap="truncate">{'   ⟳ Copilot is summarising…'}</Text>
+        ) : !gist ? (
+          <Text color="#8b949e" dimColor wrap="truncate">{'   g summarise'}</Text>
+        ) : null}
       </Box>
 
       {/* URL */}
-      <Box paddingX={2}>
+      <Box paddingX={2} flexShrink={0}>
         <Text color="#58a6ff" underline wrap="truncate">{update.url}</Text>
       </Box>
 
       {/* Content divider */}
-      <Box paddingX={2}>
+      <Box paddingX={2} flexShrink={0}>
         <Text color="#30363d">{'─'.repeat(Math.max(columns - 6, 10))}</Text>
       </Box>
 
+      {/* Saved Copilot summary */}
+      {gist && (
+        <>
+          <Box paddingX={2} flexShrink={0}>
+            <Box flexShrink={0}><Text color={GIST_COLOR} bold>{'✦ '}</Text></Box>
+            <Text color="#f0f6fc" wrap="wrap">{gist.summary}</Text>
+          </Box>
+          {points.map((point, i) => (
+            <Box key={i} paddingX={2} flexShrink={0}>
+              <Box flexShrink={0}><Text color={GIST_COLOR}>{'• '}</Text></Box>
+              <Text color="#c9d1d9" wrap="wrap">{point}</Text>
+            </Box>
+          ))}
+          {contentLines > 0 && (
+            <Box paddingX={2} flexShrink={0}>
+              <Text color="#30363d">{'┄'.repeat(Math.max(columns - 6, 10))}</Text>
+            </Box>
+          )}
+        </>
+      )}
+
       {/* Content preview */}
-      <Box paddingX={2} flexGrow={1} overflowY="hidden">
-        {hasContent ? (
-          <Text wrap="wrap" color="#c9d1d9">
-            {truncatedContent}
-          </Text>
-        ) : loading ? (
-          <Text color="#8b949e">Loading…</Text>
-        ) : (
-          <Text wrap="wrap" color="#8b949e">
-            {'No preview — press '}
-            <Text color="#58a6ff" bold>p</Text>
-            {' to fetch content or '}
-            <Text color="#58a6ff" bold>o</Text>
-            {' to open in browser'}
-          </Text>
-        )}
-      </Box>
+      {contentLines > 0 && (
+        <Box paddingX={2} flexGrow={1} overflowY="hidden">
+          {hasContent ? (
+            <Text wrap="wrap" color="#c9d1d9">
+              {truncatedContent}
+            </Text>
+          ) : loading ? (
+            <Text color="#8b949e">Loading…</Text>
+          ) : (
+            <Text wrap="wrap" color="#8b949e">
+              {'No preview — press '}
+              <Text color="#58a6ff" bold>p</Text>
+              {gist ? ' to fetch content or ' : ' to fetch content, '}
+              {!gist && <Text color="#58a6ff" bold>g</Text>}
+              {!gist && ' to summarise or '}
+              <Text color="#58a6ff" bold>o</Text>
+              {' to open in browser'}
+            </Text>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }

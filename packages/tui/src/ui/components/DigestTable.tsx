@@ -14,12 +14,17 @@ interface Props {
   columns: number;
   sourceLabels?: Record<string, string>;
   sourceColors?: Record<string, string>;
+  /** Applied search, for the empty state. */
+  search?: string;
+  /** `saved` lists saved updates (read or unread) and marks the unread ones instead of the saved ones. */
+  mode?: 'digest' | 'saved';
 }
 
 const SEL_BG = '#1c2d4f';
 const SOURCE_W = 13;
 const DATE_W = 12;
 const COUNT_W = 5;
+const UNREAD_COLOR = '#58a6ff';
 
 /** Summary shown under a single-update topic row; falls back to the topic's Copilot summary. */
 function soloSummary(entry: DigestEntry): string {
@@ -44,7 +49,10 @@ export function DigestTable({
   columns,
   sourceLabels = {},
   sourceColors = {},
+  search,
+  mode = 'digest',
 }: Props) {
+  const saved = mode === 'saved';
   // header(1) + bottom indicator(1)
   const budget = Math.max(1, height - 2);
   const scrollOffsetRef = useRef(0);
@@ -86,9 +94,21 @@ export function DigestTable({
     return (
       <Box flexDirection="column" height={height}>
         <Box flexGrow={1} alignItems="center" justifyContent="center">
-          <Text color="#8b949e">All caught up — press </Text>
-          <Text color="#58a6ff" bold>f</Text>
-          <Text color="#8b949e"> for new updates</Text>
+          {search ? (
+            <Text color="#8b949e">{`No ${saved ? 'saved' : 'unread'} updates match “${search}” — Esc clears the search`}</Text>
+          ) : saved ? (
+            <>
+              <Text color="#8b949e">No saved updates — press </Text>
+              <Text color="#58a6ff" bold>s</Text>
+              <Text color="#8b949e"> on an update to save it</Text>
+            </>
+          ) : (
+            <>
+              <Text color="#8b949e">All caught up — press </Text>
+              <Text color="#58a6ff" bold>f</Text>
+              <Text color="#8b949e"> for new updates</Text>
+            </>
+          )}
         </Box>
       </Box>
     );
@@ -116,6 +136,8 @@ export function DigestTable({
 
         if (row.kind === 'item') {
           const u = row.update;
+          const unread = u.status === 'unread';
+          const mark = saved ? (unread ? '●' : '└') : u.saved ? '⭐' : '└';
           return (
             <Box key={row.key} flexDirection="column">
               <Box paddingX={1}>
@@ -123,8 +145,8 @@ export function DigestTable({
                 <Text backgroundColor={bg}>{'  '}</Text>
                 <Text color={color(u.source)} backgroundColor={bg}>{label(u.source).padEnd(SOURCE_W)}</Text>
                 <Text color="#8b949e" backgroundColor={bg}>{u.datePublished.slice(0, 10).padEnd(DATE_W)}</Text>
-                <Text color="#30363d" backgroundColor={bg}>{(u.saved ? '⭐' : '└').padEnd(COUNT_W)}</Text>
-                <Text color="#c9d1d9" backgroundColor={bg} wrap="truncate">{clip(u.title, titleW)}</Text>
+                <Text color={saved && unread ? UNREAD_COLOR : '#30363d'} backgroundColor={bg}>{mark.padEnd(COUNT_W)}</Text>
+                <Text color={saved && !unread ? '#8b949e' : '#c9d1d9'} backgroundColor={bg} wrap="truncate">{clip(u.title, titleW)}</Text>
               </Box>
               {u.summary && (
                 <Box paddingX={1}>
@@ -144,7 +166,8 @@ export function DigestTable({
         const marker = solo ? '• ' : isOpen ? '▾ ' : '▸ ';
         const sourceText = entry.sources.length === 1 ? label(entry.sources[0]!) : `${entry.sources.length} sources`;
         const sourceColor = entry.sources.length === 1 ? color(entry.sources[0]!) : '#c9d1d9';
-        const count = solo ? (solo.saved ? '⭐' : '') : `×${entry.items.length}`;
+        const soloMark = saved ? (solo?.status === 'unread' ? '●' : '') : solo?.saved ? '⭐' : '';
+        const count = solo ? soloMark : `×${entry.items.length}`;
         const importance = entry.topic.importance;
         const titleColor = importance === 'low' ? '#8b949e' : '#f0f6fc';
         const title = solo ? solo.title : entry.topic.title;
@@ -161,7 +184,7 @@ export function DigestTable({
               <Text color={solo ? '#8b949e' : '#58a6ff'} backgroundColor={bg}>{marker}</Text>
               <Text color={sourceColor} bold backgroundColor={bg}>{sourceText.padEnd(SOURCE_W)}</Text>
               <Text color="#f0f6fc" backgroundColor={bg}>{entry.latestDate.slice(0, 10).padEnd(DATE_W)}</Text>
-              <Text color={solo ? '#e3b341' : '#58a6ff'} bold backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
+              <Text color={solo && !saved ? '#e3b341' : '#58a6ff'} bold backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
               {importance === 'high' && <Text color="#f0883e" bold backgroundColor={bg}>{'▲ '}</Text>}
               <Text color={titleColor} bold={importance !== 'low'} backgroundColor={bg} wrap="truncate">
                 {clip(title, importance === 'high' ? titleW - 2 : titleW)}

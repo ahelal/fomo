@@ -26,7 +26,7 @@ export type SettingsRow =
 
 const ACTIONS: { action: ActionId; label: string; hint: string }[] = [
   { action: 'link', label: 'Link a device', hint: 'magic link + QR code that connects the web app' },
-  { action: 'regroup', label: 'Regroup all topics', hint: 'rerun Copilot on every unread update (takes a few minutes)' },
+  { action: 'regroup', label: 'Regroup all topics', hint: 'rerun Copilot on every unread and saved update (takes a few minutes)' },
   { action: 'backup', label: 'Back up updates', hint: 'save all updates as JSON in the backup folder' },
   { action: 'restore', label: 'Restore from backup', hint: 'pick a backup file from the backup folder' },
 ];
@@ -36,6 +36,7 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
   { field: 'webUrl', label: 'Web app URL' },
   { field: 'copilotModel', label: 'Copilot model' },
   { field: 'interests', label: 'Interests' },
+  { field: 'groupingHints', label: 'Grouping hints' },
   { field: 'autoDigest', label: 'Group after fetch' },
   { field: 'digestMaxItems', label: 'Max items per run' },
   { field: 'linkDays', label: 'Link valid (days)' },
@@ -88,6 +89,8 @@ export function configDisplay(
       return config.copilotModel ? { value: config.copilotModel, muted: false, env } : muted(`${DEFAULT_COPILOT_MODEL} (default)`);
     case 'interests':
       return config.interests ? { value: config.interests, muted: false, env } : muted('(none)');
+    case 'groupingHints':
+      return config.groupingHints ? { value: config.groupingHints, muted: false, env } : muted('(none — e.g. one topic per Copilot surface)');
     case 'autoDigest':
       return { value: config.autoDigest === false ? 'off — fetch only' : 'on', muted: false };
     case 'digestMaxItems':

@@ -95,6 +95,18 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading,
         </button>
       </div>
 
+      {update.gist && (
+        <section className="detail-pane__gist" aria-label="Summary">
+          <p className="detail-pane__gist-label">✦ Summary</p>
+          <p className="detail-pane__gist-summary">{update.gist.summary}</p>
+          {update.gist.points.length > 0 && (
+            <ul className="detail-pane__gist-points">
+              {update.gist.points.map((point, i) => <li key={i}>{point}</li>)}
+            </ul>
+          )}
+        </section>
+      )}
+
       {hasContent ? (
         <pre className="detail-pane__content">{content}</pre>
       ) : contentLoading ? (

@@ -23,17 +23,27 @@ function byNewest(a: Update, b: Update): number {
   return b.datePublished.localeCompare(a.datePublished);
 }
 
+export interface BuildDigestOptions {
+  /** Group saved updates (read or unread) instead of unread ones. */
+  saved?: boolean;
+}
+
 /**
- * Group unread updates into digest entries, most important first, then newest.
+ * Group unread (or, with `saved`, saved) updates into digest entries, most important first, then newest.
  * Updates without a (known) topic become single-item synthetic entries so nothing is hidden.
  */
-export function buildDigest(unread: Update[], topics: ReadonlyMap<string, Topic>): DigestResponse {
+export function buildDigest(
+  updates: Update[],
+  topics: ReadonlyMap<string, Topic>,
+  options: BuildDigestOptions = {},
+): DigestResponse {
   const groups = new Map<string, Update[]>();
   const entries: DigestEntry[] = [];
   let pending = 0;
+  const include = options.saved ? (u: Update) => u.saved : (u: Update) => u.status === 'unread';
 
-  for (const u of unread) {
-    if (u.status !== 'unread') continue;
+  for (const u of updates) {
+    if (!include(u)) continue;
     if (u.topicId && topics.has(u.topicId)) {
       const list = groups.get(u.topicId) ?? [];
       list.push(u);
@@ -118,6 +128,30 @@ export function removeFromDigest(entries: DigestEntry[], updateIds: ReadonlySet<
     });
   }
   return out;
+}
+
+/** Apply `patch` to the given updates wherever they appear in the digest (e.g. a status change in the Saved view). */
+export function patchDigest(entries: DigestEntry[], updateIds: ReadonlySet<string>, patch: Partial<Update>): DigestEntry[] {
+  return entries.map((entry) => (
+    entry.items.some((u) => updateIds.has(u.id))
+      ? { ...entry, items: entry.items.map((u) => (updateIds.has(u.id) ? { ...u, ...patch } : u)) }
+      : entry
+  ));
+}
+
+/**
+ * Key of the row after `key`, skipping an expanded topic's own updates (so a topic moves to the next topic);
+ * stays on `key` at the end of the list, and starts at the first row when `key` is not found.
+ */
+export function nextRowKey(rows: DigestRow[], key: string | undefined): string | undefined {
+  const idx = key ? rows.findIndex((r) => r.key === key) : -1;
+  if (idx < 0) return rows[0]?.key;
+  const row = rows[idx]!;
+  let i = idx + 1;
+  if (row.kind === 'topic') {
+    while (rows[i]?.kind === 'item' && rows[i]!.entry.topic.id === row.entry.topic.id) i++;
+  }
+  return rows[i]?.key ?? row.key;
 }
 
 /**

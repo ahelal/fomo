@@ -1,9 +1,11 @@
 import { TableClient, odata, type TableEntity } from '@azure/data-tables';
 import { createTableClient, isSasConnection } from './connection.js';
 import { mapLimit } from '../util.js';
+import { matchesSearch, searchTerms } from '../search.js';
 import type {
   StoreConnection,
   Update,
+  PostGist,
   Status,
   ListOptions,
   ListResponse,
@@ -34,9 +36,11 @@ type UpdateEntity = TableEntity<{
   content: string;
   topicId?: string;
   summary?: string;
+  /** `PostGist` as JSON. */
+  gist?: string;
 }>;
 
-const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'topicId', 'summary'];
+const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'topicId', 'summary', 'gist'];
 
 // ─── ID helpers ────────────────────────────────────────────────────────────
 /**
@@ -60,7 +64,21 @@ export function parseId(id: string): { source: string; rowKey: string } {
   return { source: id.slice(0, sep), rowKey: id.slice(sep + 2) };
 }
 
+/** Parse a stored `gist` column; anything malformed is ignored. */
+function parseGistColumn(raw: string | undefined | null): PostGist | undefined {
+  if (!raw) return undefined;
+  try {
+    const value = JSON.parse(raw) as { summary?: unknown; points?: unknown };
+    if (typeof value.summary !== 'string' || !value.summary) return undefined;
+    const points = Array.isArray(value.points) ? value.points.filter((p): p is string => typeof p === 'string') : [];
+    return { summary: value.summary, points };
+  } catch {
+    return undefined;
+  }
+}
+
 function entityToUpdate(e: UpdateEntity): Update {
+  const gist = parseGistColumn(e.gist);
   return {
     id: `${e.partitionKey}__${e.rowKey}`,
     source: e.partitionKey,
@@ -74,6 +92,7 @@ function entityToUpdate(e: UpdateEntity): Update {
     content: e.content ?? '',
     ...(e.topicId ? { topicId: e.topicId } : {}),
     ...(e.summary ? { summary: e.summary } : {}),
+    ...(gist ? { gist } : {}),
   };
 }
 
@@ -92,6 +111,7 @@ export interface BackupEntity {
   content: string;
   topicId?: string;
   summary?: string;
+  gist?: string;
 }
 
 export interface BackupPayload {
@@ -255,6 +275,12 @@ export class UpdateStore {
     );
   }
 
+  /** Save the post's gist (Copilot summary of the full post). */
+  async setGist(id: string, gist: PostGist): Promise<void> {
+    const { source, rowKey } = parseId(id);
+    await this.client.updateEntity({ partitionKey: source, rowKey, gist: JSON.stringify(gist) }, 'Merge');
+  }
+
   async getUpdate(id: string): Promise<Update | null> {
     const { source, rowKey } = parseId(id);
     try {
@@ -280,13 +306,18 @@ export class UpdateStore {
     }
 
     const filter = filters.length > 0 ? filters.join(' and ') : undefined;
-    const select = options.includeContent === false ? LIST_COLUMNS : undefined;
+    // Table Storage can't search text, so a search reads content and filters here.
+    const searching = searchTerms(options.search).length > 0;
+    const withContent = options.includeContent !== false;
+    const select = withContent || searching ? undefined : LIST_COLUMNS;
 
     const iter = this.client.listEntities<UpdateEntity>({ queryOptions: { filter, select } });
 
     const updates: Update[] = [];
     for await (const entity of iter) {
-      updates.push(entityToUpdate(entity as UpdateEntity));
+      const update = entityToUpdate(entity as UpdateEntity);
+      if (searching && !matchesSearch(update, options.search)) continue;
+      updates.push(withContent ? update : { ...update, content: '' });
     }
 
     // Sort newest-first in application (Table Storage has no ORDER BY)
@@ -347,6 +378,7 @@ export class UpdateStore {
         content: e.content ?? '',
         ...(e.topicId ? { topicId: e.topicId } : {}),
         ...(e.summary ? { summary: e.summary } : {}),
+        ...(e.gist ? { gist: e.gist } : {}),
       });
     }
 
@@ -380,6 +412,7 @@ export class UpdateStore {
           content: e.content,
           ...(e.topicId ? { topicId: e.topicId } : {}),
           ...(e.summary ? { summary: e.summary } : {}),
+          ...(e.gist ? { gist: e.gist } : {}),
         },
         'Replace',
       );

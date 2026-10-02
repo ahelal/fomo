@@ -2,8 +2,10 @@ import { UpdateStore, TodoStore } from './store/tables.js';
 import { TopicStore } from './store/topics.js';
 import { getAllSources } from './scraper/registry.js';
 import { buildDigest } from './digest/view.js';
+import { searchDigest, searchTerms } from './search.js';
 import type {
   FomoService,
+  DigestQuery,
   StoreConnection,
   Update,
   ListOptions,
@@ -79,15 +81,24 @@ export class FomoStorageService implements FomoService {
     return this.store.getStats();
   }
 
-  async getDigest(): Promise<DigestResponse> {
+  async getDigest(query: DigestQuery = {}): Promise<DigestResponse> {
     await this.ensureInit();
+    const searching = searchTerms(query.search).length > 0;
     const { updates } = await this.store.listUpdates({
-      status: 'unread',
+      ...(query.saved ? { saved: true } : { status: 'unread' as const }),
+      ...(query.source ? { source: query.source } : {}),
       limit: Number.MAX_SAFE_INTEGER,
-      includeContent: false,
+      includeContent: searching,
     });
     const topics = await this.topicStore.getTopics(updates.map((u) => u.topicId ?? '').filter(Boolean));
-    return buildDigest(updates, topics);
+    const digest = buildDigest(updates, topics, { saved: query.saved });
+    if (!searching) return digest;
+    // Content was only needed to match; digest lists stay light like the unfiltered ones.
+    const entries = searchDigest(digest.entries, query.search).map((e) => ({
+      ...e,
+      items: e.items.map((u) => ({ ...u, content: '' })),
+    }));
+    return { entries, pending: entries.filter((e) => e.synthetic).length };
   }
 
   async getSources(): Promise<SourceInfo[]> {
