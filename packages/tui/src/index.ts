@@ -5,8 +5,7 @@ import { CONFIG_FILE, LOG_FILE, loadConfig } from './config.js';
 import { SummarizerCache } from './copilot.js';
 import { Root } from './ui/Root.js';
 import { enterFullScreen } from './ui/screen.js';
-
-const VERSION = '0.1.0';
+import { VERSION } from './version.js';
 
 const USAGE = `📰 FOMO — release & update tracker (v${VERSION})
 

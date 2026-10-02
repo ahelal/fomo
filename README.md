@@ -231,7 +231,7 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `o`             | Open URL in a new tab                     |
 | `.`             | Toggle preview position (right / bottom)  |
 | `c`             | Config                                    |
-| `h`             | Help                                      |
+| `h`             | Help (also shows the version)             |
 
 Fetching isn't done in the browser. Run `fomo` on your computer and press `f`, then pull to refresh.
 
@@ -261,7 +261,7 @@ Run `fomo`. It opens on the **Digest**. There are no subcommands: `fomo --help` 
 | `t`             | Todos (`a` add, `Enter` cycle status, `d` delete) |
 | `Esc`           | Clear the source filter                   |
 | `.`             | Show preview / toggle its position        |
-| `h`             | Help                                      |
+| `h`             | Help (also shows the version)             |
 | `q`             | Quit                                      |
 
 The status bar shows counts by status; the config screen shows counts per source.
