@@ -90,7 +90,7 @@ export function HelpOverlay({ context, onClose }: Props) {
       <div className="help-panel" onClick={(e) => e.stopPropagation()}>
         <div className="help-panel__header">
           <h2>⌨ Keyboard Shortcuts</h2>
-          <span className="help-panel__context">{CONTEXT_LABEL[context]}</span>
+          <span className="help-panel__context">{CONTEXT_LABEL[context]} · FOMO v{__FOMO_VERSION__}</span>
           <button className="btn" onClick={onClose}>✕</button>
         </div>
 
