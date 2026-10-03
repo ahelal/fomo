@@ -20,8 +20,7 @@ export const githubBlogSource: SourcePlugin = {
       const xml = await res.text();
       return parseRss(xml);
     } catch (err) {
-      console.error('[github-blog] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
+      throw new Error(`[github-blog] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   },
 };

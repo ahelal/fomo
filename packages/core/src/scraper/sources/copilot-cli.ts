@@ -29,8 +29,7 @@ export const copilotCliSource: SourcePlugin = {
           content: stripMarkdown((r.body ?? '').slice(0, 3000)),
         }));
     } catch (err) {
-      console.error('[copilot-cli] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
+      throw new Error(`[copilot-cli] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   },
 };

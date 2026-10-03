@@ -20,8 +20,7 @@ export const githubNextSource: SourcePlugin = {
       const xml = await res.text();
       return parseRss(xml);
     } catch (err) {
-      console.error('[github-next] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
+      throw new Error(`[github-next] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   },
 };

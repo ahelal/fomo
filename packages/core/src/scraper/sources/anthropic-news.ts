@@ -24,8 +24,7 @@ export const anthropicNewsSource: SourcePlugin = {
       const html = await res.text();
       return parseNews(html);
     } catch (err) {
-      console.error('[anthropic-news] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
+      throw new Error(`[anthropic-news] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   },
 };

@@ -19,8 +19,7 @@ export const vscodeSource: SourcePlugin = {
       const xml = await res.text();
       return parseAtomFeed(xml);
     } catch (err) {
-      console.error('[vscode] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
+      throw new Error(`[vscode] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   },
 };
