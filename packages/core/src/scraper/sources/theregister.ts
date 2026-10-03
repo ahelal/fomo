@@ -17,26 +17,25 @@ export const theRegisterSource: SourcePlugin = {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const xml = await res.text();
-      return parseAtom(xml);
+      return parseFeed(xml);
     } catch (err) {
-      console.error('[theregister] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
+      throw new Error(`[theregister] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   },
 };
 
-function parseAtom(xml: string): ScrapedItem[] {
+function parseFeed(xml: string): ScrapedItem[] {
   const items: ScrapedItem[] = [];
 
-  const parts = xml.split('<entry>');
-  for (let i = 1; i < parts.length; i++) {
-    const end = parts[i].indexOf('</entry>');
-    const block = end === -1 ? parts[i] : parts[i].slice(0, end);
+  const entries = [...xml.matchAll(/<(entry|item)\b[^>]*>([\s\S]*?)<\/\1>/gi)];
+  for (const [, type, block] of entries) {
+    const rss = type.toLowerCase() === 'item';
 
     const title = extractTag(block, 'title');
-    const url = extractLink(block);
-    const published = extractTag(block, 'published');
-    const summary = extractTag(block, 'summary');
+    const url = rss ? extractTag(block, 'link') : extractLink(block);
+    const published = extractTag(block, rss ? 'pubDate' : 'published');
+    const summary = extractTag(block, rss ? 'content:encoded' : 'summary')
+      || extractTag(block, 'description');
 
     if (!title || !url) continue;
 
@@ -53,7 +52,9 @@ function parseAtom(xml: string): ScrapedItem[] {
 
 function extractTag(xml: string, tag: string): string {
   const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i');
-  return (xml.match(re)?.[1] ?? '').trim();
+  return (xml.match(re)?.[1] ?? '')
+    .replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/, '$1')
+    .trim();
 }
 
 function extractLink(block: string): string {
@@ -68,7 +69,7 @@ function decodeEntities(text: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+    .replace(/&apos;|&#39;/g, "'");
 }
 
 function stripHtml(html: string): string {

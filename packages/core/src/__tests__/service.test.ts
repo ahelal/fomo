@@ -94,6 +94,7 @@ vi.mock('../scraper/registry.js', () => {
     getAllSources: vi.fn(() => [mockSource]),
     getSource: vi.fn((id: string) => id === 'mock-source' ? mockSource : undefined),
     getSourceIds: vi.fn(() => ['mock-source']),
+    __mockSource: mockSource,
   };
 });
 
@@ -127,6 +128,19 @@ describe('FomoDirectService', () => {
   it('fetch with specific sources filters to those sources', async () => {
     const result = await svc.fetch({ sources: ['mock-source'] });
     expect(result.added).toBe(1);
+  });
+
+  it('returns per-source fetch failures instead of treating them as empty results', async () => {
+    const { __mockSource } = await import('../scraper/registry.js') as any;
+    __mockSource.fetch.mockRejectedValueOnce(new Error('[mock-source] fetch failed: HTTP 503'));
+
+    const result = await svc.fetch();
+
+    expect(result.results['mock-source']).toEqual({
+      fetched: 0,
+      added: 0,
+      error: '[mock-source] fetch failed: HTTP 503',
+    });
   });
 
   it('fetch with unknown sources throws', async () => {

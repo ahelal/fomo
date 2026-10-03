@@ -24,8 +24,7 @@ export const anthropicEngineeringSource: SourcePlugin = {
       const html = await res.text();
       return parsePosts(html);
     } catch (err) {
-      console.error('[anthropic-engineering] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
+      throw new Error(`[anthropic-engineering] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   },
 };

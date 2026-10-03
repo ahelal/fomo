@@ -70,7 +70,7 @@ export interface SourcePlugin {
   readonly displayName: string;
   /** Declares what this source is capable of. */
   readonly capabilities: SourceCapabilities;
-  /** Fetch and return scraped items. Should return `[]` on failure rather than throwing. */
+  /** Fetch scraped items. Throw on failure so the service can report per-source errors. */
   fetch(): Promise<ScrapedItem[]>;
 }
 
@@ -278,4 +278,3 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
   sourceLabels: {},
   sourceColors: {},
 };
-

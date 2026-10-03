@@ -19,8 +19,7 @@ export const azureSreAgentSource: SourcePlugin = {
       const xml = await res.text();
       return parseRss(xml);
     } catch (err) {
-      console.error('[azure-sre-agent] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
+      throw new Error(`[azure-sre-agent] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   },
 };

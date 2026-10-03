@@ -62,20 +62,18 @@ describe('github source fetch', () => {
     expect(items[1].title).toBe('Bug fix Y');
   });
 
-  it('returns empty array on HTTP error', async () => {
+  it('reports HTTP errors', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('', { status: 500 }),
     );
 
-    const items = await githubSource.fetch();
-    expect(items).toEqual([]);
+    await expect(githubSource.fetch()).rejects.toThrow('[github] fetch failed: HTTP 500');
   });
 
-  it('returns empty array on network error', async () => {
+  it('reports network errors', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network error'));
 
-    const items = await githubSource.fetch();
-    expect(items).toEqual([]);
+    await expect(githubSource.fetch()).rejects.toThrow('[github] fetch failed: Network error');
   });
 });
 
@@ -105,10 +103,9 @@ describe('azure source fetch', () => {
     expect(items[0].url).toBe('https://azure.microsoft.com/updates/aks-123');
   });
 
-  it('returns empty array on failure', async () => {
+  it('reports failures', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('timeout'));
-    const items = await azureSource.fetch();
-    expect(items).toEqual([]);
+    await expect(azureSource.fetch()).rejects.toThrow('[azure] fetch failed: timeout');
   });
 });
 
@@ -173,10 +170,9 @@ describe('vscode source fetch', () => {
     expect(titles).not.toContain('How VS Code Builds with AI');
   });
 
-  it('returns empty array on failure', async () => {
+  it('reports failures', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
-    const items = await vscodeSource.fetch();
-    expect(items).toEqual([]);
+    await expect(vscodeSource.fetch()).rejects.toThrow('[vscode] fetch failed: offline');
   });
 });
 
@@ -219,10 +215,9 @@ describe('copilot-cli source fetch', () => {
     expect(items[0].content).not.toContain('##');
   });
 
-  it('returns empty array on failure', async () => {
+  it('reports failures', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
-    const items = await copilotCliSource.fetch();
-    expect(items).toEqual([]);
+    await expect(copilotCliSource.fetch()).rejects.toThrow('[copilot-cli] fetch failed: offline');
   });
 });
 
@@ -271,10 +266,29 @@ describe('theregister source fetch', () => {
     expect(items[1].title).toBe('NASA gets the ball rolling on Mars rover');
   });
 
-  it('returns empty array on failure', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+  it('parses RSS feed items and indexes their full article content', async () => {
+    const rss = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>
+  <item>
+    <link>https://www.theregister.com/2026/10/02/example/</link>
+    <pubDate>Fri, 02 Oct 2026 21:52:40 +0200</pubDate>
+    <title>Google hearts Apple&apos;s Swift</title>
+    <description><![CDATA[Short summary]]></description>
+    <content:encoded><![CDATA[Full article text with backend details.]]></content:encoded>
+  </item>
+</channel></rss>`;
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(rss, { status: 200 }));
+
     const items = await theRegisterSource.fetch();
-    expect(items).toEqual([]);
+    expect(items).toHaveLength(1);
+    expect(items[0].title).toBe("Google hearts Apple's Swift");
+    expect(items[0].datePublished.toISOString()).toBe('2026-10-02T19:52:40.000Z');
+    expect(items[0].content).toBe('Full article text with backend details.');
+  });
+
+  it('reports failures', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+    await expect(theRegisterSource.fetch()).rejects.toThrow('[theregister] fetch failed: offline');
   });
 });
 
@@ -325,10 +339,9 @@ describe('github-next source fetch', () => {
     expect(items[1].title).toBe('Crane: verified code migration');
   });
 
-  it('returns empty array on failure', async () => {
+  it('reports failures', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
-    const items = await githubNextSource.fetch();
-    expect(items).toEqual([]);
+    await expect(githubNextSource.fetch()).rejects.toThrow('[github-next] fetch failed: offline');
   });
 });
 
