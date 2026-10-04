@@ -27,7 +27,7 @@ const SAVED_KEYS: [string, string][] = [
   ['↵',     'Expand / collapse topic'],
   ['→/l',   'Expand topic'],
   ['←',     'Collapse topic'],
-  ['r / u', 'Mark topic (or update) read / unread'],
+  ['r',     'Toggle topic (or update) read / unread'],
   ['x',     'Mark read & next'],
   ['n',     'Jump to next topic'],
   ['s',     'Unsave update'],
@@ -37,8 +37,7 @@ const SAVED_KEYS: [string, string][] = [
 
 const LIST_KEYS: [string, string][] = [
   ['↵',     'Open detail view'],
-  ['r',     'Mark as read'],
-  ['u',     'Mark as unread'],
+  ['r',     'Toggle read / unread'],
   ['s',     'Save / unsave'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next unread'],
@@ -47,8 +46,7 @@ const LIST_KEYS: [string, string][] = [
 
 const DETAIL_KEYS: [string, string][] = [
   ['Esc/⌫', 'Close detail view'],
-  ['r',     'Mark as read'],
-  ['u',     'Mark as unread'],
+  ['r',     'Toggle read / unread'],
   ['s',     'Save / unsave'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next unread'],

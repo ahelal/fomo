@@ -67,7 +67,7 @@ export function TopicPane({ entry, height, columns, position = 'bottom', sourceL
 
       <Box paddingX={2} flexShrink={0} marginTop={topic.summary || topic.highlights.length ? 1 : 0}>
         <Text color="#8b949e" dimColor>
-          {saved ? '↵ expand/collapse · r/u mark topic read/unread · o open newest' : '↵ expand/collapse · x mark topic read · o open newest'}
+          {saved ? '↵ expand/collapse · r toggle topic read/unread · o open newest' : '↵ expand/collapse · x mark topic read · o open newest'}
         </Text>
       </Box>
       {items.map((u) => (

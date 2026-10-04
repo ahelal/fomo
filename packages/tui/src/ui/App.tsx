@@ -535,6 +535,14 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     }
   }, [service, refresh, loadStats, showMessage]);
 
+  const doToggleSavedStatus = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    const hasUnread = digestEntriesRef.current
+      .flatMap((entry) => entry.items)
+      .some((update) => idSet.has(update.id) && update.status === 'unread');
+    void doSavedStatus(ids, hasUnread ? 'read' : 'unread');
+  }, [doSavedStatus]);
+
   /** Saved view: unsave an update, drop it from the list and keep the cursor on the next remaining row. */
   const doUnsave = useCallback(async (id: string) => {
     const selectedKey = digestRowsRef.current[selectedRef.current]?.key;
@@ -561,9 +569,10 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     });
   }, []);
 
-  const doMark = useCallback(async (status: Status) => {
+  const doToggleStatus = useCallback(async () => {
     const selected = updatesRef.current[selectedRef.current];
     if (!selected) return;
+    const status: Status = selected.status === 'unread' ? 'read' : 'unread';
 
     setUpdates((prev) =>
       prev.map((u) => (u.id === selected.id ? { ...u, status } : u)),
@@ -1079,7 +1088,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       }
       const rowIds = row.kind === 'item' ? [row.update.id] : entry.items.map((u) => u.id);
       if (savedView) {
-        if (input === 'r' || input === 'u') { void doSavedStatus(rowIds, input === 'r' ? 'read' : 'unread'); return; }
+        if (input === 'r') { doToggleSavedStatus(rowIds); return; }
         if (input === 'x') { void doSavedStatus(rowIds, 'read', true); return; }
         if (input === 's') {
           if (update) void doUnsave(update.id);
@@ -1114,15 +1123,13 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         if (next >= 0) setSelectedIndex(next);
         return;
       }
-      if (input === 'u') { showMessage('Everything here is unread — press 2 for a list'); return; }
       return;
     }
 
     if (key.return) { setShowDetail((prev) => !prev); return; }
 
     // Actions (work in both list and detail)
-    if (input === 'r') { void doMark('read');     return; }
-    if (input === 'u') { void doMark('unread');   return; }
+    if (input === 'r') { void doToggleStatus();   return; }
     if (input === 's') { void doToggleSaved();    return; }
     if (input === 'x') { void doReadAndNext();    return; }
     if (input === 'n') {
