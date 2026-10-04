@@ -137,7 +137,7 @@ export function DigestTable({
         if (row.kind === 'item') {
           const u = row.update;
           const unread = u.status === 'unread';
-          const mark = saved ? (unread ? '●' : '└') : u.saved ? '⭐' : '└';
+          const mark = saved ? (unread ? '●' : '└') : unread ? (u.saved ? '⭐' : '└') : u.saved ? '○⭐' : '○';
           return (
             <Box key={row.key} flexDirection="column">
               <Box paddingX={1}>
@@ -166,8 +166,9 @@ export function DigestTable({
         const marker = solo ? '• ' : isOpen ? '▾ ' : '▸ ';
         const sourceText = entry.sources.length === 1 ? label(entry.sources[0]!) : `${entry.sources.length} sources`;
         const sourceColor = entry.sources.length === 1 ? color(entry.sources[0]!) : '#c9d1d9';
-        const soloMark = saved ? (solo?.status === 'unread' ? '●' : '') : solo?.saved ? '⭐' : '';
-        const count = solo ? soloMark : `×${entry.items.length}`;
+        const soloMark = saved ? (solo?.status === 'unread' ? '●' : '') : solo?.status === 'read' ? (solo.saved ? '○⭐' : '○') : solo?.saved ? '⭐' : '';
+        const allRead = entry.items.every((u) => u.status !== 'unread');
+        const count = solo ? soloMark : !saved && allRead ? '○' : `×${entry.items.length}`;
         const importance = entry.topic.importance;
         const titleColor = importance === 'low' ? '#8b949e' : '#f0f6fc';
         const title = solo ? solo.title : entry.topic.title;

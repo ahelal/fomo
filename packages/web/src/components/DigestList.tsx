@@ -9,7 +9,7 @@ interface Props {
   pending: number;
   onSelect(row: DigestRow): void;
   onToggle(topicId: string): void;
-  onMarkRead(row: DigestRow): void;
+  onToggleRead(row: DigestRow): void;
   sourceLabels?: Record<string, string>;
   sourceColors?: Record<string, string>;
   onRefresh?(): void;
@@ -26,7 +26,7 @@ export function DigestList({
   pending,
   onSelect,
   onToggle,
-  onMarkRead,
+  onToggleRead,
   sourceLabels = {},
   sourceColors = {},
   onRefresh,
@@ -47,14 +47,22 @@ export function DigestList({
   const badge = (u: Update) => (
     saved
       ? u.status === 'unread' && <span className="digest-row__unread" title="Unread">● </span>
-      : u.saved && '⭐ '
+      : u.status === 'read'
+        ? <><span className="digest-row__unread" title="Read; press r to mark unread">○ </span>{u.saved && '⭐ '}</>
+        : u.saved && '⭐ '
   );
-  const readButton = (row: DigestRow, title: string) => (
-    // The Saved view keeps read updates, so only offer ✓ while something in the row is unread.
-    saved && !(row.kind === 'item' ? [row.update] : row.entry.items).some((u) => u.status === 'unread')
-      ? <span />
-      : <button className="digest-row__read" title={title} onClick={(e) => { e.stopPropagation(); onMarkRead(row); }}>✓</button>
-  );
+  const readButton = (row: DigestRow) => {
+    const unread = (row.kind === 'item' ? [row.update] : row.entry.items).some((u) => u.status === 'unread');
+    return (
+      <button
+        className="digest-row__read"
+        title={`Mark ${unread ? 'read' : 'unread'}`}
+        onClick={(e) => { e.stopPropagation(); onToggleRead(row); }}
+      >
+        {unread ? '✓' : '●'}
+      </button>
+    );
+  };
   const colorStyle = (s: string) => (sourceColors[s] ? { color: sourceColors[s] } : undefined);
 
   if (rows.length === 0) {
@@ -93,7 +101,7 @@ export function DigestList({
       )}
       {rows.map((row) => {
         const selected = row.key === selectedKey;
-        const read = saved && (row.kind === 'item' ? [row.update] : row.entry.items).every((u) => u.status !== 'unread');
+        const read = (row.kind === 'item' ? [row.update] : row.entry.items).every((u) => u.status !== 'unread');
         const cls = ['digest-row', `digest-row--${row.kind}`, selected ? 'digest-row--selected' : '', read ? 'digest-row--read' : '']
           .filter(Boolean)
           .join(' ');
@@ -111,7 +119,7 @@ export function DigestList({
                 <span />
                 <span className="digest-row__sources" style={colorStyle(u.source)}>{label(u.source)}</span>
                 <span className="digest-row__date">{u.datePublished.slice(0, 10)}</span>
-                {readButton(row, 'Mark read')}
+                {readButton(row)}
               </div>
             </div>
           );
@@ -148,7 +156,7 @@ export function DigestList({
                 {single ? label(single) : entry.sources.map(label).join(', ')}
               </span>
               <span className="digest-row__date">{entry.latestDate.slice(0, 10)}</span>
-              {readButton(row, solo ? 'Mark read' : 'Mark topic read')}
+              {readButton(row)}
             </div>
           </div>
         );

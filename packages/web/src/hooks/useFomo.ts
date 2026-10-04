@@ -46,7 +46,7 @@ export interface FomoActions {
   /** Search titles, summaries and content within the current view. */
   setSearch(q: string): void;
   setStatus(id: string, status: Status): Promise<void>;
-  /** Grouped Unread: read updates leave the list. Grouped Saved: they stay, with their new status. */
+  /** Change read status in place so an update can be toggled back before refreshing or switching views. */
   setStatusMany(ids: string[], status: Status): Promise<void>;
   markRead(ids: string[]): Promise<void>;
   setSaved(id: string, saved: boolean): Promise<void>;
@@ -178,8 +178,7 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
       if (ids.length === 0) return;
       const idSet = new Set(ids);
       setUpdates((prev) => prev.map((u) => (idSet.has(u.id) ? { ...u, status } : u)));
-      if (filterRef.current === 'saved') setDigest((prev) => patchDigest(prev, idSet, { status }));
-      else if (status === 'read') setDigest((prev) => removeFromDigest(prev, idSet));
+      setDigest((prev) => patchDigest(prev, idSet, { status }));
       showMessage(`✓ ${ids.length > 1 ? `${ids.length} marked` : 'Marked'} ${status}`);
       try {
         await service.setStatusMany(ids, status);
