@@ -13,11 +13,6 @@ interface Props {
   onClose?(): void;
 }
 
-const STATUS_OPTIONS: { label: string; value: Status }[] = [
-  { label: 'u · Unread', value: 'unread' },
-  { label: 'r · Read', value: 'read' },
-];
-
 function stripHtml(html: string): string {
   return html
     .replace(/<[^>]+>/g, ' ')
@@ -78,15 +73,12 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading,
 
       {/* Desktop action buttons */}
       <div className="detail-pane__actions">
-        {STATUS_OPTIONS.filter((o) => o.value !== update.status).map((o) => (
-          <button
-            key={o.value}
-            className="btn"
-            onClick={() => onSetStatus(update.id, o.value)}
-          >
-            {o.label}
-          </button>
-        ))}
+        <button
+          className="btn"
+          onClick={() => onSetStatus(update.id, update.status === 'unread' ? 'read' : 'unread')}
+        >
+          r · Mark {update.status === 'unread' ? 'read' : 'unread'}
+        </button>
         <button
           className="btn"
           onClick={() => onToggleSaved(update.id, !update.saved)}

@@ -206,6 +206,11 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     void fomo.setStatusMany(rowIds(row), 'read');
   }, [fomo, digestRows]);
 
+  const toggleSavedRead = useCallback((row: DigestRow) => {
+    const status = rowItems(row).some((u) => u.status === 'unread') ? 'read' : 'unread';
+    void fomo.setStatusMany(rowIds(row), status);
+  }, [fomo]);
+
   /** Saved view: unsave the selected update, which leaves the list; select the next remaining row. */
   const savedUnsave = useCallback((update: Update) => {
     if (digestKey) setDigestKey(removeAndAdvance(fomo.digest, expanded, digestKey, new Set([update.id])).nextKey);
@@ -409,8 +414,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         }
         const update = rowUpdate(row);
         if (isSaved) {
-          if (e.key === 'r') { digestMarkRead(row); return; }
-          if (e.key === 'u') { void fomo.setStatusMany(rowIds(row), 'unread'); return; }
+          if (e.key === 'r') { toggleSavedRead(row); return; }
           if (e.key === 'x') { savedReadAndNext(row); return; }
         } else if (e.key === 'x' || e.key === 'r') {
           digestMarkRead(row);
@@ -448,8 +452,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
       if (!selected) return;
       if (e.key === 'x') { handleReadAndNext(); return; }
-      if (e.key === 'r') { handleSetStatus(selected.id, 'read'); return; }
-      if (e.key === 'u') { handleSetStatus(selected.id, 'unread'); return; }
+      if (e.key === 'r') { handleSetStatus(selected.id, selected.status === 'unread' ? 'read' : 'unread'); return; }
       if (e.key === 's') { handleToggleSaved(selected.id, !selected.saved); return; }
       if (e.key === 'o' && selected.url) { openUrl(selected.url); return; }
     }
@@ -458,7 +461,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [
     fomo, selected, isGrouped, isSaved, viewHelp, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
-    previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, savedReadAndNext, groupedToggleSaved,
+    previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, savedReadAndNext, toggleSavedRead, groupedToggleSaved,
     digestNextTopic, handleNextUnread, handleReadAndNext, handleSetStatus, handleToggleSaved,
   ]);
 
@@ -517,7 +520,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
             sourceLabels={fomo.settings.sourceLabels}
             onOpenItem={(u) => openTopicItem(digestTopic.topic.id, u)}
             onMarkRead={() => digestMarkRead(digestRow)}
-            onMarkUnread={isSaved ? () => void fomo.setStatusMany(rowIds(digestRow), 'unread') : undefined}
+            onToggleRead={isSaved ? () => toggleSavedRead(digestRow) : undefined}
             onClose={clearSelection}
           />
         );

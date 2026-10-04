@@ -6,15 +6,15 @@ interface Props {
   sourceLabels?: Record<string, string>;
   onOpenItem(update: Update): void;
   onMarkRead(): void;
-  /** Saved view only: mark the topic's updates unread again. */
-  onMarkUnread?(): void;
+  /** Saved view only: toggle the topic's updates between read and unread. */
+  onToggleRead?(): void;
   onClose(): void;
   /** `saved` shows the topic's saved updates, marking the unread ones. */
   mode?: 'digest' | 'saved';
 }
 
 /** Copilot summary + highlights for a topic, with the updates it groups. */
-export function TopicPane({ entry, sourceLabels = {}, onOpenItem, onMarkRead, onMarkUnread, onClose, mode = 'digest' }: Props) {
+export function TopicPane({ entry, sourceLabels = {}, onOpenItem, onMarkRead, onToggleRead, onClose, mode = 'digest' }: Props) {
   const { topic, items } = entry;
   const label = (s: string) => sourceLabels[s] ?? s;
   const saved = mode === 'saved';
@@ -47,8 +47,11 @@ export function TopicPane({ entry, sourceLabels = {}, onOpenItem, onMarkRead, on
 
       {saved ? (
         <div className="detail-pane__actions">
-          <button className="btn btn--primary" onClick={onMarkRead} disabled={unread === 0}>r · Mark topic read</button>
-          {onMarkUnread && <button className="btn" onClick={onMarkUnread}>u · Mark topic unread</button>}
+          {onToggleRead && (
+            <button className="btn btn--primary" onClick={onToggleRead}>
+              r · Mark topic {unread > 0 ? 'read' : 'unread'}
+            </button>
+          )}
         </div>
       ) : (
         <>
