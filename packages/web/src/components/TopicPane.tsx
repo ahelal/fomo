@@ -6,7 +6,7 @@ interface Props {
   sourceLabels?: Record<string, string>;
   onOpenItem(update: Update): void;
   onMarkRead(): void;
-  /** Saved view only: toggle the topic's updates between read and unread. */
+  /** Toggle the topic's updates between read and unread. */
   onToggleRead?(): void;
   onClose(): void;
   /** `saved` shows the topic's saved updates, marking the unread ones. */
@@ -45,24 +45,18 @@ export function TopicPane({ entry, sourceLabels = {}, onOpenItem, onMarkRead, on
         </div>
       </div>
 
-      {saved ? (
+      {onToggleRead && (
         <div className="detail-pane__actions">
-          {onToggleRead && (
-            <button className="btn btn--primary" onClick={onToggleRead}>
-              r · Mark topic {unread > 0 ? 'read' : 'unread'}
-            </button>
-          )}
+          <button className="btn btn--primary" onClick={onToggleRead}>
+            r · Mark topic {unread > 0 ? 'read' : 'unread'}
+          </button>
         </div>
-      ) : (
-        <>
-          <div className="detail-pane__mobile-actions">
-            <button className="btn btn--primary" onClick={onMarkRead}>✓ Read&Next</button>
-            <button className="btn" onClick={onClose}>Close</button>
-          </div>
-          <div className="detail-pane__actions">
-            <button className="btn btn--primary" onClick={onMarkRead}>x · Mark topic read</button>
-          </div>
-        </>
+      )}
+      {!saved && (
+        <div className="detail-pane__mobile-actions">
+          <button className="btn btn--primary" onClick={onMarkRead}>✓ Read&Next</button>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
       )}
 
       {topic.summary && <p className="topic-pane__summary">{topic.summary}</p>}

@@ -486,14 +486,16 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   }, [currentUpdate, summarize, patchUpdate, showMessage]);
 
   // ── Digest actions ──────────────────────────────────────────────────────────
-  /** Mark updates read, drop them from the digest and keep the cursor on the next remaining row. */
-  const doDigestRead = useCallback(async (ids: string[]) => {
+  /** Mark updates read in place and optionally move to the next row, keeping them available for undo. */
+  const doDigestRead = useCallback(async (ids: string[], advance = false) => {
     if (ids.length === 0) return;
     const selectedKey = digestRowsRef.current[selectedRef.current]?.key;
-    const next = removeAndAdvance(digestEntriesRef.current, expandedRef.current, selectedKey, new Set(ids));
-    setDigestEntries(next.entries);
-    setSelectedIndex(Math.max(0, next.rows.findIndex((r) => r.key === next.nextKey)));
-    showMessage(ids.length > 1 ? `✓ ${ids.length} marked read` : '✓ Marked read');
+    if (advance) {
+      const nextKey = nextRowKey(digestRowsRef.current, selectedKey);
+      setSelectedIndex(Math.max(0, digestRowsRef.current.findIndex((r) => r.key === nextKey)));
+    }
+    setDigestEntries((prev) => patchDigest(prev, new Set(ids), { status: 'read' }));
+    showMessage(ids.length > 1 ? `✓ ${ids.length} marked read${advance ? ' → next' : ''}` : `✓ Marked read${advance ? ' → next' : ''}`);
 
     try {
       await service.setStatusMany(ids, 'read');
@@ -517,8 +519,8 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     }
   }, [service, refresh, loadStats, showMessage]);
 
-  /** Saved view: change the read state of updates in place; with `advance`, move to the next row. */
-  const doSavedStatus = useCallback(async (ids: string[], status: Status, advance = false) => {
+  /** Change update statuses in place; with `advance`, move to the next row. */
+  const doDigestStatus = useCallback(async (ids: string[], status: Status, advance = false) => {
     if (ids.length === 0) return;
     if (advance) {
       const key = nextRowKey(digestRowsRef.current, digestRowsRef.current[selectedRef.current]?.key);
@@ -535,13 +537,13 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     }
   }, [service, refresh, loadStats, showMessage]);
 
-  const doToggleSavedStatus = useCallback((ids: string[]) => {
+  const doToggleDigestStatus = useCallback((ids: string[]) => {
     const idSet = new Set(ids);
     const hasUnread = digestEntriesRef.current
       .flatMap((entry) => entry.items)
       .some((update) => idSet.has(update.id) && update.status === 'unread');
-    void doSavedStatus(ids, hasUnread ? 'read' : 'unread');
-  }, [doSavedStatus]);
+    void doDigestStatus(ids, hasUnread ? 'read' : 'unread');
+  }, [doDigestStatus]);
 
   /** Saved view: unsave an update, drop it from the list and keep the cursor on the next remaining row. */
   const doUnsave = useCallback(async (id: string) => {
@@ -1088,16 +1090,20 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       }
       const rowIds = row.kind === 'item' ? [row.update.id] : entry.items.map((u) => u.id);
       if (savedView) {
-        if (input === 'r') { doToggleSavedStatus(rowIds); return; }
-        if (input === 'x') { void doSavedStatus(rowIds, 'read', true); return; }
+        if (input === 'r') { doToggleDigestStatus(rowIds); return; }
+        if (input === 'x') { void doDigestStatus(rowIds, 'read', true); return; }
         if (input === 's') {
           if (update) void doUnsave(update.id);
           else showMessage('Expand the topic to unsave a single update');
           return;
         }
       }
-      if (input === 'x' || input === 'r') {
-        void doDigestRead(rowIds);
+      if (input === 'x') {
+        void doDigestRead(rowIds, true);
+        return;
+      }
+      if (input === 'r') {
+        doToggleDigestStatus(rowIds);
         return;
       }
       if (input === 's') {

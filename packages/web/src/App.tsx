@@ -186,19 +186,16 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     });
   }, []);
 
-  /**
-   * Mark a row read (a topic marks all its updates). The digest drops it and advances the selection if it was
-   * selected; the Saved view keeps it in place.
-   */
+  /** Mark a row read without removing it from the current view, so it can be toggled back. */
   const digestMarkRead = useCallback((row: DigestRow) => {
-    const ids = rowIds(row);
-    if (isSaved) { void fomo.setStatusMany(ids, 'read'); return; }
-    const next = removeAndAdvance(fomo.digest, expanded, row.key, new Set(ids));
-    if (digestKey === row.key || (row.kind === 'topic' && digestKey?.startsWith(`${row.key}/`))) {
-      setDigestKey(next.nextKey);
-    }
-    void fomo.markRead(ids);
-  }, [fomo, isSaved, expanded, digestKey]);
+    void fomo.markRead(rowIds(row));
+  }, [fomo]);
+
+  /** Mark a row read and move on, while leaving it visible for undo until the view is reloaded. */
+  const digestReadAndNext = useCallback((row: DigestRow) => {
+    setDigestKey(nextRowKey(digestRows, row.key));
+    void fomo.markRead(rowIds(row));
+  }, [fomo, digestRows]);
 
   /** Saved view: mark a row read and select the next one. */
   const savedReadAndNext = useCallback((row: DigestRow) => {
@@ -206,7 +203,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     void fomo.setStatusMany(rowIds(row), 'read');
   }, [fomo, digestRows]);
 
-  const toggleSavedRead = useCallback((row: DigestRow) => {
+  const toggleDigestRead = useCallback((row: DigestRow) => {
     const status = rowItems(row).some((u) => u.status === 'unread') ? 'read' : 'unread';
     void fomo.setStatusMany(rowIds(row), status);
   }, [fomo]);
@@ -414,10 +411,13 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         }
         const update = rowUpdate(row);
         if (isSaved) {
-          if (e.key === 'r') { toggleSavedRead(row); return; }
+          if (e.key === 'r') { toggleDigestRead(row); return; }
           if (e.key === 'x') { savedReadAndNext(row); return; }
-        } else if (e.key === 'x' || e.key === 'r') {
-          digestMarkRead(row);
+        } else if (e.key === 'x') {
+          digestReadAndNext(row);
+          return;
+        } else if (e.key === 'r') {
+          toggleDigestRead(row);
           return;
         }
         if (e.key === 's' && update) { groupedToggleSaved(update); return; }
@@ -461,7 +461,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [
     fomo, selected, isGrouped, isSaved, viewHelp, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
-    previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, savedReadAndNext, toggleSavedRead, groupedToggleSaved,
+    previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, digestReadAndNext, savedReadAndNext, toggleDigestRead, groupedToggleSaved,
     digestNextTopic, handleNextUnread, handleReadAndNext, handleSetStatus, handleToggleSaved,
   ]);
 
@@ -520,7 +520,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
             sourceLabels={fomo.settings.sourceLabels}
             onOpenItem={(u) => openTopicItem(digestTopic.topic.id, u)}
             onMarkRead={() => digestMarkRead(digestRow)}
-            onToggleRead={isSaved ? () => toggleSavedRead(digestRow) : undefined}
+            onToggleRead={() => toggleDigestRead(digestRow)}
             onClose={clearSelection}
           />
         );
@@ -531,9 +531,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         <DetailPane
           update={withContent(update)}
           contentLoading={!update.content && !(update.id in fomo.content)}
-          onSetStatus={(id, status) => (status === 'read' ? digestMarkRead(digestRow) : void fomo.setStatus(id, status))}
+          onSetStatus={(id, status) => void fomo.setStatus(id, status)}
           onToggleSaved={() => groupedToggleSaved(update)}
-          onReadAndNext={() => (isSaved ? savedReadAndNext(digestRow) : digestMarkRead(digestRow))}
+          onReadAndNext={() => (isSaved ? savedReadAndNext(digestRow) : digestReadAndNext(digestRow))}
           onNextUnread={digestNextTopic}
           onOpen={() => openUrl(update.url)}
           onClose={goBack}
@@ -559,7 +559,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     if (isGrouped && digestRow) {
       const update = rowUpdate(digestRow);
       // The Saved view keeps read updates, so its button toggles between read and unread.
-      const markUnread = isSaved && !rowItems(digestRow).some((u) => u.status === 'unread');
+      const markUnread = !rowItems(digestRow).some((u) => u.status === 'unread');
       const what = digestTopic ? 'Topic ' : '';
       return (
         <div className="mobile-actions">
@@ -568,7 +568,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           </button>
           <button
             className="mobile-actions__btn"
-            onClick={() => (markUnread ? void fomo.setStatusMany(rowIds(digestRow), 'unread') : digestMarkRead(digestRow))}
+            onClick={() => void fomo.setStatusMany(rowIds(digestRow), markUnread ? 'unread' : 'read')}
           >
             <span>{markUnread ? '●' : '✓'}</span><span>{markUnread ? `${what}unread` : `${what}read`}</span>
           </button>
@@ -662,7 +662,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
               pending={fomo.pending}
               onSelect={(row) => setDigestKey(row.key)}
               onToggle={(topicId) => setTopicExpanded(topicId, !expanded.has(topicId))}
-              onMarkRead={digestMarkRead}
+              onToggleRead={toggleDigestRead}
               sourceLabels={fomo.settings.sourceLabels}
               sourceColors={fomo.settings.sourceColors}
               onRefresh={handleRefresh}
