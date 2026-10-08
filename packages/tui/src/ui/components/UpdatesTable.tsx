@@ -18,6 +18,18 @@ export const DEFAULT_SOURCE_COLOR: Record<string, string> = {
   'anthropic-engineering':'#06b6d4', // teal
 };
 
+/** Read/unread/saved styling for one update, shared by the list and the topic tree. */
+export function updateLook(u: Update) {
+  const unread = u.status === 'unread';
+  const icon = STATUS_ICON[u.status] ?? { icon: '?', color: 'white' };
+  return {
+    unread,
+    status: u.saved ? `⭐${icon.icon}` : `${icon.icon} `,
+    statusColor: u.saved ? '#e3b341' : icon.color,
+    textColor: unread ? '#f0f6fc' : u.saved ? '#e3b341' : '#8b949e',
+  };
+}
+
 interface Props {
   updates: Update[];
   selectedIndex: number;
@@ -88,18 +100,13 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
       {visibleUpdates.map((update, viewIdx) => {
         const realIdx = scrollOffset + viewIdx;
         const isSelected = realIdx === selectedIndex;
-        const icon = STATUS_ICON[update.status] ?? { icon: '?', color: 'white' };
+        const { unread: isUnread, status: statusLabel, statusColor, textColor } = updateLook(update);
         const sourceColor = sourceColors[update.source] ?? DEFAULT_SOURCE_COLOR[update.source] ?? '#58a6ff';
         const dateStr = update.datePublished.slice(0, 10);
         const source = (sourceLabels[update.source] ?? update.source).slice(0, 11).padEnd(sourceW);
-        const isUnread = update.status === 'unread';
-        const isSaved = update.saved;
         const titleRaw = update.title.length > titleW
           ? `${update.title.slice(0, titleW - 1)}…`
           : update.title;
-
-        const statusLabel = isSaved ? `⭐${icon.icon}` : `${icon.icon} `;
-        const textColor = isUnread ? '#f0f6fc' : isSaved ? '#e3b341' : '#8b949e';
 
         return (
           <React.Fragment key={update.id}>
@@ -118,7 +125,7 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
               )}
               <Text color={sourceColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{source}</Text>
               <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{dateStr.padEnd(dateW)}</Text>
-              <Text color={isSaved ? '#e3b341' : icon.color} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{statusLabel.padEnd(statusW)}</Text>
+              <Text color={statusColor} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{statusLabel.padEnd(statusW)}</Text>
               <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined} wrap="truncate">{titleRaw}</Text>
             </Box>
           </React.Fragment>

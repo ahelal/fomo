@@ -43,13 +43,14 @@ export function DigestList({
   }, [selectedKey]);
 
   const label = (s: string) => sourceLabels[s] ?? s;
-  /** Saved view: a dot on unread updates; digest: a star on saved ones. */
+  /** Same status mark as the list view: ⭐ when saved, ● unread, ○ read. */
   const badge = (u: Update) => (
-    saved
-      ? u.status === 'unread' && <span className="digest-row__unread" title="Unread">● </span>
-      : u.status === 'read'
-        ? <><span className="digest-row__unread" title="Read; press r to mark unread">○ </span>{u.saved && '⭐ '}</>
-        : u.saved && '⭐ '
+    <>
+      {u.saved && '⭐'}
+      {u.status === 'unread'
+        ? <span className="digest-row__unread" title="Unread">● </span>
+        : <span className="digest-row__isread" title="Read; press r to mark unread">○ </span>}
+    </>
   );
   const readButton = (row: DigestRow) => {
     const unread = (row.kind === 'item' ? [row.update] : row.entry.items).some((u) => u.status === 'unread');
