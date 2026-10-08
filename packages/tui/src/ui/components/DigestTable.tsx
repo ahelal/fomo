@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Box, Text } from 'ink';
 import { soloUpdate, type DigestEntry, type DigestRow } from '@fomo/core';
-import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
+import { DEFAULT_SOURCE_COLOR, updateLook } from './UpdatesTable.js';
 
 interface Props {
   rows: DigestRow[];
@@ -24,7 +24,6 @@ const SEL_BG = '#1c2d4f';
 const SOURCE_W = 13;
 const DATE_W = 12;
 const COUNT_W = 5;
-const UNREAD_COLOR = '#58a6ff';
 const READ_COLOR = '#8b949e';
 
 /** Summary shown under a single-update topic row; falls back to the topic's Copilot summary. */
@@ -137,17 +136,16 @@ export function DigestTable({
 
         if (row.kind === 'item') {
           const u = row.update;
-          const unread = u.status === 'unread';
-          const mark = saved ? (unread ? '●' : '└') : unread ? (u.saved ? '⭐' : '└') : u.saved ? '○⭐' : '○';
+          const look = updateLook(u);
           return (
             <Box key={row.key} flexDirection="column">
               <Box paddingX={1}>
                 {bar}
-                <Text backgroundColor={bg}>{'  '}</Text>
-                <Text color={color(u.source)} backgroundColor={bg}>{label(u.source).padEnd(SOURCE_W)}</Text>
-                <Text color="#8b949e" backgroundColor={bg}>{u.datePublished.slice(0, 10).padEnd(DATE_W)}</Text>
-                <Text color={unread ? (saved ? UNREAD_COLOR : '#30363d') : READ_COLOR} backgroundColor={bg}>{mark.padEnd(COUNT_W)}</Text>
-                <Text color={unread ? '#c9d1d9' : READ_COLOR} backgroundColor={bg} wrap="truncate">{clip(u.title, titleW)}</Text>
+                <Text color="#30363d" backgroundColor={bg}>{'└ '}</Text>
+                <Text color={color(u.source)} bold={look.unread} backgroundColor={bg}>{label(u.source).padEnd(SOURCE_W)}</Text>
+                <Text color={look.textColor} bold={look.unread} backgroundColor={bg}>{u.datePublished.slice(0, 10).padEnd(DATE_W)}</Text>
+                <Text color={look.statusColor} backgroundColor={bg}>{look.status.padEnd(COUNT_W)}</Text>
+                <Text color={look.textColor} bold={look.unread} backgroundColor={bg} wrap="truncate">{clip(u.title, titleW)}</Text>
               </Box>
               {u.summary && (
                 <Box paddingX={1}>
@@ -167,12 +165,14 @@ export function DigestTable({
         const marker = solo ? '• ' : isOpen ? '▾ ' : '▸ ';
         const sourceText = entry.sources.length === 1 ? label(entry.sources[0]!) : `${entry.sources.length} sources`;
         const sourceColor = entry.sources.length === 1 ? color(entry.sources[0]!) : '#c9d1d9';
-        const soloMark = saved ? (solo?.status === 'unread' ? '●' : '') : solo?.status === 'read' ? (solo.saved ? '○⭐' : '○') : solo?.saved ? '⭐' : '';
+        const soloLook = solo ? updateLook(solo) : undefined;
         const allRead = entry.items.every((u) => u.status !== 'unread');
-        const count = solo ? soloMark : !saved && allRead ? '○' : `×${entry.items.length}`;
+        const unread = !allRead;
+        const count = soloLook ? soloLook.status : !saved && allRead ? '○' : `×${entry.items.length}`;
         const importance = entry.topic.importance;
-        const titleColor = allRead || importance === 'low' ? READ_COLOR : '#f0f6fc';
-        const countColor = allRead && !saved ? READ_COLOR : solo && !saved ? '#e3b341' : '#58a6ff';
+        const textColor = soloLook ? soloLook.textColor : unread ? '#f0f6fc' : READ_COLOR;
+        const titleColor = !soloLook && unread && importance === 'low' ? READ_COLOR : textColor;
+        const countColor = soloLook ? soloLook.statusColor : unread ? '#58a6ff' : READ_COLOR;
         const title = solo ? solo.title : entry.topic.title;
 
         return (
@@ -185,11 +185,11 @@ export function DigestTable({
             <Box paddingX={1}>
               {bar}
               <Text color={solo ? '#8b949e' : '#58a6ff'} backgroundColor={bg}>{marker}</Text>
-              <Text color={sourceColor} bold={!allRead} backgroundColor={bg}>{sourceText.padEnd(SOURCE_W)}</Text>
-              <Text color={allRead ? READ_COLOR : '#f0f6fc'} backgroundColor={bg}>{entry.latestDate.slice(0, 10).padEnd(DATE_W)}</Text>
-              <Text color={countColor} bold={!allRead} backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
-              {importance === 'high' && <Text color={allRead ? READ_COLOR : '#f0883e'} bold={!allRead} backgroundColor={bg}>{'▲ '}</Text>}
-              <Text color={titleColor} bold={!allRead && importance !== 'low'} backgroundColor={bg} wrap="truncate">
+              <Text color={sourceColor} bold={unread} backgroundColor={bg}>{sourceText.padEnd(SOURCE_W)}</Text>
+              <Text color={textColor} bold={unread} backgroundColor={bg}>{entry.latestDate.slice(0, 10).padEnd(DATE_W)}</Text>
+              <Text color={countColor} bold={!soloLook && unread} backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
+              {importance === 'high' && <Text color={unread ? '#f0883e' : READ_COLOR} bold={unread} backgroundColor={bg}>{'▲ '}</Text>}
+              <Text color={titleColor} bold={unread && titleColor !== READ_COLOR} backgroundColor={bg} wrap="truncate">
                 {clip(title, importance === 'high' ? titleW - 2 : titleW)}
               </Text>
             </Box>

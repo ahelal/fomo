@@ -315,7 +315,7 @@ body {
 }
 .digest-row__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .digest-row--topic .digest-row__title { color: var(--unread-color); font-weight: 600; }
-.digest-row--item .digest-row__title { color: var(--text); padding-left: 8px; }
+.digest-row--item .digest-row__title { color: var(--unread-color); font-weight: 600; padding-left: 8px; }
 .digest-row--item .digest-row__inner { align-items: start; }
 .digest-row--solo .digest-row__inner { align-items: start; }
 .digest-row__summary {
@@ -343,7 +343,11 @@ body {
 .digest-row__imp { color: var(--orange); margin-right: 6px; }
 .digest-row--imp-low .digest-row__title { color: var(--text-dim); font-weight: normal; }
 .digest-row__unread { color: var(--cyan); }
-.digest-row--read .digest-row__title { color: var(--text-dim); font-weight: normal; }
+.digest-row__isread { color: var(--read-color); }
+.digest-row--read .digest-row__title,
+.digest-row--read .digest-row__sources,
+.digest-row--read .digest-row__date,
+.digest-row--read .digest-row__count { color: var(--read-color); font-weight: normal; }
 
 /* ─── Topic pane ─────────────────────────────────────────────────────────────── */
 .topic-pane__importance { font-weight: 600; }
