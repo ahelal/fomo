@@ -25,6 +25,7 @@ const SOURCE_W = 13;
 const DATE_W = 12;
 const COUNT_W = 5;
 const UNREAD_COLOR = '#58a6ff';
+const READ_COLOR = '#8b949e';
 
 /** Summary shown under a single-update topic row; falls back to the topic's Copilot summary. */
 function soloSummary(entry: DigestEntry): string {
@@ -145,8 +146,8 @@ export function DigestTable({
                 <Text backgroundColor={bg}>{'  '}</Text>
                 <Text color={color(u.source)} backgroundColor={bg}>{label(u.source).padEnd(SOURCE_W)}</Text>
                 <Text color="#8b949e" backgroundColor={bg}>{u.datePublished.slice(0, 10).padEnd(DATE_W)}</Text>
-                <Text color={saved && unread ? UNREAD_COLOR : '#30363d'} backgroundColor={bg}>{mark.padEnd(COUNT_W)}</Text>
-                <Text color={saved && !unread ? '#8b949e' : '#c9d1d9'} backgroundColor={bg} wrap="truncate">{clip(u.title, titleW)}</Text>
+                <Text color={unread ? (saved ? UNREAD_COLOR : '#30363d') : READ_COLOR} backgroundColor={bg}>{mark.padEnd(COUNT_W)}</Text>
+                <Text color={unread ? '#c9d1d9' : READ_COLOR} backgroundColor={bg} wrap="truncate">{clip(u.title, titleW)}</Text>
               </Box>
               {u.summary && (
                 <Box paddingX={1}>
@@ -170,7 +171,8 @@ export function DigestTable({
         const allRead = entry.items.every((u) => u.status !== 'unread');
         const count = solo ? soloMark : !saved && allRead ? '○' : `×${entry.items.length}`;
         const importance = entry.topic.importance;
-        const titleColor = importance === 'low' ? '#8b949e' : '#f0f6fc';
+        const titleColor = allRead || importance === 'low' ? READ_COLOR : '#f0f6fc';
+        const countColor = allRead && !saved ? READ_COLOR : solo && !saved ? '#e3b341' : '#58a6ff';
         const title = solo ? solo.title : entry.topic.title;
 
         return (
@@ -183,11 +185,11 @@ export function DigestTable({
             <Box paddingX={1}>
               {bar}
               <Text color={solo ? '#8b949e' : '#58a6ff'} backgroundColor={bg}>{marker}</Text>
-              <Text color={sourceColor} bold backgroundColor={bg}>{sourceText.padEnd(SOURCE_W)}</Text>
-              <Text color="#f0f6fc" backgroundColor={bg}>{entry.latestDate.slice(0, 10).padEnd(DATE_W)}</Text>
-              <Text color={solo && !saved ? '#e3b341' : '#58a6ff'} bold backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
-              {importance === 'high' && <Text color="#f0883e" bold backgroundColor={bg}>{'▲ '}</Text>}
-              <Text color={titleColor} bold={importance !== 'low'} backgroundColor={bg} wrap="truncate">
+              <Text color={sourceColor} bold={!allRead} backgroundColor={bg}>{sourceText.padEnd(SOURCE_W)}</Text>
+              <Text color={allRead ? READ_COLOR : '#f0f6fc'} backgroundColor={bg}>{entry.latestDate.slice(0, 10).padEnd(DATE_W)}</Text>
+              <Text color={countColor} bold={!allRead} backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
+              {importance === 'high' && <Text color={allRead ? READ_COLOR : '#f0883e'} bold={!allRead} backgroundColor={bg}>{'▲ '}</Text>}
+              <Text color={titleColor} bold={!allRead && importance !== 'low'} backgroundColor={bg} wrap="truncate">
                 {clip(title, importance === 'high' ? titleW - 2 : titleW)}
               </Text>
             </Box>
