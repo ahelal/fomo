@@ -285,6 +285,7 @@ The status bar shows counts by status; the config screen shows counts per source
 Search (`/`) works like the web app: it's scoped to the current view, matches every word against the title, summary and content, and shows the query and match count in the filter bar until `Esc` clears it.
 The source filter (`v`) lists the sources in the current view with their counts (honouring the search), stays applied across views like the search, and shows as a `src:` chip next to it.
 While a fetch, Copilot digest or restore runs, the status bar shows a spinner, the current step and the elapsed time.
+While the TUI is open, it automatically fetches every 15 minutes, starting 15 minutes after launch. Each run fetches all enabled sources and groups updates with Copilot when auto-digest is enabled, just like `f`. A scheduled run is skipped if a fetch, regroup or restore is already running; closing the TUI stops the timer.
 Fetch errors and Copilot runtime logs are written to `~/.fomo/fomo.log` instead of the screen.
 
 ### Config Screen
