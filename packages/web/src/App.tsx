@@ -30,6 +30,7 @@ import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { TodosPane } from './components/TodosPane.js';
 import { ConnectScreen } from './components/ConnectScreen.js';
 import { SearchBox } from './components/SearchBox.js';
+import { SourcePicker, SourceFilterChip, type SourceOption } from './components/SourcePicker.js';
 
 const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: '1 All', value: 'all' },
@@ -123,6 +124,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const [showHelp, setShowHelp] = useState(false);
   const [helpContext, setHelpContext] = useState<HelpContext>('list');
   const [sources, setSources] = useState<SourceInfo[]>([]);
+  /** Open source picker; options are undefined while the counts load. */
+  const [sourcePicker, setSourcePicker] = useState<{ options?: SourceOption[] } | undefined>();
+  const sourcePickerSeq = useRef(0);
 
   const previewPosition = fomo.settings.previewPosition;
   /** Unread and Saved list topics unless switched to a plain list. */
@@ -173,6 +177,38 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     clearSelection();
     fomo.setSearch(q);
   }, [fomo, clearSelection]);
+
+  const sourceName = useCallback(
+    (id: string) => fomo.settings.sourceLabels[id] ?? sources.find((s) => s.id === id)?.displayName ?? id,
+    [fomo.settings.sourceLabels, sources],
+  );
+
+  /** Pick which sources to show; counts are for the current view and search. */
+  const openSourcePicker = useCallback(() => {
+    const seq = ++sourcePickerSeq.current;
+    setSourcePicker({});
+    fomo.countSources().then((counts) => {
+      if (seq !== sourcePickerSeq.current) return;
+      const ids = new Set([...Object.keys(counts), ...(fomo.sourceFilter ?? [])]);
+      const options = [...ids]
+        .map((id) => ({ id, label: sourceName(id), color: fomo.settings.sourceColors[id], count: counts[id] ?? 0 }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+      setSourcePicker({ options });
+    }).catch(() => {
+      if (seq === sourcePickerSeq.current) setSourcePicker({ options: [] });
+    });
+  }, [fomo, sourceName]);
+
+  const closeSourcePicker = useCallback(() => {
+    sourcePickerSeq.current++;
+    setSourcePicker(undefined);
+  }, []);
+
+  const applySourceFilter = useCallback((ids: string[] | undefined) => {
+    closeSourcePicker();
+    clearSelection();
+    fomo.setSourceFilter(ids);
+  }, [fomo, clearSelection, closeSourcePicker]);
 
   // ── Digest actions ──
 
@@ -332,6 +368,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
+      if (sourcePicker) return;
       if (showHelp) {
         if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'h') setShowHelp(false);
         return;
@@ -357,8 +394,17 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         searchInputRef.current?.select();
         return;
       }
+      if (e.key === 'v' && !e.metaKey && !e.ctrlKey && !e.altKey && fomo.filter !== 'todos') {
+        openSourcePicker();
+        return;
+      }
+      // Esc clears the search first, then the source filter.
       if (e.key === 'Escape' && fomo.search && fomo.filter !== 'todos') {
         setSearch('');
+        return;
+      }
+      if (e.key === 'Escape' && fomo.sourceFilter && fomo.filter !== 'todos') {
+        applySourceFilter(undefined);
         return;
       }
 
@@ -461,6 +507,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [
     fomo, selected, isGrouped, isSaved, viewHelp, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
+    sourcePicker, openSourcePicker, applySourceFilter,
     previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, digestReadAndNext, savedReadAndNext, toggleDigestRead, groupedToggleSaved,
     digestNextTopic, handleNextUnread, handleReadAndNext, handleSetStatus, handleToggleSaved,
   ]);
@@ -505,6 +552,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   const showPreview = hasSelection && fomo.filter !== 'todos' && previewPosition !== 'off';
   const mainClass = `main main--preview-${showPreview ? previewPosition : 'none'}`;
+  const sourceFilterLabel = fomo.sourceFilter
+    ? fomo.sourceFilter.length <= 2 ? fomo.sourceFilter.map(sourceName).join(', ') : `${fomo.sourceFilter.length} sources`
+    : undefined;
   const searchMatches = !fomo.search || fomo.loading
     ? undefined
     : isGrouped ? fomo.digest.reduce((n, e) => n + e.items.length, 0) : fomo.total;
@@ -645,6 +695,14 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           })}
         </div>
         {fomo.filter !== 'todos' && (
+          <SourceFilterChip
+            filter={fomo.sourceFilter}
+            label={sourceFilterLabel}
+            onOpen={openSourcePicker}
+            onClear={() => applySourceFilter(undefined)}
+          />
+        )}
+        {fomo.filter !== 'todos' && (
           <SearchBox ref={searchInputRef} value={fomo.search} matches={searchMatches} onSearch={setSearch} />
         )}
       </div>
@@ -688,6 +746,15 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       </div>
 
       {renderMobileActions()}
+
+      {sourcePicker && (
+        <SourcePicker
+          options={sourcePicker.options}
+          current={fomo.sourceFilter}
+          onApply={applySourceFilter}
+          onClose={closeSourcePicker}
+        />
+      )}
 
       {showHelp && <HelpOverlay context={helpContext} onClose={() => setShowHelp(false)} />}
 

@@ -17,7 +17,7 @@ interface Props {
   /** The active view is listed as topics (Unread and Saved can switch). */
   grouped?: boolean;
   columns: number;
-  /** Name of the source the list is limited to, if any. */
+  /** Sources the view is limited to (names, or a count), if any. */
   sourceLabel?: string;
   /** Applied search query. */
   search?: string;

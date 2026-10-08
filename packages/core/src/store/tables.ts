@@ -295,8 +295,9 @@ export class UpdateStore {
   async listUpdates(options: ListOptions = {}): Promise<ListResponse> {
     const filters: string[] = [];
 
-    if (options.source) {
-      filters.push(odata`PartitionKey eq ${options.source}`);
+    if (options.sources) {
+      if (options.sources.length === 0) return { updates: [], total: 0, hasMore: false };
+      filters.push(`(${options.sources.map((s) => odata`PartitionKey eq ${s}`).join(' or ')})`);
     }
     if (options.status && options.status !== 'all') {
       filters.push(odata`status eq ${options.status}`);

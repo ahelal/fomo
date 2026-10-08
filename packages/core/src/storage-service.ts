@@ -13,6 +13,8 @@ import type {
   StatsResponse,
   Status,
   SourceInfo,
+  SourceCountQuery,
+  SourceId,
   AppSettings,
   DigestResponse,
   Todo,
@@ -86,7 +88,7 @@ export class FomoStorageService implements FomoService {
     const searching = searchTerms(query.search).length > 0;
     const { updates } = await this.store.listUpdates({
       ...(query.saved ? { saved: true } : { status: 'unread' as const }),
-      ...(query.source ? { source: query.source } : {}),
+      ...(query.sources ? { sources: query.sources } : {}),
       limit: Number.MAX_SAFE_INTEGER,
       includeContent: searching,
     });
@@ -99,6 +101,25 @@ export class FomoStorageService implements FomoService {
       items: e.items.map((u) => ({ ...u, content: '' })),
     }));
     return { entries, pending: entries.filter((e) => e.synthetic).length };
+  }
+
+  async countSources(query: SourceCountQuery): Promise<Record<SourceId, number>> {
+    const counts: Record<SourceId, number> = {};
+    const add = (u: Update) => { counts[u.source] = (counts[u.source] ?? 0) + 1; };
+    if (query.grouped) {
+      const { entries } = await this.getDigest({ search: query.search, saved: query.saved });
+      for (const e of entries) e.items.forEach(add);
+      return counts;
+    }
+    await this.ensureInit();
+    const { updates } = await this.store.listUpdates({
+      ...(query.saved ? { saved: true } : { status: query.status ?? 'all' }),
+      search: query.search,
+      limit: Number.MAX_SAFE_INTEGER,
+      includeContent: false,
+    });
+    updates.forEach(add);
+    return counts;
   }
 
   async getSources(): Promise<SourceInfo[]> {

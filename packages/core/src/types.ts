@@ -86,7 +86,8 @@ export interface SourceInfo {
 export interface ListOptions {
   status?: Status | 'all';
   saved?: boolean;
-  source?: SourceId;
+  /** Only updates from these sources; an empty list matches nothing. */
+  sources?: SourceId[];
   limit?: number;
   offset?: number;
   /** Include the (potentially large) `content` field. Default: true. */
@@ -164,8 +165,17 @@ export interface DigestQuery {
   search?: string;
   /** Group saved updates (read or unread) instead of unread ones. */
   saved?: boolean;
-  /** Only updates from this source. */
-  source?: SourceId;
+  /** Only updates from these sources; an empty list matches nothing. */
+  sources?: SourceId[];
+}
+
+/** A view (as listed or grouped) whose updates are counted per source, ignoring any source filter. */
+export interface SourceCountQuery {
+  status?: Status | 'all';
+  saved?: boolean;
+  search?: string;
+  /** Count the topic view (search also matches topic text) instead of the plain list. */
+  grouped?: boolean;
 }
 
 export interface DigestResponse {
@@ -205,6 +215,8 @@ export interface FomoService {
   setSaved(id: string, saved: boolean): Promise<Update>;
   getStats(): Promise<StatsResponse>;
   getDigest(query?: DigestQuery): Promise<DigestResponse>;
+  /** Updates per source in a view, to pick which sources to show. */
+  countSources(query: SourceCountQuery): Promise<Record<SourceId, number>>;
   getSources(): Promise<SourceInfo[]>;
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;

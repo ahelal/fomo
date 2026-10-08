@@ -11,8 +11,9 @@ import { buildSettingsRows, editStartValue, findRow, firstFocusable, moveFocus, 
 import { copyToClipboard } from './clipboard.js';
 import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
 import { RestorePicker, type BackupFile } from './components/RestorePicker.js';
+import { SourcePicker, type SourceOption } from './components/SourcePicker.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
-import { UpdatesTable } from './components/UpdatesTable.js';
+import { UpdatesTable, DEFAULT_SOURCE_COLOR } from './components/UpdatesTable.js';
 import { DigestTable } from './components/DigestTable.js';
 import { StatusBar, type Activity } from './components/StatusBar.js';
 import { DetailPane } from './components/DetailPane.js';
@@ -92,9 +93,17 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   const [restoreFiles, setRestoreFiles] = useState<BackupFile[] | undefined>();
   const [restoreIndex, setRestoreIndex] = useState(0);
   const [restoreConfirm, setRestoreConfirm] = useState(false);
-  /** Only show updates from this source (list views). */
-  const [sourceFilter, setSourceFilter] = useState<string | undefined>();
-  const sourceFilterRef = useRef<string | undefined>();
+  /** Only show updates from these sources (every view); undefined shows all. */
+  const [sourceFilter, setSourceFilter] = useState<string[] | undefined>();
+  const sourceFilterRef = useRef<string[] | undefined>();
+  /** Source picker opened with v. */
+  const [sourcePicker, setSourcePicker] = useState<{
+    options?: SourceOption[];
+    checked: ReadonlySet<string>;
+    focus: number;
+    warning?: string;
+  } | undefined>();
+  const sourcePickerSeq = useRef(0);
   /** Applied search; it narrows whichever view is shown. */
   const [search, setSearch] = useState('');
   const searchRef = useRef('');
@@ -172,17 +181,17 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       setLoading(true);
       try {
         const search = searchRef.current || undefined;
-        const source = sourceFilterRef.current;
+        const sources = sourceFilterRef.current;
         if (isGrouped(f, groupedViewsRef.current)) {
-          const resp = await service.getDigest({ search, source, saved: f === 'saved' });
+          const resp = await service.getDigest({ search, sources, saved: f === 'saved' });
           if (seq !== loadSeq.current) return;
           setDigestEntries(resp.entries);
           setDigestPending(resp.pending);
           return;
         }
         const resp = await service.listUpdates(f === 'saved'
-          ? { saved: true, source, search, limit: 200 }
-          : { status: f, source, search, limit: 200 });
+          ? { saved: true, sources, search, limit: 200 }
+          : { status: f, sources, search, limit: 200 });
         if (seq !== loadSeq.current) return;
         setUpdates(resp.updates);
         setListTotal(resp.total);
@@ -407,14 +416,49 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     }
   }, [config.webUrl, config.connectionString, config.linkDays, settingsRows, showMessage]);
 
-  const applySourceFilter = useCallback((id: string | undefined, f: FilterStatus = filterRef.current) => {
-    sourceFilterRef.current = id;
-    setSourceFilter(id);
+  const applySourceFilter = useCallback((ids: string[] | undefined, f: FilterStatus = filterRef.current) => {
+    sourceFilterRef.current = ids;
+    setSourceFilter(ids);
     setFilter(f);
     setSelectedIndex(0);
     setShowDetail(false);
     void refresh(f);
   }, [refresh]);
+
+  /** Open the source picker with the sources in the current view (search applied, source filter ignored). */
+  const openSourcePicker = useCallback(async () => {
+    const seq = ++sourcePickerSeq.current;
+    const current = sourceFilterRef.current;
+    setSourcePicker({ checked: new Set(current ?? []), focus: 0 });
+    const f = filterRef.current;
+    try {
+      const counts = await service.countSources({
+        ...(f === 'saved' ? { saved: true } : { status: f }),
+        search: searchRef.current || undefined,
+        grouped: isGrouped(f, groupedViewsRef.current),
+      });
+      if (seq !== sourcePickerSeq.current) return;
+      const ids = [...new Set([...Object.keys(counts), ...(current ?? [])])];
+      const options = ids
+        .map((id) => ({
+          id,
+          label: sourceName(id),
+          color: appSettings.sourceColors?.[id] ?? DEFAULT_SOURCE_COLOR[id] ?? '#58a6ff',
+          count: counts[id] ?? 0,
+        }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+      setSourcePicker((p) => p && { ...p, options, checked: new Set(current ?? ids) });
+    } catch (err) {
+      if (seq !== sourcePickerSeq.current) return;
+      setSourcePicker(undefined);
+      showMessage(`Error: ${errorText(err)}`);
+    }
+  }, [service, sourceName, appSettings.sourceColors, showMessage]);
+
+  const closeSourcePicker = useCallback(() => {
+    sourcePickerSeq.current++;
+    setSourcePicker(undefined);
+  }, []);
 
   /** Search the current view (and any view switched to) for `query`; empty clears it. */
   const applySearch = useCallback((query: string) => {
@@ -751,6 +795,40 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       return;
     }
 
+    // ── Source picker (opened with v) ──
+    if (sourcePicker) {
+      if (key.escape || key.backspace || key.delete) { closeSourcePicker(); return; }
+      const options = sourcePicker.options;
+      if (!options) return;
+      const last = Math.max(0, options.length - 1);
+      const set = (checked: ReadonlySet<string>) => setSourcePicker({ ...sourcePicker, checked, warning: undefined });
+      if (key.upArrow || input === 'k') { setSourcePicker({ ...sourcePicker, focus: Math.max(0, sourcePicker.focus - 1) }); return; }
+      if (key.downArrow || input === 'j') { setSourcePicker({ ...sourcePicker, focus: Math.min(last, sourcePicker.focus + 1) }); return; }
+      if (input === 'a') { set(new Set(options.map((o) => o.id))); return; }
+      if (input === 'n') { set(new Set()); return; }
+      if (input === ' ') {
+        const id = options[sourcePicker.focus]?.id;
+        if (!id) return;
+        const next = new Set(sourcePicker.checked);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        set(next);
+        return;
+      }
+      if (key.return) {
+        const chosen = options.filter((o) => sourcePicker.checked.has(o.id)).map((o) => o.id);
+        if (options.length > 0 && chosen.length === 0) {
+          setSourcePicker({ ...sourcePicker, warning: 'Tick at least one source (space), or press a for all' });
+          return;
+        }
+        closeSourcePicker();
+        const all = chosen.length === options.length;
+        applySourceFilter(all ? undefined : chosen);
+        showMessage(all ? 'Showing all sources' : `Showing ${chosen.length} of ${options.length} sources`);
+      }
+      return;
+    }
+
     // ── Link a device overlay ──
     if (linkView) {
       if (key.escape || key.backspace || key.delete) {
@@ -930,7 +1008,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
           void doFetch([sourceId]);
         } else if (input === 'v') {
           setShowSettings(false);
-          applySourceFilter(sourceId);
+          applySourceFilter([sourceId]);
         }
         return;
       }
@@ -984,6 +1062,12 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       return;
     }
 
+    // Pick which sources to show
+    if (input === 'v') {
+      void openSourcePicker();
+      return;
+    }
+
     // Detail-specific: Esc or q to close
     if (showDetail && (key.escape || key.backspace || key.delete)) {
       setShowDetail(false);
@@ -997,7 +1081,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       return;
     }
 
-    // Esc clears a source filter (set with v in config)
+    // Esc clears a source filter (set with v)
     if (key.escape && sourceFilter) {
       applySourceFilter(undefined);
       showMessage('Showing all sources');
@@ -1172,12 +1256,15 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   const searchMatches = grouped
     ? digestEntries.reduce((n, e) => n + e.items.length, 0)
     : listTotal;
+  const sourceFilterLabel = !sourceFilter
+    ? undefined
+    : sourceFilter.length <= 2 ? sourceFilter.map(sourceName).join(', ') : `${sourceFilter.length} sources`;
   const filterBar = (
     <FilterBar
       active={filter}
       grouped={grouped}
       columns={columns}
-      sourceLabel={sourceFilter ? sourceName(sourceFilter) : undefined}
+      sourceLabel={sourceFilterLabel}
       search={!showTodos && search ? search : undefined}
       matches={!showTodos && search ? searchMatches : undefined}
       searchDraft={searchDraft}
@@ -1268,6 +1355,23 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         {statusBar}
         {filterBar}
         <LinkOverlay link={linkView} height={availableH} columns={columns} />
+      </Box>
+    );
+  }
+
+  if (sourcePicker) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        {statusBar}
+        {filterBar}
+        <SourcePicker
+          options={sourcePicker.options}
+          checked={sourcePicker.checked}
+          focusIndex={sourcePicker.focus}
+          warning={sourcePicker.warning}
+          height={availableH}
+          columns={columns}
+        />
       </Box>
     );
   }

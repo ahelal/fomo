@@ -230,6 +230,7 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `2` / `4` again | Switch Unread / Saved between topics and a list (or click the active tab) |
 | `5` / `t`       | Todos                                     |
 | `/`             | Search titles & content in the current view (`Enter` searches, `Esc` clears) |
+| `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply); `Esc` clears it after the search |
 | `j` / `↓`       | Next row                                  |
 | `k` / `↑`       | Previous row                              |
 | `Enter`         | Topics: expand topic · Lists: toggle detail |
@@ -274,6 +275,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `c`             | Config: sources, link a device, backup / restore, local settings |
 | `t`             | Todos (`a` add, `Enter` cycle status, `d` delete) |
 | `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |
+| `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply) |
 | `Esc`           | Clear the search, then the source filter  |
 | `.`             | Show preview / toggle its position        |
 | `h`             | Help (also shows the version)             |
@@ -281,6 +283,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 
 The status bar shows counts by status; the config screen shows counts per source.
 Search (`/`) works like the web app: it's scoped to the current view, matches every word against the title, summary and content, and shows the query and match count in the filter bar until `Esc` clears it.
+The source filter (`v`) lists the sources in the current view with their counts (honouring the search), stays applied across views like the search, and shows as a `src:` chip next to it.
 While a fetch, Copilot digest or restore runs, the status bar shows a spinner, the current step and the elapsed time.
 Fetch errors and Copilot runtime logs are written to `~/.fomo/fomo.log` instead of the screen.
 

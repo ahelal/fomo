@@ -35,6 +35,8 @@ export interface FomoState {
   grouped: GroupedViews;
   /** Applied search query, scoped to the current view ('' when off). */
   search: string;
+  /** Only updates from these sources are shown (every view); undefined shows all. */
+  sourceFilter: string[] | undefined;
   /** Lazily loaded update bodies (lists are fetched without content). */
   content: Record<string, string>;
 }
@@ -45,6 +47,10 @@ export interface FomoActions {
   toggleGrouped(): void;
   /** Search titles, summaries and content within the current view. */
   setSearch(q: string): void;
+  /** Limit every view to these sources; undefined shows all. */
+  setSourceFilter(ids: string[] | undefined): void;
+  /** Updates per source in the current view (with the search, ignoring the source filter). */
+  countSources(): Promise<Record<string, number>>;
   setStatus(id: string, status: Status): Promise<void>;
   /** Change read status in place so an update can be toggled back before refreshing or switching views. */
   setStatusMany(ids: string[], status: Status): Promise<void>;
@@ -77,6 +83,8 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
   filterRef.current = filter;
   const [search, setSearchState] = useState('');
   const searchRef = useRef(search);
+  const [sourceFilter, setSourceFilterState] = useState<string[] | undefined>();
+  const sourceFilterRef = useRef(sourceFilter);
   const loadSeq = useRef(0);
   const contentRequested = useRef(new Set<string>());
 
@@ -95,16 +103,17 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
       setLoading(true);
       try {
         const search = searchRef.current || undefined;
+        const sources = sourceFilterRef.current;
         if (isGroupedView(f, groupedRef.current)) {
-          const resp = await service.getDigest({ search, saved: f === 'saved' });
+          const resp = await service.getDigest({ search, sources, saved: f === 'saved' });
           if (seq !== loadSeq.current) return;
           setDigest(resp.entries);
           setPending(resp.pending);
           return;
         }
         const resp = await service.listUpdates(f === 'saved'
-          ? { saved: true, search, limit: 200, includeContent: false }
-          : { status: f, search, limit: 200, includeContent: false });
+          ? { saved: true, sources, search, limit: 200, includeContent: false }
+          : { status: f, sources, search, limit: 200, includeContent: false });
         if (seq !== loadSeq.current) return;
         setUpdates(resp.updates);
         setTotal(resp.total);
@@ -172,6 +181,24 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     },
     [loadView],
   );
+
+  const setSourceFilter = useCallback(
+    (ids: string[] | undefined) => {
+      sourceFilterRef.current = ids;
+      setSourceFilterState(ids);
+      void loadView(filterRef.current);
+    },
+    [loadView],
+  );
+
+  const countSources = useCallback(() => {
+    const f = filterRef.current;
+    return service.countSources({
+      ...(f === 'saved' ? { saved: true } : { status: f === 'todos' ? 'all' : f }),
+      search: searchRef.current || undefined,
+      grouped: isGroupedView(f, groupedRef.current),
+    });
+  }, [service]);
 
   const setStatusMany = useCallback(
     async (ids: string[], status: Status) => {
@@ -252,10 +279,13 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     filter,
     grouped,
     search,
+    sourceFilter,
     content,
     setFilter,
     toggleGrouped,
     setSearch,
+    setSourceFilter,
+    countSources,
     setStatus,
     setStatusMany,
     markRead,
