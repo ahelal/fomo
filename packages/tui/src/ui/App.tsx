@@ -13,6 +13,7 @@ import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
 import { RestorePicker, type BackupFile } from './components/RestorePicker.js';
 import { SourcePicker, type SourceOption } from './components/SourcePicker.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
+import { useAutoFetch } from './hooks/useAutoFetch.js';
 import { UpdatesTable, DEFAULT_SOURCE_COLOR } from './components/UpdatesTable.js';
 import { DigestTable } from './components/DigestTable.js';
 import { StatusBar, type Activity } from './components/StatusBar.js';
@@ -320,6 +321,13 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       releaseBusy();
     }
   }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy]);
+
+  useAutoFetch(() => {
+    if (busyRef.current) return;
+    void doFetch().catch((err) => {
+      showMessage(`Auto-fetch error: ${errorText(err)}`, 8000);
+    });
+  });
 
   /** Forget all topics and regroup every unread and saved update. */
   const doRegroup = useCallback(async () => {
