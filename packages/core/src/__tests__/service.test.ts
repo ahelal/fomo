@@ -312,6 +312,45 @@ describe('FomoDirectService', () => {
     expect(digest.pending).toBe(1);
   });
 
+  it('getDigest limits the view to the chosen sources', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    await svc.getDigest({ sources: ['a', 'b'] });
+    expect(__mockStore.listUpdates).toHaveBeenCalledWith(expect.objectContaining({ status: 'unread', sources: ['a', 'b'] }));
+  });
+
+  it('countSources counts a list view per source, ignoring any source filter', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const base = { url: 'u', dateAdded: '2026-01-01', datePublished: '2026-01-01', status: 'read', saved: false, content: '', title: 'T' };
+    __mockStore.listUpdates.mockResolvedValueOnce({
+      updates: [{ ...base, id: 'a__1', source: 'a' }, { ...base, id: 'a__2', source: 'a' }, { ...base, id: 'b__3', source: 'b' }],
+      total: 3,
+      hasMore: false,
+    });
+    const counts = await svc.countSources({ status: 'read', search: 'x' });
+    expect(__mockStore.listUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'read', search: 'x', includeContent: false }));
+    expect(__mockStore.listUpdates.mock.lastCall[0].sources).toBeUndefined();
+    expect(counts).toEqual({ a: 2, b: 1 });
+  });
+
+  it('countSources counts the grouped view through the digest', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const { __mockTopicStore } = await import('../store/topics.js') as any;
+    const base = { url: 'u', dateAdded: '2026-01-01', status: 'unread', saved: true, content: '' };
+    __mockStore.listUpdates.mockResolvedValueOnce({
+      updates: [
+        { ...base, id: 'a__1', source: 'a', title: 'A1', datePublished: '2026-01-02', topicId: 't1' },
+        { ...base, id: 'b__2', source: 'b', title: 'B2', datePublished: '2026-01-03', topicId: 't1' },
+        { ...base, id: 'b__3', source: 'b', title: 'B3', datePublished: '2026-01-01' },
+      ],
+      total: 3,
+      hasMore: false,
+    });
+    __mockTopicStore.getTopics.mockResolvedValueOnce(new Map([['t1', { id: 't1', title: 'T1', summary: '', highlights: [], createdAt: '', updatedAt: '' }]]));
+    const counts = await svc.countSources({ saved: true, grouped: true });
+    expect(__mockStore.listUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ saved: true }));
+    expect(counts).toEqual({ a: 1, b: 2 });
+  });
+
   it('digest runs the summarizer over pending updates', async () => {
     const { __mockStore } = await import('../store/tables.js') as any;
     const { __mockTopicStore } = await import('../store/topics.js') as any;

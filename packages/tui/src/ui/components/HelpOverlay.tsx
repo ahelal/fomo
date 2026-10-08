@@ -74,7 +74,8 @@ const GLOBAL_KEYS: [string, string][] = [
   ['c',    'Config: sources, link a device, backup / restore'],
   ['t',    'Todos'],
   ['/',    'Search titles & content in this view (↵ search)'],
-  ['Esc',  'Clear the search, then the source filter (v in config)'],
+  ['v',    'Pick which sources to show (works with the search)'],
+  ['Esc',  'Clear the search, then the source filter'],
   ['.',    'Show preview / toggle its position'],
   ['h',    'Show this help'],
 ];
