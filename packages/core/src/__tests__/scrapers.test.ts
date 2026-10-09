@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { githubSource } from '../scraper/sources/github.js';
 import { azureSource } from '../scraper/sources/azure.js';
 import { vscodeSource } from '../scraper/sources/vscode.js';
-import { copilotCliSource } from '../scraper/sources/copilot-cli.js';
+import { copilotCliSource, parseChangelog } from '../scraper/sources/copilot-cli.js';
 import { theRegisterSource } from '../scraper/sources/theregister.js';
 import { githubNextSource } from '../scraper/sources/github-next.js';
 import { getAllSources, getSource, getSourceIds, registerSource } from '../scraper/registry.js';
@@ -201,9 +201,7 @@ describe('copilot-cli source fetch', () => {
       },
     ];
 
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(releases), { status: 200 }),
-    );
+    mockCopilotCli(releases, null);
 
     const items = await copilotCliSource.fetch();
     expect(items).toHaveLength(1);
@@ -215,11 +213,74 @@ describe('copilot-cli source fetch', () => {
     expect(items[0].content).not.toContain('##');
   });
 
+  it('uses the changelog section for the release version', async () => {
+    const changelog = [
+      '# Changelog',
+      '',
+      '## 1.0.94 - 2026-10-08',
+      '',
+      '- Add Claude Haiku 5.5 to model selection',
+      '- `copilot mcp add` recovers cleanly',
+      '',
+      '## 1.0.93 - 2026-10-07',
+      '',
+      '- Add enterprise permissions.limitTo',
+    ].join('\n');
+    const releases = [
+      release('v1.0.95-0', 'Fixes and changes'),
+      release('v1.0.94', '2026-10-08'),
+      release('v1.0.94-2', 'Fixes and changes'),
+      release('v1.0.94-1', '**Fixed**\n- Sessions sidebar row switches reliably'),
+    ];
+    mockCopilotCli(releases, changelog);
+
+    const items = await copilotCliSource.fetch();
+    const byTitle = Object.fromEntries(items.map((i) => [i.title, i.content]));
+    expect(byTitle['1.0.94']).toBe('- Add Claude Haiku 5.5 to model selection\n- copilot mcp add recovers cleanly');
+    expect(byTitle['1.0.94-2']).toContain('Add Claude Haiku 5.5');
+    expect(byTitle['1.0.94-1']).toBe('Fixed\n- Sessions sidebar row switches reliably');
+    expect(byTitle['1.0.95-0']).toBe('Fixes and changes');
+  });
+
+  it('falls back to release bodies when the changelog is unavailable', async () => {
+    mockCopilotCli([release('v1.0.94', '2026-10-08\n\n- Something new')], new Error('offline'));
+    const items = await copilotCliSource.fetch();
+    expect(items[0].content).toContain('Something new');
+  });
+
+  it('parses changelog headings', () => {
+    const sections = parseChangelog('## 1.0.2 - 2026-01-02\n\n- two\n\n## v1.0.1\n- one\n');
+    expect(sections.get('1.0.2')).toBe('- two');
+    expect(sections.get('1.0.1')).toBe('- one');
+  });
+
   it('reports failures', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
     await expect(copilotCliSource.fetch()).rejects.toThrow('[copilot-cli] fetch failed: offline');
   });
 });
+
+function release(tag: string, body: string) {
+  return {
+    name: tag.replace(/^v/, ''),
+    tag_name: tag,
+    html_url: `https://github.com/github/copilot-cli/releases/tag/${tag}`,
+    published_at: '2026-10-08T00:00:00Z',
+    created_at: '2026-10-08T00:00:00Z',
+    body,
+  };
+}
+
+function mockCopilotCli(releases: unknown[], changelog: string | null | Error) {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes('changelog.md')) {
+      if (changelog instanceof Error) throw changelog;
+      return changelog === null ? new Response('', { status: 404 }) : new Response(changelog, { status: 200 });
+    }
+    return new Response(JSON.stringify(releases), { status: 200 });
+  });
+}
 
 describe('theregister source', () => {
   it('has correct metadata', () => {
