@@ -123,7 +123,7 @@ How it works:
 - Updates that haven't been digested yet still appear in the grouped Unread and Saved views as single-item entries.
 - About 220 updates take roughly 2 minutes. **Max items per run** (default 300) caps a run; the rest are grouped next time.
 - The default model is `gpt-5-mini`. Change it with **Copilot model** in the config screen or `FOMO_COPILOT_MODEL`.
-- Existing topics keep their grouping and rating. **Regroup all topics** in the config screen (or `R` twice in the TUI's main view) regroups and re-rates all unread and saved updates (read and saved status is untouched). This also fills in per-update summaries for updates digested before they existed.
+- Existing topics keep their grouping and rating. **Regroup all topics** in the config screen (or `z` twice in the TUI's main view) regroups and re-rates all unread and saved updates (read and saved status is untouched). This also fills in per-update summaries for updates digested before they existed.
 - Authentication uses your logged-in Copilot CLI user, or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`.
 
 ### Post Summaries
@@ -272,7 +272,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `p`             | Fetch full content (detail view)          |
 | `g` / `G`       | [Summarise the update with Copilot](#post-summaries) (saved) / regenerate |
 | `f` / `F`       | Fetch latest updates + Copilot digest     |
-| `R` twice       | Regroup all topics with Copilot (`Esc` after the first `R` cancels) |
+| `z` twice       | Regroup all topics with Copilot (`Esc` after the first `z` cancels) |
 | `c`             | Config: sources, link a device, backup / restore, local settings |
 | `t`             | Todos (`a` add, `Enter` cycle status, `d` delete) |
 | `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |

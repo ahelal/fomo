@@ -63,38 +63,38 @@ async function renderApp() {
   return { digest, press, frame: () => frame };
 }
 
-describe('R regroup shortcut', () => {
-  it('asks first, then regroups all topics on the second R', async () => {
+describe('z regroup shortcut', () => {
+  it('asks first, then regroups all topics on the second z', async () => {
     const { digest, press, frame } = await renderApp();
-    await press('R');
+    await press('z');
     expect(digest).not.toHaveBeenCalled();
-    expect(frame()).toContain('R again to regroup all topics');
-    await press('R');
+    expect(frame()).toContain('z again to regroup all topics');
+    await press('z');
     expect(digest).toHaveBeenCalledTimes(1);
     expect(digest).toHaveBeenCalledWith(expect.any(Function), { reset: true });
   });
 
   it('cancels when another key or Esc comes in between', async () => {
     const { digest, press, frame } = await renderApp();
-    await press('R');
+    await press('z');
     await press('k');
-    expect(frame()).not.toContain('R again');
-    await press('R');
+    expect(frame()).not.toContain('z again');
+    await press('z');
     await press('\u001B');
-    await press('R');
+    await press('z');
     expect(digest).not.toHaveBeenCalled();
-    await press('R');
+    await press('z');
     expect(digest).toHaveBeenCalledTimes(1);
   });
 
-  it('expires if the second R comes too late', async () => {
+  it('expires if the second z comes too late', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const { digest, press } = await renderApp();
-    await press('R');
+    await press('z');
     vi.setSystemTime(Date.now() + REGROUP_CONFIRM_MS);
-    await press('R');
+    await press('z');
     expect(digest).not.toHaveBeenCalled();
-    await press('R');
+    await press('z');
     expect(digest).toHaveBeenCalledTimes(1);
   });
 });

@@ -50,7 +50,7 @@ interface Props {
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const BUSY_MESSAGE = '⏳ Still busy — wait for the current run to finish';
-/** How long the first `R` waits for the second one before the regroup prompt expires. */
+/** How long the first `z` waits for the second one before the regroup prompt expires. */
 export const REGROUP_CONFIRM_MS = 5000;
 
 /** The update a digest row points at (items and single-update topics), if any. */
@@ -359,7 +359,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       releaseBusy();
     }
   }, [digest, refresh, showMessage, claimBusy, updatePhase, releaseBusy]);
-  /** When `R` asked to confirm a regroup (0 = not waiting for the second `R`). */
+  /** When `z` asked to confirm a regroup (0 = not waiting for the second `z`). */
   const regroupArmedAt = useRef(0);
 
   const backupDir = config.backupDir ?? DEFAULT_BACKUP_DIR;
@@ -1074,7 +1074,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       return; // Consume all other input while in settings
     }
 
-    // R asks before regrouping every topic with Copilot: R again within a few seconds runs it,
+    // z asks before regrouping every topic with Copilot: z again within a few seconds runs it,
     // any other key cancels (Esc does nothing else).
     const regroupArmed = Date.now() - regroupArmedAt.current < REGROUP_CONFIRM_MS;
     regroupArmedAt.current = 0;
@@ -1083,13 +1083,13 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       setMessage(undefined);
       if (key.escape) return;
     }
-    if (input === 'R') {
+    if (input === 'z') {
       if (!digest) showMessage('Copilot is not available');
       else if (busyRef.current) showMessage(BUSY_MESSAGE);
       else if (regroupArmed) void doRegroup();
       else {
         regroupArmedAt.current = Date.now();
-        showMessage('⚠ R again to regroup all topics · Esc cancels', REGROUP_CONFIRM_MS);
+        showMessage('⚠ z again to regroup all topics · Esc cancels', REGROUP_CONFIRM_MS);
       }
       return;
     }

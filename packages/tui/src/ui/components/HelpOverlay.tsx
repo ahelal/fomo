@@ -71,7 +71,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['1–4',  'All / unread / read / saved'],
   ['2 / 4','Again: switch Unread / Saved between topics and a list'],
   ['f / F','Fetch latest updates + group with Copilot'],
-  ['R',    'Regroup all topics with Copilot (press twice)'],
+  ['z',    'Regroup all topics with Copilot (press twice)'],
   ['c',    'Config: sources, link a device, backup / restore'],
   ['t',    'Todos'],
   ['/',    'Search titles & content in this view (↵ search)'],
