@@ -49,6 +49,9 @@ interface Props {
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const BUSY_MESSAGE = '⏳ Still busy — wait for the current run to finish';
+/** How long the first `R` waits for the second one before the regroup prompt expires. */
+export const REGROUP_CONFIRM_MS = 5000;
 
 /** The update a digest row points at (items and single-update topics), if any. */
 function rowUpdate(row: DigestRow | undefined): Update | undefined {
@@ -262,7 +265,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   const busyRef = useRef(false);
   const claimBusy = useCallback((label: string) => {
     if (busyRef.current) {
-      showMessage('⏳ Still busy — wait for the current run to finish');
+      showMessage(BUSY_MESSAGE);
       return false;
     }
     busyRef.current = true;
@@ -356,6 +359,8 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       releaseBusy();
     }
   }, [digest, refresh, showMessage, claimBusy, updatePhase, releaseBusy]);
+  /** When `R` asked to confirm a regroup (0 = not waiting for the second `R`). */
+  const regroupArmedAt = useRef(0);
 
   const backupDir = config.backupDir ?? DEFAULT_BACKUP_DIR;
 
@@ -1069,6 +1074,26 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       return; // Consume all other input while in settings
     }
 
+    // R asks before regrouping every topic with Copilot: R again within a few seconds runs it,
+    // any other key cancels (Esc does nothing else).
+    const regroupArmed = Date.now() - regroupArmedAt.current < REGROUP_CONFIRM_MS;
+    regroupArmedAt.current = 0;
+    if (regroupArmed) {
+      clearTimeout(messageTimer.current);
+      setMessage(undefined);
+      if (key.escape) return;
+    }
+    if (input === 'R') {
+      if (!digest) showMessage('Copilot is not available');
+      else if (busyRef.current) showMessage(BUSY_MESSAGE);
+      else if (regroupArmed) void doRegroup();
+      else {
+        regroupArmedAt.current = Date.now();
+        showMessage('⚠ R again to regroup all topics · Esc cancels', REGROUP_CONFIRM_MS);
+      }
+      return;
+    }
+
     // Help
     if (input === 'h') {
       setHelpContext(grouped ? (filter === 'saved' ? 'saved' : 'digest') : showDetail ? 'detail' : 'list');
@@ -1125,7 +1150,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
 
     // Navigation
     if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - 1));                return; }
-    if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.min(listLength - 1, i + 1));    return; }
+    if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.max(0, Math.min(listLength - 1, i + 1))); return; }
 
     // Filters
     const filterMap: Record<string, FilterStatus> = { '1': 'all', '2': 'unread', '3': 'read', '4': 'saved' };
