@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, nextRowKey, patchDig
 import { FomoDirectService, type PostGistResult } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, tildify, type LocalConfig } from '../config.js';
-import { buildSettingsRows, editStartValue, findRow, firstFocusable, moveFocus, parseConfigEdit, type SettingsRow } from './settings.js';
+import { buildSettingsRows, editStartValue, findRow, firstFocusable, isToggleField, moveFocus, parseConfigEdit, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
 import { RestorePicker, type BackupFile } from './components/RestorePicker.js';
@@ -90,6 +90,8 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   /** Key of the action row waiting for a second ↵. */
   const [confirmKey, setConfirmKey] = useState<string | undefined>();
   const [lastFetch, setLastFetch] = useState<Record<string, SourceFetchResult>>({});
+  /** When the last fetch (manual or automatic) finished. */
+  const [lastFetchAt, setLastFetchAt] = useState<number | undefined>();
   const [linkView, setLinkView] = useState<LinkView | undefined>();
   const [restoreFiles, setRestoreFiles] = useState<BackupFile[] | undefined>();
   const [restoreIndex, setRestoreIndex] = useState(0);
@@ -280,20 +282,22 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   }, []);
 
   /** Fetch every enabled source, or only `only` (even if disabled), then group with Copilot. */
-  const doFetch = useCallback(async (only?: string[]) => {
-    if (!claimBusy(`Fetching ${only ? only.map(sourceName).join(', ') : 'latest updates'}…`)) return;
+  const doFetch = useCallback(async (only?: string[], auto = false) => {
+    const what = only ? only.map(sourceName).join(', ') : 'latest updates';
+    if (!claimBusy(`${auto ? 'Auto-fetching' : 'Fetching'} ${what}…`)) return;
     try {
       let resp: Awaited<ReturnType<typeof service.fetch>>;
       try {
         resp = await service.fetch(only ? { sources: only } : {});
       } catch (err) {
-        showMessage(`Fetch error: ${errorText(err)}`, 8000);
+        showMessage(`${auto ? 'Auto-fetch' : 'Fetch'} error: ${errorText(err)}`, 8000);
         return;
       }
+      setLastFetchAt(Date.now());
       setLastFetch((prev) => ({ ...prev, ...resp.results }));
       const failed = Object.entries(resp.results).filter(([, r]) => r.error).map(([id]) => sourceName(id));
       const failedNote = failed.length ? ` · ⚠ ${failed.join(', ')} failed` : '';
-      const added = `✓ Added ${resp.added} update${resp.added !== 1 ? 's' : ''}${failedNote}`;
+      const added = `✓ ${auto ? 'Auto-fetch: added' : 'Added'} ${resp.added} update${resp.added !== 1 ? 's' : ''}${failedNote}`;
       if (!digest || config.autoDigest === false) {
         showMessage(added, failed.length ? 6000 : 3000);
         await refresh();
@@ -322,12 +326,19 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     }
   }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy]);
 
-  useAutoFetch(() => {
+  const autoFetchEnabled = config.autoFetch !== false;
+  const nextAutoFetchAt = useAutoFetch(() => {
     if (busyRef.current) return;
-    void doFetch().catch((err) => {
+    void doFetch(undefined, true).catch((err) => {
       showMessage(`Auto-fetch error: ${errorText(err)}`, 8000);
     });
-  });
+  }, autoFetchEnabled);
+  const fetchInfo = useMemo(() => {
+    const hhmm = (t: number) => new Date(t).toTimeString().slice(0, 5);
+    const last = lastFetchAt ? `fetched ${hhmm(lastFetchAt)}` : '';
+    const next = nextAutoFetchAt ? `next ${hhmm(nextAutoFetchAt)}` : 'auto-fetch off';
+    return [last, next].filter(Boolean).join(' · ');
+  }, [lastFetchAt, nextAutoFetchAt]);
 
   /** Forget all topics and regroup every unread and saved update. */
   const doRegroup = useCallback(async () => {
@@ -1032,8 +1043,9 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
 
       if (row.kind === 'config') {
         if (!key.return && input !== 'e') return;
-        if (row.field === 'autoDigest') {
-          const err = onConfigChange({ autoDigest: config.autoDigest === false ? undefined : false });
+        if (isToggleField(row.field)) {
+          const field = row.field;
+          const err = onConfigChange({ [field]: config[field] === false ? undefined : false });
           if (err) showMessage(`⚠ Could not save: ${err}`, 6000);
           return;
         }
@@ -1259,7 +1271,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   const availableH = rows - chrome;
   const selectedUpdate = updates[selectedIndex];
   const statusBar = (
-    <StatusBar stats={stats} loading={loading} message={message} activity={activity} columns={columns} />
+    <StatusBar stats={stats} loading={loading} message={message} activity={activity} fetchInfo={fetchInfo} columns={columns} />
   );
   const searchMatches = grouped
     ? digestEntries.reduce((n, e) => n + e.items.length, 0)

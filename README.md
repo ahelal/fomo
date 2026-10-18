@@ -285,7 +285,7 @@ The status bar shows counts by status; the config screen shows counts per source
 Search (`/`) works like the web app: it's scoped to the current view, matches every word against the title, summary and content, and shows the query and match count in the filter bar until `Esc` clears it.
 The source filter (`v`) lists the sources in the current view with their counts (honouring the search), stays applied across views like the search, and shows as a `src:` chip next to it.
 While a fetch, Copilot digest or restore runs, the status bar shows a spinner, the current step and the elapsed time.
-While the TUI is open, it automatically fetches every 15 minutes, starting 15 minutes after launch. Each run fetches all enabled sources and groups updates with Copilot when auto-digest is enabled, just like `f`. A scheduled run is skipped if a fetch, regroup or restore is already running; closing the TUI stops the timer.
+While the TUI is open, it automatically fetches every 15 minutes, starting 15 minutes after launch. Each run fetches all enabled sources and groups updates with Copilot when auto-digest is enabled, just like `f`. A scheduled run is skipped if a fetch, regroup or restore is already running; closing the TUI stops the timer. The status bar shows when the last fetch finished and when the next automatic one is due (`fetched 19:30 · next 19:45`). Turn **Auto-fetch (15 min)** off in the config screen to fetch only with `f`.
 Fetch errors and Copilot runtime logs are written to `~/.fomo/fomo.log` instead of the screen.
 
 ### Config Screen
@@ -299,7 +299,7 @@ Press `c`. The bottom line shows the keys for the selected row.
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
 | **Sources** (shared with the web app) | One row per source, with its item count and last fetch result | `Enter` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
-| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Interests, Grouping hints, Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Group after fetch). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. |
+| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Interests, Grouping hints, Auto-fetch (15 min), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Auto-fetch and Group after fetch). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. |
 
 ### Backup & Restore
 
@@ -327,8 +327,16 @@ The backup format is `{ version: 1, exportedAt, count, entities: [...] }`.
 | The Register | `theregister` | The Register tech news (Atom feed) |
 | Anthropic News | `anthropic-news` | Anthropic news |
 | Anthropic Engineering | `anthropic-engineering` | Anthropic engineering blog |
-| Azure SRE Agent | `azure-sre-agent` | Azure SRE Agent updates |
+| Azure SRE Agent | `azure-sre-agent` | Azure Updates announcements and Apps on Azure Tech Community posts mentioning SRE Agent |
 | GitHub Next | `github-next` | GitHub Next research & prototypes (RSS) |
+
+The Azure SRE Agent source combines Microsoft's public Azure Updates RSS feed
+with the latest 100 posts from Tech Community's Apps on Azure blog, filtering
+titles and descriptions for SRE Agent mentions. This includes blog guides and
+feature posts as well as release announcements, without the legacy Azure Charts
+endpoint's authentication requirement. These are rolling feeds (Azure Updates
+currently returns 200 announcements), not complete archives or date-based resume
+APIs. Each fetch adds previously unseen URLs; stored updates are retained.
 
 ### Adding a New Source
 

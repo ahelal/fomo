@@ -23,6 +23,8 @@ export interface LocalConfig {
   groupingHints?: string;
   /** Group new updates with Copilot after each fetch. Default true. */
   autoDigest?: boolean;
+  /** Fetch automatically every 15 minutes while the TUI is open. Default true. */
+  autoFetch?: boolean;
   /** Most updates one digest run sends to Copilot; the rest wait for the next run. Default 300. */
   digestMaxItems?: number;
   /** Magic link validity in days. Default 365. */
@@ -55,7 +57,9 @@ export function readConfigFile(): LocalConfig {
   for (const key of ['connectionString', 'webUrl', 'copilotModel', 'interests', 'groupingHints', 'backupDir'] as const) {
     if (typeof raw[key] === 'string' && raw[key]) out[key] = raw[key] as string;
   }
-  if (typeof raw.autoDigest === 'boolean') out.autoDigest = raw.autoDigest;
+  for (const key of ['autoDigest', 'autoFetch'] as const) {
+    if (typeof raw[key] === 'boolean') out[key] = raw[key] as boolean;
+  }
   for (const key of ['linkDays', 'digestMaxItems'] as const) {
     if (typeof raw[key] === 'number' && (raw[key] as number) > 0) out[key] = raw[key] as number;
   }

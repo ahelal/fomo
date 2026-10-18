@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { githubSource } from '../scraper/sources/github.js';
 import { azureSource } from '../scraper/sources/azure.js';
+import { azureSreAgentSource } from '../scraper/sources/azure-sre-agent.js';
 import { vscodeSource } from '../scraper/sources/vscode.js';
 import { copilotCliSource, parseChangelog } from '../scraper/sources/copilot-cli.js';
 import { theRegisterSource } from '../scraper/sources/theregister.js';
@@ -106,6 +107,144 @@ describe('azure source fetch', () => {
   it('reports failures', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('timeout'));
     await expect(azureSource.fetch()).rejects.toThrow('[azure] fetch failed: timeout');
+  });
+});
+
+describe('azure-sre-agent source fetch', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('uses the public Azure feed and keeps only SRE Agent updates', async () => {
+    const rssXml = `<rss><channel>
+      <item>
+        <title>[In preview] Live Reports for Azure SRE Agent</title>
+        <link>https://azure.microsoft.com/updates?id=569690</link>
+        <pubDate>Wed, 26 Aug 2026 16:52:23 Z</pubDate>
+        <description><![CDATA[<p>Reports &amp; operational views</p>]]></description>
+      </item>
+      <item>
+        <title>New operational capabilities</title>
+        <link>https://azure.microsoft.com/updates?id=569695</link>
+        <description>Connect Azure sre agent to your network.</description>
+      </item>
+      <item>
+        <title>Azure Kubernetes update</title>
+        <link>https://azure.microsoft.com/updates?id=123</link>
+        <description>Tools for SRE teams and unrelated agents.</description>
+      </item>
+    </channel></rss>`;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input) === 'https://www.microsoft.com/releasecommunications/api/v2/azure/rss') {
+        return new Response(rssXml, { status: 200 });
+      }
+      if (String(input) === 'https://techcommunity.microsoft.com/t5/s/gxcuf89792/rss/board?board.id=AppsonAzureBlog&count=100') {
+        return new Response('<rss><channel></channel></rss>', { status: 200 });
+      }
+      return new Response('', { status: 401 });
+    });
+
+    const items = await azureSreAgentSource.fetch();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      title: '[In preview] Live Reports for Azure SRE Agent',
+      url: 'https://azure.microsoft.com/updates?id=569690',
+      datePublished: new Date('2026-08-26T16:52:23Z'),
+      content: 'Reports & operational views',
+    });
+    expect(items[1].title).toBe('New operational capabilities');
+  });
+
+  it('includes the reported Tech Community article and decodes RSS-escaped HTML', async () => {
+    const blogXml = `<rss><channel>
+      <item>
+        <title>Enterprise Adoption Guide for Azure SRE Agent, Part 2: From One Team to Enterprise-Wide Adoption</title>
+        <link>https://techcommunity.microsoft.com/t5/apps-on-azure-blog/enterprise-adoption-guide-for-azure-sre-agent-part-2-from-one/ba-p/4564311</link>
+        <pubDate>Thu, 15 Oct 2026 03:51:09 GMT</pubDate>
+        <description>&lt;P&gt;Share &amp;amp; govern your &lt;strong&gt;SRE Agent&lt;/strong&gt;.&lt;/P&gt;</description>
+      </item>
+      <item>
+        <title>New operational guidance</title>
+        <link>https://techcommunity.microsoft.com/blog/AppsonAzureBlog/guidance/123</link>
+        <description>&lt;p&gt;Learn about SRE&amp;#32;agents.&lt;/p&gt;</description>
+      </item>
+      <item>
+        <title>Unrelated Azure Container Apps post</title>
+        <link>https://techcommunity.microsoft.com/blog/AppsonAzureBlog/other/456</link>
+        <description>New container features.</description>
+      </item>
+    </channel></rss>`;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => new Response(
+      String(input).includes('techcommunity.microsoft.com') ? blogXml : '<rss><channel></channel></rss>',
+      { status: 200 },
+    ));
+
+    const items = await azureSreAgentSource.fetch();
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      title: 'Enterprise Adoption Guide for Azure SRE Agent, Part 2: From One Team to Enterprise-Wide Adoption',
+      url: expect.stringContaining('/4564311'),
+      datePublished: new Date('2026-10-15T03:51:09Z'),
+      content: 'Share & govern your SRE Agent .',
+    });
+    expect(items[1].content).toBe('Learn about SRE agents.');
+    expect(items[0].content).not.toMatch(/&lt;|<P>|<strong>/);
+  });
+
+  it('merges both feeds without duplicate URLs', async () => {
+    const xml = `<rss><channel><item>
+      <title>Azure SRE Agent update</title>
+      <link>https://azure.microsoft.com/updates?id=569690</link>
+    </item></channel></rss>`;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(xml, { status: 200 }));
+
+    await expect(azureSreAgentSource.fetch()).resolves.toHaveLength(1);
+  });
+
+  it('reports Tech Community failures instead of silently returning only Azure announcements', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => (
+      String(input).includes('techcommunity.microsoft.com')
+        ? new Response('', { status: 503 })
+        : new Response('<rss><channel></channel></rss>', { status: 200 })
+    ));
+
+    await expect(azureSreAgentSource.fetch()).rejects.toThrow(
+      '[azure-sre-agent] fetch failed: Tech Community fetch failed: HTTP 503',
+    );
+  });
+
+  it('reports a non-RSS response instead of treating it as an empty feed', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => new Response(
+      String(input).includes('techcommunity.microsoft.com') ? '<html>Sign in</html>' : '<rss><channel></channel></rss>',
+      { status: 200 },
+    ));
+
+    await expect(azureSreAgentSource.fetch()).rejects.toThrow('Expected an RSS feed');
+  });
+
+  it('returns no items when the feed has no SRE Agent updates', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response('<rss><channel></channel></rss>', { status: 200 }),
+    );
+
+    await expect(azureSreAgentSource.fetch()).resolves.toEqual([]);
+  });
+
+  it('reports HTTP failures with the SRE Agent source ID', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('', { status: 503 }),
+    );
+
+    await expect(azureSreAgentSource.fetch()).rejects.toThrow(/\[azure-sre-agent\].*HTTP 503/);
+  });
+
+  it('reports network failures with the SRE Agent source ID', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+
+    await expect(azureSreAgentSource.fetch()).rejects.toThrow(/\[azure-sre-agent\].*offline/);
   });
 });
 

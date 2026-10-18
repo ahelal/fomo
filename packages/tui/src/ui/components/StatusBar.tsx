@@ -14,6 +14,8 @@ interface Props {
   loading?: boolean;
   message?: string;
   activity?: Activity;
+  /** Last / next fetch times, e.g. `fetched 19:30 · next 19:45`. */
+  fetchInfo?: string;
   columns: number;
 }
 
@@ -27,7 +29,7 @@ function formatElapsed(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
 }
 
-export const StatusBar = React.memo(function StatusBar({ stats, loading, message, activity, columns }: Props) {
+export const StatusBar = React.memo(function StatusBar({ stats, loading, message, activity, fetchInfo, columns }: Props) {
   // Animate while a background job runs, so it's obvious the app is still working.
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -52,6 +54,11 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
   const leftW = textWidth(brandStr + sep + statsStr);
   let room = columns - leftW - textWidth(sep + helpStr) - 1;
 
+  // Fetch times give way first when the bar is narrow or a job is running.
+  const fetchWant = fetchInfo ? textWidth(sep + fetchInfo) : 0;
+  const fetchStr = fetchInfo && !activity && room - fetchWant >= 30 ? fetchInfo : '';
+  if (fetchStr) room -= fetchWant;
+
   // Spinner and elapsed time always show; the message comes next; the label gets the rest.
   const spinStr = activity ? ` ${SPINNER[tick % SPINNER.length]} ` : loading ? ' ⟳ ' : '';
   const elapsedStr = activity ? ` · ${formatElapsed(Date.now() - activity.startedAt)} ` : '';
@@ -63,7 +70,7 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
   const labelStr = activity ? fit(activity.label, room) : '';
   const messageColor = /^⚠|error:/i.test(message ?? '') ? '#f0883e' : '#3fb950';
 
-  const rightW = textWidth(messageStr + spinStr + labelStr + elapsedStr + sep + helpStr);
+  const rightW = textWidth(messageStr + spinStr + labelStr + elapsedStr + (fetchStr ? sep + fetchStr : '') + sep + helpStr);
   const pad = ' '.repeat(Math.max(1, columns - leftW - rightW));
 
   return (
@@ -90,6 +97,8 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
         {spinStr && <Text color="#e3b341" bold backgroundColor={bg}>{spinStr}</Text>}
         {labelStr && <Text color="#e3b341" backgroundColor={bg}>{labelStr}</Text>}
         {elapsedStr && <Text color="#8b949e" backgroundColor={bg}>{elapsedStr}</Text>}
+        {fetchStr && <Text color="#8b949e" backgroundColor={bg}>{sep}</Text>}
+        {fetchStr && <Text color="#8b949e" backgroundColor={bg}>{fetchStr}</Text>}
         <Text color="#8b949e" backgroundColor={bg}>{sep}</Text>
         <Text color="#58a6ff" bold backgroundColor={bg}>{'[h]'}</Text>
         <Text color="#8b949e" backgroundColor={bg}>{' help '}</Text>

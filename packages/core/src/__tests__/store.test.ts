@@ -1,5 +1,44 @@
 import { describe, it, expect } from 'vitest';
-import { makeId, parseId, UpdateStore } from '../store/tables.js';
+import { clampContent, makeId, MAX_CONTENT_CHARS, parseId, UpdateStore } from '../store/tables.js';
+
+describe('clampContent', () => {
+  it('keeps content within the limit unchanged', () => {
+    const text = 'x'.repeat(MAX_CONTENT_CHARS);
+    expect(clampContent(text)).toBe(text);
+  });
+
+  it('cuts long content to the limit and marks the cut', () => {
+    const out = clampContent('x'.repeat(52_000));
+    expect(out).toHaveLength(MAX_CONTENT_CHARS);
+    expect(out.endsWith('x…')).toBe(true);
+    // 64 KiB of UTF-16 is the Table Storage limit for one string property.
+    expect(out.length * 2).toBeLessThanOrEqual(64 * 1024);
+  });
+
+  it('never splits a surrogate pair', () => {
+    // An emoji straddles the cut point.
+    const out = clampContent('x'.repeat(MAX_CONTENT_CHARS - 2) + '😀'.repeat(100));
+    expect(out).toBe(`${'x'.repeat(MAX_CONTENT_CHARS - 2)}…`);
+  });
+});
+
+describe('UpdateStore.insertUpdate', () => {
+  it('stores oversized content cut to the Table Storage limit', async () => {
+    const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+    const store = new UpdateStore(conn as any);
+    const created: { content: string }[] = [];
+    (store as any).client = { createEntity: async (e: { content: string }) => { created.push(e); } };
+    const inserted = await store.insertUpdate({
+      source: 'azure-sre-agent',
+      title: 'Zero Ops',
+      url: 'https://example.com/zero-ops',
+      datePublished: '2026-10-18T00:00:00Z',
+      content: 'y'.repeat(51_991),
+    });
+    expect(inserted).toBe(true);
+    expect(created[0]!.content).toHaveLength(MAX_CONTENT_CHARS);
+  });
+});
 
 describe('makeId / parseId', () => {
   it('creates a deterministic id from source + url', async () => {

@@ -37,6 +37,7 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
   { field: 'copilotModel', label: 'Copilot model' },
   { field: 'interests', label: 'Interests' },
   { field: 'groupingHints', label: 'Grouping hints' },
+  { field: 'autoFetch', label: 'Auto-fetch (15 min)' },
   { field: 'autoDigest', label: 'Group after fetch' },
   { field: 'digestMaxItems', label: 'Max items per run' },
   { field: 'linkDays', label: 'Link valid (days)' },
@@ -91,6 +92,8 @@ export function configDisplay(
       return config.interests ? { value: config.interests, muted: false, env } : muted('(none)');
     case 'groupingHints':
       return config.groupingHints ? { value: config.groupingHints, muted: false, env } : muted('(none — e.g. one topic per Copilot surface)');
+    case 'autoFetch':
+      return { value: config.autoFetch === false ? '[ ] off' : '[x] on — every 15 minutes while open', muted: false };
     case 'autoDigest':
       return { value: config.autoDigest === false ? 'off — fetch only' : 'on', muted: false };
     case 'digestMaxItems':
@@ -102,9 +105,15 @@ export function configDisplay(
   }
 }
 
+/** On/off settings toggled with ↵ instead of edited as text. */
+export const TOGGLE_FIELDS = ['autoFetch', 'autoDigest'] as const;
+export type ToggleField = (typeof TOGGLE_FIELDS)[number];
+export const isToggleField = (field: ConfigField): field is ToggleField =>
+  (TOGGLE_FIELDS as readonly ConfigField[]).includes(field);
+
 /** Starting text when editing a field. The connection string starts empty so the key is never shown. */
 export function editStartValue(field: ConfigField): string {
-  if (field === 'connectionString' || field === 'autoDigest') return '';
+  if (field === 'connectionString' || isToggleField(field)) return '';
   const value = readConfigFile()[field];
   if (value === undefined) return '';
   return field === 'backupDir' ? tildify(String(value)) : String(value);
@@ -134,6 +143,7 @@ export function parseConfigEdit(field: ConfigField, text: string): { patch: Part
       return problem ? { error: problem } : { patch: { connectionString: value } };
     }
     case 'autoDigest':
+    case 'autoFetch':
       return { error: 'Press ↵ to toggle' };
     default:
       return { patch: { [field]: value } };
@@ -146,7 +156,7 @@ export function rowHint(row: SettingsRow | undefined): string {
     case 'action': return '↵ run';
     case 'source': return '↵ enable/disable   e label   d color   f fetch now   v show its updates';
     case 'preview': return '↵ cycle';
-    case 'config': return row.field === 'autoDigest' ? '↵ toggle' : '↵ edit   (save empty to reset to the default)';
+    case 'config': return isToggleField(row.field) ? '↵ toggle' : '↵ edit   (save empty to reset to the default)';
     default: return '';
   }
 }

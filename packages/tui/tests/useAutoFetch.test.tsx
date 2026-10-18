@@ -59,4 +59,43 @@ describe('automatic fetch timer', () => {
       stderr.destroy();
     }
   });
+
+  it('does nothing while disabled and restarts the timer when re-enabled', async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn();
+    const seen: (number | undefined)[] = [];
+    function Probe({ enabled }: { enabled: boolean }) {
+      seen.push(useAutoFetch(fetch, enabled));
+      return null;
+    }
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    const stderr = new PassThrough();
+    let instance!: ReturnType<typeof render>;
+    await act(async () => {
+      instance = render(<Probe enabled={false} />, { stdout, stdin, stderr, debug: true, exitOnCtrlC: false, patchConsole: false });
+    });
+    try {
+      await act(async () => { vi.advanceTimersByTime(3 * 900_000); });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(seen.at(-1)).toBeUndefined();
+
+      await act(async () => { instance.rerender(<Probe enabled />); });
+      expect(seen.at(-1)).toBe(Date.now() + 900_000);
+      await act(async () => { vi.advanceTimersByTime(900_000); });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(seen.at(-1)).toBe(Date.now() + 900_000);
+
+      await act(async () => { instance.rerender(<Probe enabled={false} />); });
+      await act(async () => { vi.advanceTimersByTime(3 * 900_000); });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(seen.at(-1)).toBeUndefined();
+    } finally {
+      instance.unmount();
+      instance.cleanup();
+      stdout.destroy();
+      stdin.destroy();
+      stderr.destroy();
+    }
+  });
 });

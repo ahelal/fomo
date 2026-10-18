@@ -42,6 +42,21 @@ type UpdateEntity = TableEntity<{
 
 const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'topicId', 'summary', 'gist'];
 
+/**
+ * Table Storage caps a string property at 64 KiB of UTF-16 (32,768 code units) and rejects the
+ * whole entity with `PropertyValueTooLarge` above it, so long posts are cut to stay under it.
+ */
+export const MAX_CONTENT_CHARS = 32_000;
+
+/** `content` cut to `MAX_CONTENT_CHARS` (ending in `…`), never splitting a surrogate pair. */
+export function clampContent(content: string): string {
+  if (content.length <= MAX_CONTENT_CHARS) return content;
+  let end = MAX_CONTENT_CHARS - 1;
+  const last = content.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return `${content.slice(0, end)}…`;
+}
+
 // ─── ID helpers ────────────────────────────────────────────────────────────
 /**
  * The REST-facing ID encodes both the Table Storage PartitionKey (source)
@@ -151,6 +166,7 @@ export class UpdateStore {
     update: Omit<Update, 'id' | 'dateAdded' | 'status' | 'saved'>,
   ): Promise<boolean> {
     const rowKey = await hashUrl(update.url);
+    const content = clampContent(update.content ?? '');
 
     try {
       await this.client.createEntity<UpdateEntity>({
@@ -162,15 +178,15 @@ export class UpdateStore {
         dateAdded: new Date().toISOString(),
         status: 'unread',
         saved: false,
-        content: update.content ?? '',
+        content,
       });
       return true;
     } catch (err: unknown) {
       // EntityAlreadyExists → URL was already ingested
       if (isTableError(err, 409)) {
         // Backfill content if the existing entity has none
-        if (update.content) {
-          await this.backfillContent(update.source, rowKey, update.content);
+        if (content) {
+          await this.backfillContent(update.source, rowKey, content);
         }
         return false;
       }
@@ -199,7 +215,7 @@ export class UpdateStore {
   async updateContent(id: string, content: string): Promise<Update> {
     const { source, rowKey } = parseId(id);
     const entity = await this.client.getEntity<UpdateEntity>(source, rowKey);
-    const updated: UpdateEntity = { ...entity, content };
+    const updated: UpdateEntity = { ...entity, content: clampContent(content) };
     await this.client.updateEntity(updated, 'Replace', { etag: entity.etag });
     return entityToUpdate(updated);
   }
@@ -410,7 +426,7 @@ export class UpdateStore {
           dateAdded: e.dateAdded,
           status: e.status,
           saved: e.saved,
-          content: e.content,
+          content: clampContent(e.content ?? ''),
           ...(e.topicId ? { topicId: e.topicId } : {}),
           ...(e.summary ? { summary: e.summary } : {}),
           ...(e.gist ? { gist: e.gist } : {}),
