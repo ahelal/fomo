@@ -1,5 +1,5 @@
 import type { SourceInfo } from '@fomo/core';
-import { DEFAULT_COPILOT_MODEL } from '../copilot.js';
+import { copilotTokenEnv, DEFAULT_COPILOT_MODEL } from '../copilot.js';
 import {
   CONFIG_FILE,
   connectionStringProblem,
@@ -35,6 +35,7 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
   { field: 'connectionString', label: 'Connection string' },
   { field: 'webUrl', label: 'Web app URL' },
   { field: 'copilotModel', label: 'Copilot model' },
+  { field: 'copilotAccount', label: 'Copilot account' },
   { field: 'interests', label: 'Interests' },
   { field: 'groupingHints', label: 'Grouping hints' },
   { field: 'autoFetch', label: 'Auto-fetch (15 min)' },
@@ -73,6 +74,12 @@ export function findRow(rows: SettingsRow[], key: string): number {
   return rows.findIndex((r) => r.key === key);
 }
 
+/** What Copilot uses when no Copilot account is chosen. */
+export function automaticAccount(): string {
+  const tokenEnv = copilotTokenEnv();
+  return tokenEnv ? `token in ${tokenEnv}` : 'gh’s active account';
+}
+
 /** What the config screen shows for a local setting. */
 export function configDisplay(
   config: LocalConfig,
@@ -88,6 +95,8 @@ export function configDisplay(
       return config.webUrl ? { value: config.webUrl, muted: false, env } : muted('(not set — needed to link a device)');
     case 'copilotModel':
       return config.copilotModel ? { value: config.copilotModel, muted: false, env } : muted(`${DEFAULT_COPILOT_MODEL} (default)`);
+    case 'copilotAccount':
+      return config.copilotAccount ? { value: config.copilotAccount, muted: false } : muted(`automatic — ${automaticAccount()}`);
     case 'interests':
       return config.interests ? { value: config.interests, muted: false, env } : muted('(none)');
     case 'groupingHints':
@@ -110,6 +119,12 @@ export const TOGGLE_FIELDS = ['autoFetch', 'autoDigest'] as const;
 export type ToggleField = (typeof TOGGLE_FIELDS)[number];
 export const isToggleField = (field: ConfigField): field is ToggleField =>
   (TOGGLE_FIELDS as readonly ConfigField[]).includes(field);
+
+/** Settings chosen from a list (opened with ↵) instead of typed. */
+export const PICKER_FIELDS = ['copilotAccount'] as const;
+export type PickerField = (typeof PICKER_FIELDS)[number];
+export const isPickerField = (field: ConfigField): field is PickerField =>
+  (PICKER_FIELDS as readonly ConfigField[]).includes(field);
 
 /** Starting text when editing a field. The connection string starts empty so the key is never shown. */
 export function editStartValue(field: ConfigField): string {
@@ -156,7 +171,9 @@ export function rowHint(row: SettingsRow | undefined): string {
     case 'action': return '↵ run';
     case 'source': return '↵ enable/disable   e label   d color   f fetch now   v show its updates';
     case 'preview': return '↵ cycle';
-    case 'config': return isToggleField(row.field) ? '↵ toggle' : '↵ edit   (save empty to reset to the default)';
+    case 'config':
+      if (isToggleField(row.field)) return '↵ toggle';
+      return isPickerField(row.field) ? '↵ choose' : '↵ edit   (save empty to reset to the default)';
     default: return '';
   }
 }

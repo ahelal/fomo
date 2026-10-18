@@ -122,9 +122,15 @@ export async function runDigest(
   }
   const active = [...activeById.values()];
 
+  let resetAssignments: Array<{ id: string; topicId: string }> = [];
+  let remainingBeforeReset = 0;
+  let resetTopics = new Map<string, Topic>();
   if (options.reset) {
     const grouped = active.filter((u) => u.topicId);
     const topicIds = [...new Set(grouped.map((u) => u.topicId!))];
+    resetAssignments = grouped.map((u) => ({ id: u.id, topicId: u.topicId! }));
+    remainingBeforeReset = active.length - grouped.length;
+    resetTopics = await stores.topics.getTopics(topicIds);
     log(`Resetting ${grouped.length} item(s) across ${topicIds.length} topic(s)…`);
     await mapLimit(grouped, 8, (u) => stores.updates.setTopicId(u.id, ''));
     await mapLimit(topicIds, 8, (id) => stores.topics.deleteTopic(id));
@@ -281,5 +287,11 @@ export async function runDigest(
   });
 
   result.remaining = allPending.length - result.processed;
+  if (options.reset && result.processed === 0 && result.errors.length > 0) {
+    await mapLimit([...resetTopics.values()], 8, (topic) => stores.topics.upsertTopic(topic));
+    await mapLimit(resetAssignments, 8, ({ id, topicId }) => stores.updates.setTopicId(id, topicId));
+    result.remaining = remainingBeforeReset;
+    log('⚠ Regroup failed before processing any updates; restored prior topic assignments.');
+  }
   return result;
 }

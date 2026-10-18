@@ -6,9 +6,13 @@ import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSet
 import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, nextRowKey, patchDigest, removeAndAdvance, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
-import { DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, tildify, type LocalConfig } from '../config.js';
-import { buildSettingsRows, editStartValue, findRow, firstFocusable, isToggleField, moveFocus, parseConfigEdit, type SettingsRow } from './settings.js';
+import { AUDIT_FILE, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
+import { createMemoryAuditLog, type AuditLog } from '../audit.js';
+import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
+import { AuditView } from './components/AuditView.js';
+import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
+import { AccountPicker, accountOptions } from './components/AccountPicker.js';
 import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
 import { RestorePicker, type BackupFile } from './components/RestorePicker.js';
 import { SourcePicker, type SourceOption } from './components/SourcePicker.js';
@@ -46,9 +50,23 @@ interface Props {
   digest?(onProgress: (message: string) => void, options?: DigestRunOptions): Promise<DigestResult>;
   /** Summarise a post with Copilot and save it (`g`); `force` regenerates a saved one (`G`). */
   summarize?(id: string, force?: boolean): Promise<PostGistResult>;
+  /** Audit trail of actions and errors (viewed with `a`); in-memory when omitted. */
+  audit?: AuditLog;
+  /** Where `audit` is stored (shown in the audit view). */
+  auditFile?: string;
+  /** gh CLI accounts offered for Config → Copilot account. */
+  listAccounts?(): Promise<GhAccount[]>;
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+/** Audit text for a local config change; the connection string's secret is masked. */
+const describeConfig = (patch: Partial<LocalConfig>) =>
+  Object.entries(patch)
+    .map(([field, value]) => `${field} = ${
+      value === undefined ? '(default)'
+        : field === 'connectionString' ? maskConnectionString(String(value))
+          : typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value)}`)
+    .join(', ');
 const BUSY_MESSAGE = '⏳ Still busy — wait for the current run to finish';
 /** How long the first `z` waits for the second one before the regroup prompt expires. */
 export const REGROUP_CONFIRM_MS = 5000;
@@ -64,9 +82,10 @@ function rowUpdate(row: DigestRow | undefined): Update | undefined {
 const STATUSBAR_H = 2; // content + border line
 const FILTERBAR_H = 1;
 
-export function App({ service, config, onConfigChange, digest, summarize }: Props) {
+export function App({ service, config, onConfigChange, digest, summarize, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
+  const audit = useMemo(() => auditProp ?? createMemoryAuditLog(), [auditProp]);
 
   const [updates, setUpdates] = useState<Update[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -99,6 +118,9 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   const [restoreFiles, setRestoreFiles] = useState<BackupFile[] | undefined>();
   const [restoreIndex, setRestoreIndex] = useState(0);
   const [restoreConfirm, setRestoreConfirm] = useState(false);
+  /** Config → Copilot account picker; `accounts` is undefined while gh lists them. */
+  const [accountPicker, setAccountPicker] = useState<{ accounts?: GhAccount[]; error?: string; focus: number } | undefined>();
+  const accountPickerSeq = useRef(0);
   /** Only show updates from these sources (every view); undefined shows all. */
   const [sourceFilter, setSourceFilter] = useState<string[] | undefined>();
   const sourceFilterRef = useRef<string[] | undefined>();
@@ -142,6 +164,23 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   const [todosFormDesc, setTodosFormDesc] = useState('');
   const [todosMessage, setTodosMessage] = useState<string | undefined>();
 
+  // ── Audit trail view (a) ────────────────────────────────────────────────────
+  const [showAudit, setShowAudit] = useState(false);
+  const [auditIndex, setAuditIndex] = useState(0);
+  const [auditErrorsOnly, setAuditErrorsOnly] = useState(false);
+  const [auditVersion, setAuditVersion] = useState(0);
+  useEffect(() => {
+    if (!showAudit) return;
+    return audit.subscribe(() => setAuditVersion((v) => v + 1));
+  }, [audit, showAudit]);
+  const auditEntries = useMemo(
+    () => (showAudit ? audit.recent(1000).filter((e) => !auditErrorsOnly || e.level === 'error') : []),
+    [audit, showAudit, auditErrorsOnly, auditVersion], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  useEffect(() => {
+    setAuditIndex((i) => Math.min(i, Math.max(0, auditEntries.length - 1)));
+  }, [auditEntries.length]);
+
   // Keep refs so async callbacks always see the latest state
   const updatesRef  = useRef(updates);
   const selectedRef = useRef(selectedIndex);
@@ -156,6 +195,15 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
   useEffect(() => { digestRowsRef.current    = digestRows;    }, [digestRows]);
   useEffect(() => { expandedRef.current      = expanded;      }, [expanded]);
 
+  /** Audit text for updates: the title of one, or a count and the first title. */
+  const describeIds = useCallback((ids: string[]) => {
+    const titleOf = (id: string) =>
+      (updatesRef.current.find((u) => u.id === id)
+        ?? digestEntriesRef.current.flatMap((e) => e.items).find((u) => u.id === id))?.title ?? id;
+    if (ids.length === 0) return 'nothing';
+    return ids.length === 1 ? `“${titleOf(ids[0]!)}”` : `${ids.length} updates (“${titleOf(ids[0]!)}”, …)`;
+  }, []);
+
   const grouped = isGrouped(filter, groupedViews);
   const listLength = grouped ? digestRows.length : updates.length;
   useEffect(() => {
@@ -168,9 +216,9 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       setAppSettings(s);
       const pos = s.previewPosition === 'off' ? 'bottom' : s.previewPosition;
       setPreviewPosition(pos as 'right' | 'bottom');
-    }).catch(() => { /* use default */ });
-    service.getSources().then(setSources).catch(() => { /* ignore */ });
-  }, [service]);
+    }).catch((err) => audit.error('settings', `load: ${errorText(err)}`));
+    service.getSources().then(setSources).catch((err) => audit.error('sources', `load: ${errorText(err)}`));
+  }, [service, audit]);
 
   const messageTimer = useRef<ReturnType<typeof setTimeout>>();
   const showMessage = useCallback((msg: string, ms = 2500) => {
@@ -204,32 +252,35 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         setSelectedIndex((i) => Math.min(i, Math.max(0, resp.updates.length - 1)));
       } catch (err) {
         if (seq !== loadSeq.current) return;
+        audit.error('load', `${f} view: ${errorText(err)}`);
         showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         if (seq === loadSeq.current) setLoading(false);
       }
     },
-    [service, showMessage],
+    [service, showMessage, audit],
   );
 
   const loadStats = useCallback(async () => {
     try {
       const s = await service.getStats();
       setStats(s);
-    } catch {
+    } catch (err) {
       // non-critical
+      audit.error('stats', errorText(err));
     }
-  }, [service]);
+  }, [service, audit]);
 
   const loadTodos = useCallback(async () => {
     try {
       const resp = await service.listTodos();
       setTodosList(resp.todos);
       setTodosSelectedIndex((i) => Math.min(i, Math.max(0, resp.todos.length - 1)));
-    } catch {
+    } catch (err) {
       // non-critical
+      audit.error('todo', `load: ${errorText(err)}`);
     }
-  }, [service]);
+  }, [service, audit]);
 
   const showTodosMessage = useCallback((msg: string, ms = 2000) => {
     setTodosMessage(msg);
@@ -284,21 +335,35 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     setDigesting(false);
   }, []);
 
+  /** Record a digest run and each of its errors. */
+  const logDigest = useCallback((action: string, result: DigestResult) => {
+    audit.log(action, `grouped ${result.processed} update(s): ${result.created} new topic(s), ${result.updated} updated, ${result.remaining} left${result.errors.length ? `, ${result.errors.length} error(s)` : ''}`);
+    for (const e of result.errors) audit.error(action, e);
+  }, [audit]);
+
   /** Fetch every enabled source, or only `only` (even if disabled), then group with Copilot. */
   const doFetch = useCallback(async (only?: string[], auto = false) => {
     const what = only ? only.map(sourceName).join(', ') : 'latest updates';
-    if (!claimBusy(`${auto ? 'Auto-fetching' : 'Fetching'} ${what}…`)) return;
+    const action = auto ? 'auto-fetch' : 'fetch';
+    if (!claimBusy(`${auto ? 'Auto-fetching' : 'Fetching'} ${what}…`)) {
+      audit.log(action, `skipped (${what}): another run is in progress`);
+      return;
+    }
     try {
       let resp: Awaited<ReturnType<typeof service.fetch>>;
       try {
         resp = await service.fetch(only ? { sources: only } : {});
       } catch (err) {
+        audit.error(action, `${what}: ${errorText(err)}`);
         showMessage(`${auto ? 'Auto-fetch' : 'Fetch'} error: ${errorText(err)}`, 8000);
         return;
       }
       setLastFetchAt(Date.now());
       setLastFetch((prev) => ({ ...prev, ...resp.results }));
-      const failed = Object.entries(resp.results).filter(([, r]) => r.error).map(([id]) => sourceName(id));
+      const failedResults = Object.entries(resp.results).filter(([, r]) => r.error);
+      const failed = failedResults.map(([id]) => sourceName(id));
+      audit.log(action, `${what}: added ${resp.added} from ${Object.keys(resp.results).length} source(s)${failed.length ? `, ${failed.length} failed` : ''}`);
+      for (const [id, r] of failedResults) audit.error(action, `${sourceName(id)}: ${r.error}`);
       const failedNote = failed.length ? ` · ⚠ ${failed.join(', ')} failed` : '';
       const added = `✓ ${auto ? 'Auto-fetch: added' : 'Added'} ${resp.added} update${resp.added !== 1 ? 's' : ''}${failedNote}`;
       if (!digest || config.autoDigest === false) {
@@ -314,6 +379,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       await refresh();
       try {
         const result = await digest((msg) => updatePhase(`Copilot: ${msg}`));
+        logDigest('digest', result);
         const grouped = result.processed
           ? `grouped ${result.processed} into topics`
           : 'nothing new to group';
@@ -321,18 +387,23 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         const errs = result.errors.length ? ` · ⚠ ${result.errors.length} Copilot call${result.errors.length !== 1 ? 's' : ''} failed` : '';
         showMessage(`${added} · ${grouped}${left}${errs}`, 8000);
       } catch (err) {
+        audit.error('digest', err);
         showMessage(`⚠ Copilot grouping failed: ${errorText(err)}`, 10_000);
       }
       await refresh();
     } finally {
       releaseBusy();
     }
-  }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy]);
+  }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy, audit, logDigest]);
 
   const autoFetchEnabled = config.autoFetch !== false;
   const nextAutoFetchAt = useAutoFetch(() => {
-    if (busyRef.current) return;
+    if (busyRef.current) {
+      audit.log('auto-fetch', 'skipped: another run is in progress');
+      return;
+    }
     void doFetch(undefined, true).catch((err) => {
+      audit.error('auto-fetch', err);
       showMessage(`Auto-fetch error: ${errorText(err)}`, 8000);
     });
   }, autoFetchEnabled);
@@ -349,16 +420,21 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     setDigesting(true);
     try {
       const result = await digest((msg) => updatePhase(`Copilot: ${msg}`), { reset: true });
-      const errs = result.errors.length ? ` · ⚠ ${result.errors.length} failed` : '';
+      logDigest('regroup', result);
       const left = result.remaining ? ` · ${result.remaining} left for next time` : '';
-      showMessage(`✓ Regrouped ${result.processed} update${result.processed !== 1 ? 's' : ''} into ${result.created} topics${left}${errs}`, 8000);
+      const summary = `Regrouped ${result.processed} update${result.processed !== 1 ? 's' : ''} into ${result.created} topics${left}`;
+      const message = result.errors.length
+        ? `⚠ ${result.errors.length} failed: ${result.errors[0]} · ${summary}`
+        : `✓ ${summary}`;
+      showMessage(message, result.errors.length ? 10_000 : 8000);
       await refresh();
     } catch (err) {
+      audit.error('regroup', err);
       showMessage(`Regroup error: ${errorText(err)}`, 10_000);
     } finally {
       releaseBusy();
     }
-  }, [digest, refresh, showMessage, claimBusy, updatePhase, releaseBusy]);
+  }, [digest, refresh, showMessage, claimBusy, updatePhase, releaseBusy, audit, logDigest]);
   /** When `z` asked to confirm a regroup (0 = not waiting for the second `z`). */
   const regroupArmedAt = useRef(0);
 
@@ -372,11 +448,13 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const file = join(backupDir, `fomo-backup-${stamp}.json`);
       await writeFile(file, JSON.stringify(payload, null, 2));
+      audit.log('backup', `${payload.count} update(s) → ${tildify(file)}`);
       showMessage(`✓ Backed up ${payload.count} update${payload.count !== 1 ? 's' : ''} → ${tildify(file)}`, 6000);
     } catch (err) {
+      audit.error('backup', err);
       showMessage(`Backup error: ${errorText(err)}`, 6000);
     }
-  }, [service, backupDir, showMessage]);
+  }, [service, backupDir, showMessage, audit]);
 
   const openRestore = useCallback(async () => {
     let names: string[];
@@ -384,6 +462,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       names = (await readdir(backupDir)).filter((n) => n.endsWith('.json'));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        audit.error('restore', `read ${tildify(backupDir)}: ${errorText(err)}`);
         showMessage(`Can’t read ${tildify(backupDir)}: ${errorText(err)}`, 6000);
         return;
       }
@@ -412,19 +491,22 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       const payload = JSON.parse(await readFile(file.path, 'utf-8'));
       if (!payload?.version || !Array.isArray(payload.entities)) throw new Error('not a FOMO backup file');
       const restored = await service.restore(payload);
+      audit.log('restore', `${restored} update(s) from ${file.name}`);
       showMessage(`✓ Restored ${restored} update${restored !== 1 ? 's' : ''} from ${file.name}`, 6000);
       await refresh();
     } catch (err) {
+      audit.error('restore', `${file.name}: ${errorText(err)}`);
       showMessage(`Restore error: ${errorText(err)}`, 6000);
     } finally {
       releaseBusy();
     }
-  }, [service, refresh, showMessage, claimBusy, releaseBusy]);
+  }, [service, refresh, showMessage, claimBusy, releaseBusy, audit]);
 
   /** Create a magic link (account SAS in the URL fragment) for the web app and show it as a QR code. */
   const doLink = useCallback(async () => {
     if (!config.webUrl) {
       setSettingsFocusIndex(findRow(settingsRows, 'c-webUrl'));
+      audit.error('link-device', 'Web app URL is not set');
       showMessage('Set “Web app URL” first (deploy.sh prints it), then link again', 6000);
       return;
     }
@@ -435,19 +517,23 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       const { default: qrcode } = await import('qrcode-terminal');
       const qr = await new Promise<string>((resolve) => qrcode.generate(url, { small: true }, resolve));
       setLinkView({ url, expiresOn: conn.expiresOn, qr });
+      // Never record the link itself: it carries the access token.
+      audit.log('link-device', `created a web app link valid until ${conn.expiresOn}`);
     } catch (err) {
+      audit.error('link-device', err);
       showMessage(`Can’t create a link: ${errorText(err)}`, 6000);
     }
-  }, [config.webUrl, config.connectionString, config.linkDays, settingsRows, showMessage]);
+  }, [config.webUrl, config.connectionString, config.linkDays, settingsRows, showMessage, audit]);
 
   const applySourceFilter = useCallback((ids: string[] | undefined, f: FilterStatus = filterRef.current) => {
+    audit.log('filter', ids ? `sources: ${ids.map(sourceName).join(', ')}` : 'sources: all');
     sourceFilterRef.current = ids;
     setSourceFilter(ids);
     setFilter(f);
     setSelectedIndex(0);
     setShowDetail(false);
     void refresh(f);
-  }, [refresh]);
+  }, [refresh, audit, sourceName]);
 
   /** Open the source picker with the sources in the current view (search applied, source filter ignored). */
   const openSourcePicker = useCallback(async () => {
@@ -475,24 +561,48 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     } catch (err) {
       if (seq !== sourcePickerSeq.current) return;
       setSourcePicker(undefined);
+      audit.error('filter', `count sources: ${errorText(err)}`);
       showMessage(`Error: ${errorText(err)}`);
     }
-  }, [service, sourceName, appSettings.sourceColors, showMessage]);
+  }, [service, sourceName, appSettings.sourceColors, showMessage, audit]);
 
   const closeSourcePicker = useCallback(() => {
     sourcePickerSeq.current++;
     setSourcePicker(undefined);
   }, []);
 
+  /** Open the Copilot account picker with the accounts signed in to gh, focused on the saved one. */
+  const openAccountPicker = useCallback(async () => {
+    const seq = ++accountPickerSeq.current;
+    setAccountPicker({ focus: 0 });
+    let accounts: GhAccount[] = [];
+    let error: string | undefined;
+    try {
+      accounts = await listAccounts();
+    } catch (err) {
+      error = errorText(err);
+    }
+    if (seq !== accountPickerSeq.current) return;
+    if (error) audit.error('config', `list gh accounts: ${error}`);
+    const focus = accountOptions(accounts, config.copilotAccount).findIndex((o) => o.login === config.copilotAccount);
+    setAccountPicker({ accounts, error, focus: Math.max(0, focus) });
+  }, [listAccounts, config.copilotAccount, audit]);
+
+  const closeAccountPicker = useCallback(() => {
+    accountPickerSeq.current++;
+    setAccountPicker(undefined);
+  }, []);
+
   /** Search the current view (and any view switched to) for `query`; empty clears it. */
   const applySearch = useCallback((query: string) => {
     const q = query.trim();
+    audit.log('search', q ? `“${q}”` : 'cleared');
     searchRef.current = q;
     setSearch(q);
     setSelectedIndex(0);
     setShowDetail(false);
     void loadUpdates(filterRef.current);
-  }, [loadUpdates]);
+  }, [loadUpdates, audit]);
 
   const doFetchContent = useCallback(async () => {
     const selected = currentUpdate();
@@ -505,13 +615,15 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         prev.map((u) => (u.id === updated.id ? updated : u)),
       );
       setContentCache((prev) => ({ ...prev, [updated.id]: updated.content }));
+      audit.log('fetch-content', `“${selected.title}”`);
       showMessage('✓ Content fetched');
     } catch (err) {
+      audit.error('fetch-content', `“${selected.title}”: ${errorText(err)}`);
       showMessage(`Fetch error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
-  }, [service, currentUpdate, showMessage]);
+  }, [service, currentUpdate, showMessage, audit]);
 
   /** Change one update wherever it is shown (list and digest). */
   const patchUpdate = useCallback((id: string, patch: Partial<Update>) => {
@@ -540,20 +652,36 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     try {
       const result = await summarize(id, force);
       if (result.outcome === 'short') {
+        audit.log('summarize', `“${selected.title}”: too short to summarise`);
         showMessage('Short post (under 1,000 characters) — nothing to summarise', 5000);
         return;
       }
       patchUpdate(id, { gist: result.update.gist });
       const from = result.from === 'page' ? ' (from the full page)' : result.from === 'preview' ? ' (from the preview)' : '';
+      audit.log('summarize', `“${selected.title}”: ${result.outcome === 'cached' ? 'already saved' : `${force ? 'regenerated' : 'saved'}${from}`}`);
       showMessage(result.outcome === 'cached' ? 'Summary already saved · G regenerates it' : `✓ Summary saved${from}`, 4000);
     } catch (err) {
+      audit.error('summarize', `“${selected.title}”: ${errorText(err)}`);
       showMessage(`⚠ Summary failed: ${errorText(err)}`, 10_000);
     } finally {
       track(false);
     }
-  }, [currentUpdate, summarize, patchUpdate, showMessage]);
+  }, [currentUpdate, summarize, patchUpdate, showMessage, audit]);
 
   // ── Digest actions ──────────────────────────────────────────────────────────
+  /** Record a read / save change and write it; on failure record the error and reload. */
+  const persistChange = useCallback(async (action: string, detail: string, write: () => Promise<unknown>) => {
+    audit.log(action, detail);
+    try {
+      await write();
+      void loadStats();
+    } catch (err) {
+      audit.error(action, `${detail}: ${errorText(err)}`);
+      showMessage(`Error: ${errorText(err)}`);
+      await refresh();
+    }
+  }, [audit, loadStats, refresh, showMessage]);
+
   /** Mark updates read in place and optionally move to the next row, keeping them available for undo. */
   const doDigestRead = useCallback(async (ids: string[], advance = false) => {
     if (ids.length === 0) return;
@@ -565,27 +693,15 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     setDigestEntries((prev) => patchDigest(prev, new Set(ids), { status: 'read' }));
     showMessage(ids.length > 1 ? `✓ ${ids.length} marked read${advance ? ' → next' : ''}` : `✓ Marked read${advance ? ' → next' : ''}`);
 
-    try {
-      await service.setStatusMany(ids, 'read');
-      void loadStats();
-    } catch (err) {
-      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      await refresh();
-    }
-  }, [service, refresh, loadStats, showMessage]);
+    await persistChange('status', `read ${describeIds(ids)}`, () => service.setStatusMany(ids, 'read'));
+  }, [service, persistChange, describeIds, showMessage]);
 
   const doDigestToggleSaved = useCallback(async (update: Update) => {
     const saved = !update.saved;
     setDigestEntries((prev) => patchDigest(prev, new Set([update.id]), { saved }));
     showMessage(saved ? '⭐ Saved' : 'Unsaved');
-    try {
-      await service.setSaved(update.id, saved);
-      void loadStats();
-    } catch (err) {
-      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      await refresh();
-    }
-  }, [service, refresh, loadStats, showMessage]);
+    await persistChange('save', `${saved ? 'saved' : 'unsaved'} “${update.title}”`, () => service.setSaved(update.id, saved));
+  }, [service, persistChange, showMessage]);
 
   /** Change update statuses in place; with `advance`, move to the next row. */
   const doDigestStatus = useCallback(async (ids: string[], status: Status, advance = false) => {
@@ -596,14 +712,8 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     }
     setDigestEntries((prev) => patchDigest(prev, new Set(ids), { status }));
     showMessage(`✓ ${ids.length > 1 ? `${ids.length} marked` : 'Marked'} ${status}${advance ? ' → next' : ''}`);
-    try {
-      await service.setStatusMany(ids, status);
-      void loadStats();
-    } catch (err) {
-      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      await refresh();
-    }
-  }, [service, refresh, loadStats, showMessage]);
+    await persistChange('status', `${status} ${describeIds(ids)}`, () => service.setStatusMany(ids, status));
+  }, [service, persistChange, describeIds, showMessage]);
 
   const doToggleDigestStatus = useCallback((ids: string[]) => {
     const idSet = new Set(ids);
@@ -620,14 +730,8 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     setDigestEntries(next.entries);
     setSelectedIndex(Math.max(0, next.rows.findIndex((r) => r.key === next.nextKey)));
     showMessage('Unsaved');
-    try {
-      await service.setSaved(id, false);
-      void loadStats();
-    } catch (err) {
-      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      await refresh();
-    }
-  }, [service, refresh, loadStats, showMessage]);
+    await persistChange('save', `unsaved ${describeIds([id])}`, () => service.setSaved(id, false));
+  }, [service, persistChange, describeIds, showMessage]);
 
   const setTopicExpanded = useCallback((topicId: string, open: boolean) => {
     setExpanded((prev) => {
@@ -649,14 +753,8 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     );
     showMessage(`Marked ${status}`);
 
-    try {
-      await service.setStatus(selected.id, status);
-      void loadStats();
-    } catch (err) {
-      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      await refresh();
-    }
-  }, [service, refresh, loadStats, showMessage]);
+    await persistChange('status', `${status} “${selected.title}”`, () => service.setStatus(selected.id, status));
+  }, [service, persistChange, showMessage]);
 
   const doToggleSaved = useCallback(async () => {
     const selected = updatesRef.current[selectedRef.current];
@@ -668,14 +766,8 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     );
     showMessage(newSaved ? '⭐ Saved' : 'Unsaved');
 
-    try {
-      await service.setSaved(selected.id, newSaved);
-      void loadStats();
-    } catch (err) {
-      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      await refresh();
-    }
-  }, [service, refresh, loadStats, showMessage]);
+    await persistChange('save', `${newSaved ? 'saved' : 'unsaved'} “${selected.title}”`, () => service.setSaved(selected.id, newSaved));
+  }, [service, persistChange, showMessage]);
 
   const doOpen = useCallback(async () => {
     const selected = updatesRef.current[selectedRef.current];
@@ -683,10 +775,12 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     try {
       const { default: open } = await import('open');
       await open(selected.url);
-    } catch {
+      audit.log('open', `“${selected.title}” ${selected.url}`);
+    } catch (err) {
+      audit.error('open', `${selected.url}: ${errorText(err)}`);
       showMessage('Could not open browser');
     }
-  }, [showMessage]);
+  }, [showMessage, audit]);
 
   const doReadAndNext = useCallback(async () => {
     const items = updatesRef.current;
@@ -717,14 +811,8 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       showMessage('Marked read (no more unread)');
     }
 
-    try {
-      await service.setStatus(selected.id, 'read');
-      void loadStats();
-    } catch (err) {
-      showMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      await refresh();
-    }
-  }, [service, refresh, loadStats, showMessage]);
+    await persistChange('status', `read “${selected.title}”`, () => service.setStatus(selected.id, 'read'));
+  }, [service, persistChange, showMessage]);
 
   // Lazily load content for the update shown in the digest detail pane
   const digestSelectedUpdate = grouped ? rowUpdate(digestRows[selectedIndex]) : undefined;
@@ -734,9 +822,12 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     let cancelled = false;
     service.getUpdate(u.id)
       .then((full) => { if (!cancelled) setContentCache((prev) => ({ ...prev, [u.id]: full.content })); })
-      .catch(() => { if (!cancelled) setContentCache((prev) => ({ ...prev, [u.id]: '' })); });
+      .catch((err) => {
+        audit.error('content', `“${u.title}”: ${errorText(err)}`);
+        if (!cancelled) setContentCache((prev) => ({ ...prev, [u.id]: '' }));
+      });
     return () => { cancelled = true; };
-  }, [service, showDetail, digestSelectedUpdate, contentCache]);
+  }, [service, showDetail, digestSelectedUpdate, contentCache, audit]);
 
   // ── Settings: save the row being edited ─────────────────────────────────────
   const commitEdit = useCallback((row: SettingsRow, text: string) => {
@@ -749,22 +840,35 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       // An empty label (or the id itself) resets to the default
       if (label === '' || label === sourceId) delete newLabels[sourceId];
       setAppSettings((prev) => ({ ...prev, sourceLabels: newLabels }));
+      audit.log('source', `${sourceId} label = ${newLabels[sourceId] ? `“${label}”` : '(default)'}`);
       void service.updateSettings({ sourceLabels: newLabels })
         .then((s) => setAppSettings(s))
-        .catch((err) => showMessage(`Error: ${errorText(err)}`));
+        .catch((err) => {
+          audit.error('source', `${sourceId} label: ${errorText(err)}`);
+          showMessage(`Error: ${errorText(err)}`);
+        });
       stopEditing();
       return;
     }
     if (row.kind !== 'config') return;
 
     const parsed = parseConfigEdit(row.field, text);
-    if ('error' in parsed) { showMessage(`⚠ ${parsed.error}`, 4000); return; }
+    if ('error' in parsed) {
+      audit.error('config', `${row.field}: ${parsed.error}`);
+      showMessage(`⚠ ${parsed.error}`, 4000);
+      return;
+    }
     stopEditing();
 
     const save = () => {
       const err = onConfigChange(parsed.patch);
-      if (err) { showMessage(`⚠ Could not save: ${err}`, 6000); return; }
+      if (err) {
+        audit.error('config', `${describeConfig(parsed.patch)}: ${err}`);
+        showMessage(`⚠ Could not save: ${err}`, 6000);
+        return;
+      }
       const env = envSource(row.field);
+      audit.log('config', `${describeConfig(parsed.patch)}${env ? ` (overridden by ${env})` : ''}`);
       showMessage(env ? `✓ Saved, but ${env} is set and takes precedence` : `✓ Saved ${row.label.toLowerCase()}`, env ? 6000 : 2500);
     };
 
@@ -776,6 +880,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         try {
           await new FomoDirectService(connectionString).getStats();
         } catch (err) {
+          audit.error('config', `connectionString not saved, can’t connect: ${errorText(err)}`);
           showMessage(`⚠ Can’t connect, not saved: ${errorText(err)}`, 8000);
           return;
         }
@@ -784,14 +889,19 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       return;
     }
     save();
-  }, [service, appSettings.sourceLabels, onConfigChange, showMessage]);
+  }, [service, appSettings.sourceLabels, onConfigChange, showMessage, audit]);
 
-  const updateRemoteSettings = useCallback((patch: Partial<AppSettings>) => {
+  /** Save settings shared with the web app; `what` describes the change for the audit trail. */
+  const updateRemoteSettings = useCallback((patch: Partial<AppSettings>, action: string, what: string) => {
+    audit.log(action, what);
     setAppSettings((prev) => ({ ...prev, ...patch }));
     void service.updateSettings(patch)
       .then((s) => setAppSettings(s))
-      .catch((err) => showMessage(`Error: ${errorText(err)}`));
-  }, [service, showMessage]);
+      .catch((err) => {
+        audit.error(action, `${what}: ${errorText(err)}`);
+        showMessage(`Error: ${errorText(err)}`);
+      });
+  }, [service, showMessage, audit]);
 
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((input, key) => {
@@ -816,6 +926,18 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     // ── Help overlay — Esc or h to close, consume all other input ──
     if (showHelp) {
       if (key.escape || key.backspace || key.delete || input === 'h') setShowHelp(false);
+      return;
+    }
+
+    // ── Audit trail (opened with a) ──
+    if (showAudit) {
+      if (key.escape || key.backspace || key.delete || input === 'a') { setShowAudit(false); return; }
+      const last = Math.max(0, auditEntries.length - 1);
+      if (key.upArrow || input === 'k') { setAuditIndex((i) => Math.max(0, i - 1)); return; }
+      if (key.downArrow || input === 'j') { setAuditIndex((i) => Math.min(last, i + 1)); return; }
+      if (key.pageUp) { setAuditIndex((i) => Math.max(0, i - 10)); return; }
+      if (key.pageDown) { setAuditIndex((i) => Math.min(last, i + 10)); return; }
+      if (input === 'e') { setAuditErrorsOnly((on) => !on); setAuditIndex(0); return; }
       return;
     }
 
@@ -860,9 +982,14 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       } else if (input === 'o') {
         void import('open')
           .then(({ default: open }) => open(linkView.url))
-          .catch(() => showMessage('Could not open browser'));
+          .then(() => audit.log('link-device', 'opened the link in the browser'))
+          .catch((err) => {
+            audit.error('link-device', `open in browser: ${errorText(err)}`);
+            showMessage('Could not open browser');
+          });
       } else if (input === 'y') {
         copyToClipboard(linkView.url);
+        audit.log('link-device', 'copied the link');
         showMessage('✓ Link copied');
       }
       return;
@@ -881,6 +1008,30 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         const file = restoreFiles[restoreIndex];
         if (!restoreConfirm) setRestoreConfirm(true);
         else if (file) void doRestore(file);
+      }
+      return;
+    }
+
+    // ── Copilot account picker (Config → Copilot account) ──
+    if (accountPicker) {
+      if (key.escape || key.backspace || key.delete) { closeAccountPicker(); return; }
+      if (!accountPicker.accounts) return;
+      const options = accountOptions(accountPicker.accounts, config.copilotAccount);
+      if (key.upArrow || input === 'k') { setAccountPicker({ ...accountPicker, focus: Math.max(0, accountPicker.focus - 1) }); return; }
+      if (key.downArrow || input === 'j') { setAccountPicker({ ...accountPicker, focus: Math.min(options.length - 1, accountPicker.focus + 1) }); return; }
+      if (key.return) {
+        const login = options[accountPicker.focus]?.login;
+        closeAccountPicker();
+        if (login === config.copilotAccount) return;
+        const patch = { copilotAccount: login };
+        const err = onConfigChange(patch);
+        if (err) {
+          audit.error('config', `${describeConfig(patch)}: ${err}`);
+          showMessage(`⚠ Could not save: ${err}`, 6000);
+          return;
+        }
+        audit.log('config', describeConfig(patch));
+        showMessage(`✓ Copilot account: ${login ?? `automatic (${automaticAccount()})`}`, 4000);
       }
       return;
     }
@@ -908,6 +1059,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
             showTodosMessage('⚠ Subject is required');
             return;
           }
+          const subject = todosFormSubject.trim();
           void (async () => {
             try {
               await service.createTodo({
@@ -921,8 +1073,10 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
               setTodosFormDesc('');
               setTodosFormField('subject');
               await loadTodos();
+              audit.log('todo', `added “${subject}”`);
               showTodosMessage('✓ Todo added');
             } catch (err) {
+              audit.error('todo', `add “${subject}”: ${errorText(err)}`);
               showTodosMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
             }
           })();
@@ -967,18 +1121,26 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         };
         const next = nextStatus[todo.status] as TodoStatus;
         setTodosList((prev) => prev.map((t) => (t.id === todo.id ? { ...t, status: next } : t)));
+        audit.log('todo', `“${todo.subject}” → ${next}`);
         void service.updateTodo(todo.id, { status: next })
           .then(() => loadTodos())
-          .catch(() => loadTodos());
+          .catch((err) => {
+            audit.error('todo', `“${todo.subject}” → ${next}: ${errorText(err)}`);
+            return loadTodos();
+          });
         return;
       }
       if (input === 'd' && todosList[todosSelectedIndex]) {
-        const id = todosList[todosSelectedIndex].id;
+        const { id, subject } = todosList[todosSelectedIndex];
         setTodosList((prev) => prev.filter((t) => t.id !== id));
         setTodosSelectedIndex((i) => Math.max(0, i - 1));
+        audit.log('todo', `deleted “${subject}”`);
         void service.deleteTodo(id)
           .then(() => loadTodos())
-          .catch(() => loadTodos());
+          .catch((err) => {
+            audit.error('todo', `delete “${subject}”: ${errorText(err)}`);
+            return loadTodos();
+          });
         return;
       }
       return; // consume remaining input while in todos view
@@ -1018,16 +1180,17 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         const sourceId = row.source.id;
         if (key.return) {
           const disabled = new Set(appSettings.disabledSources);
-          if (disabled.has(sourceId)) disabled.delete(sourceId);
+          const enable = disabled.has(sourceId);
+          if (enable) disabled.delete(sourceId);
           else disabled.add(sourceId);
-          updateRemoteSettings({ disabledSources: [...disabled] });
+          updateRemoteSettings({ disabledSources: [...disabled] }, 'source', `${sourceName(sourceId)} ${enable ? 'enabled' : 'disabled'}`);
         } else if (input === 'e') {
           setEditBuffer(appSettings.sourceLabels[sourceId] ?? '');
           setEditingKey(row.key);
         } else if (input === 'd') {
           const currentColor = appSettings.sourceColors?.[sourceId] || COLOR_PALETTE[0];
           const nextColor = COLOR_PALETTE[(COLOR_PALETTE.indexOf(currentColor) + 1) % COLOR_PALETTE.length];
-          updateRemoteSettings({ sourceColors: { ...appSettings.sourceColors, [sourceId]: nextColor } });
+          updateRemoteSettings({ sourceColors: { ...appSettings.sourceColors, [sourceId]: nextColor } }, 'source', `${sourceName(sourceId)} color = ${nextColor}`);
         } else if (input === 'f' || input === 'F') {
           void doFetch([sourceId]);
         } else if (input === 'v') {
@@ -1041,7 +1204,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         if (key.return) {
           const next = PREVIEW_OPTIONS[(PREVIEW_OPTIONS.indexOf(appSettings.previewPosition) + 1) % PREVIEW_OPTIONS.length]!;
           if (next !== 'off') setPreviewPosition(next);
-          updateRemoteSettings({ previewPosition: next });
+          updateRemoteSettings({ previewPosition: next }, 'preview', `position = ${next}`);
         }
         return;
       }
@@ -1050,8 +1213,18 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         if (!key.return && input !== 'e') return;
         if (isToggleField(row.field)) {
           const field = row.field;
-          const err = onConfigChange({ [field]: config[field] === false ? undefined : false });
-          if (err) showMessage(`⚠ Could not save: ${err}`, 6000);
+          const on = config[field] === false;
+          const err = onConfigChange({ [field]: on ? undefined : false });
+          if (err) {
+            audit.error('config', `${field} = ${on ? 'on' : 'off'}: ${err}`);
+            showMessage(`⚠ Could not save: ${err}`, 6000);
+          } else {
+            audit.log('config', `${field} = ${on ? 'on' : 'off'}`);
+          }
+          return;
+        }
+        if (isPickerField(row.field)) {
+          void openAccountPicker();
           return;
         }
         setEditBuffer(editStartValue(row.field));
@@ -1091,6 +1264,13 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         regroupArmedAt.current = Date.now();
         showMessage('⚠ z again to regroup all topics · Esc cancels', REGROUP_CONFIRM_MS);
       }
+      return;
+    }
+
+    // Audit trail of actions and errors
+    if (input === 'a') {
+      setShowAudit(true);
+      setAuditIndex(0);
       return;
     }
 
@@ -1162,6 +1342,9 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         groupedViewsRef.current = next;
         setGroupedViews(next);
         showMessage(`${f === 'unread' ? 'Unread' : 'Saved'}: ${next[f] ? 'grouped by topic' : 'list'}`);
+        audit.log('view', `${f}: ${next[f] ? 'grouped by topic' : 'list'}`);
+      } else if (f !== filter) {
+        audit.log('view', f);
       }
       setFilter(f);
       setSelectedIndex(0);
@@ -1174,6 +1357,7 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
       const next = previewPosition === 'bottom' ? 'right' : 'bottom';
       setPreviewPosition(next);
       setShowDetail(true);
+      audit.log('preview', `shown on the ${next}`);
       showMessage(`Preview on the ${next}`);
       return;
     }
@@ -1245,7 +1429,11 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
         if (target) {
           void import('open')
             .then(({ default: open }) => open(target.url))
-            .catch(() => showMessage('Could not open browser'));
+            .then(() => audit.log('open', `“${target.title}” ${target.url}`))
+            .catch((err) => {
+              audit.error('open', `${target.url}: ${errorText(err)}`);
+              showMessage('Could not open browser');
+            });
         }
         return;
       }
@@ -1394,6 +1582,23 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
     );
   }
 
+  if (showAudit) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        {statusBar}
+        {filterBar}
+        <AuditView
+          file={auditFile}
+          entries={auditEntries}
+          focusIndex={auditIndex}
+          errorsOnly={auditErrorsOnly}
+          height={availableH}
+          columns={columns}
+        />
+      </Box>
+    );
+  }
+
   if (linkView) {
     return (
       <Box flexDirection="column" height={rows}>
@@ -1431,6 +1636,24 @@ export function App({ service, config, onConfigChange, digest, summarize }: Prop
           files={restoreFiles}
           focusIndex={restoreIndex}
           confirming={restoreConfirm}
+          height={availableH}
+          columns={columns}
+        />
+      </Box>
+    );
+  }
+
+  if (accountPicker) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        {statusBar}
+        {filterBar}
+        <AccountPicker
+          accounts={accountPicker.accounts}
+          current={config.copilotAccount}
+          automatic={automaticAccount()}
+          error={accountPicker.error}
+          focusIndex={accountPicker.focus}
           height={availableH}
           columns={columns}
         />

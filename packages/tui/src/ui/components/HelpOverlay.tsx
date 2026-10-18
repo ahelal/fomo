@@ -78,6 +78,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['v',    'Pick which sources to show (works with the search)'],
   ['Esc',  'Clear the search, then the source filter'],
   ['.',    'Show preview / toggle its position'],
+  ['a',    'Audit trail: every action and error (e: errors only)'],
   ['h',    'Show this help'],
 ];
 

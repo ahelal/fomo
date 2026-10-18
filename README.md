@@ -124,7 +124,8 @@ How it works:
 - About 220 updates take roughly 2 minutes. **Max items per run** (default 300) caps a run; the rest are grouped next time.
 - The default model is `gpt-5-mini`. Change it with **Copilot model** in the config screen or `FOMO_COPILOT_MODEL`.
 - Existing topics keep their grouping and rating. **Regroup all topics** in the config screen (or `z` twice in the TUI's main view) regroups and re-rates all unread and saved updates (read and saved status is untouched). This also fills in per-update summaries for updates digested before they existed.
-- Authentication uses your logged-in Copilot CLI user, or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`.
+- If regrouping fails before processing any updates, FOMO restores the previous topic assignments and shows the first error.
+- Authentication: pick a GitHub account with **Copilot account** in the config screen. It lists the accounts signed in to the GitHub CLI (`gh auth login`), and FOMO asks `gh` for that account's token. On **Automatic** (the default), it uses `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`, else your logged-in Copilot CLI user or gh's active account. If Copilot answers `Authorization error`, the message names the rejected account; choose one with Copilot access.
 
 ### Post Summaries
 
@@ -174,6 +175,7 @@ Paste it and press `Enter`; FOMO checks the connection and saves it to `~/.fomo/
 Then press `c` and set **Web app URL** (printed by `deploy.sh`, e.g. `https://<account>.z1.web.core.windows.net/`).
 
 The digest needs GitHub Copilot. If you use the Copilot CLI, you're already signed in; otherwise export `COPILOT_GITHUB_TOKEN`.
+If `gh` has several GitHub accounts, press `c` and pick the one with Copilot under **Copilot account**.
 Press `f` to fetch all sources and build the digest.
 
 ### Connect the Web App
@@ -279,6 +281,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply) |
 | `Esc`           | Clear the search, then the source filter  |
 | `.`             | Show preview / toggle its position        |
+| `a`             | [Audit trail](#audit-trail) of actions and errors (`e` errors only, `Esc` closes) |
 | `h`             | Help (also shows the version)             |
 | `q`             | Quit                                      |
 
@@ -288,6 +291,19 @@ The source filter (`v`) lists the sources in the current view with their counts 
 While a fetch, Copilot digest or restore runs, the status bar shows a spinner, the current step and the elapsed time.
 While the TUI is open, it automatically fetches every 15 minutes, starting 15 minutes after launch. Each run fetches all enabled sources and groups updates with Copilot when auto-digest is enabled, just like `f`. A scheduled run is skipped if a fetch, regroup or restore is already running; closing the TUI stops the timer. The status bar shows when the last fetch finished and when the next automatic one is due (`fetched 19:30 · next 19:45`). Turn **Auto-fetch (15 min)** off in the config screen to fetch only with `f`.
 Fetch errors and Copilot runtime logs are written to `~/.fomo/fomo.log` instead of the screen.
+
+#### Audit trail
+
+Every action and every error is recorded in `~/.fomo/audit.log`, one JSON object per line (`ts`, `level`: `info` or `error`, `action`, `detail`). This covers:
+
+- **Runs:** manual and automatic fetches (including skipped runs and each failed source), Copilot digests and regroups (each failed Copilot call), summaries, backups and restores.
+- **Reading:** read / unread / save changes (with the update title), opening links, views, searches and source filters.
+- **Settings and todos:** todos, source and config changes, linking a device and setup.
+- **Errors:** storage errors, `console.error` output and crashes.
+
+Press `a` to browse it, newest first. Use `↑`/`↓` to move (the full message of the selected entry shows below the list), `e` to show errors only and `Esc` to close. The view updates while it's open.
+
+Connection-string keys and SAS signatures are masked, and the device link itself is never recorded. When the file reaches 1 MB it moves to `audit.log.1`, so at most about 2 MB is kept.
 
 ### Config Screen
 
@@ -300,7 +316,7 @@ Press `c`. The bottom line shows the keys for the selected row.
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
 | **Sources** (shared with the web app) | One row per source, with its item count and last fetch result | `Enter` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
-| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Interests, Grouping hints, Auto-fetch (15 min), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Auto-fetch and Group after fetch). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. |
+| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (15 min), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Auto-fetch and Group after fetch; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. |
 
 ### Backup & Restore
 
@@ -426,7 +442,7 @@ All are optional. The TUI config screen (`c` → **This computer**) stores the s
 | `FOMO_COPILOT_MODEL`              | Copilot model for the digest (overrides config)              |
 | `FOMO_INTERESTS`                  | Interests note for digest importance (overrides config)      |
 | `FOMO_GROUPING_HINTS`             | Grouping hints for the digest (overrides config)             |
-| `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` | Token for the Copilot SDK (default: logged-in Copilot CLI user) |
+| `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` | Token for the Copilot SDK when **Copilot account** is Automatic (default: logged-in Copilot CLI user or gh's active account) |
 
 ---
 

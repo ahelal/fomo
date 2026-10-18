@@ -2,13 +2,26 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelRequest, Summarizer } from '@fomo/core/digest';
+import { ghAuthToken } from './ghAccounts.js';
 
 export const DEFAULT_COPILOT_MODEL = 'gpt-5-mini';
 
+/** Token variables the Copilot SDK reads, in order, when no account is chosen. */
+export const COPILOT_TOKEN_ENV = ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'] as const;
+
+/** The token variable Copilot uses when no account is chosen, if one is set. */
+export function copilotTokenEnv(): string | undefined {
+  return COPILOT_TOKEN_ENV.find((name) => process.env[name]);
+}
+
+const AUTH_ERROR = /authorization error|credentials may be expired or invalid/i;
+
 export interface CopilotSummarizerOptions {
   model?: string;
-  /** Explicit token; otherwise COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN or the logged-in Copilot CLI user. */
+  /** Explicit token; otherwise `account`'s gh token, a COPILOT_TOKEN_ENV variable, or the logged-in user / gh's active account. */
   gitHubToken?: string;
+  /** GitHub login whose gh CLI token to use (Config → Copilot account). */
+  account?: string;
   /** Default per-request timeout in ms when the request gives none. */
   timeoutMs?: number;
 }
@@ -23,6 +36,7 @@ type CopilotClientLike = {
   stop(): Promise<unknown>;
   listModels(): Promise<Array<{ id: string; supportedReasoningEfforts?: string[] }>>;
   createSession(config: Record<string, unknown>): Promise<CopilotSessionLike>;
+  getAuthStatus?(): Promise<{ login?: string; authType?: string }>;
 };
 
 /**
@@ -43,10 +57,14 @@ export class CopilotSummarizer implements Summarizer {
   private clientPromise: Promise<CopilotClientLike> | undefined;
   private client: CopilotClientLike | undefined;
   private efforts: Promise<Set<string>> | undefined;
+  /** Where the running client's credentials came from, for auth error messages. */
+  private tokenSource: string | undefined;
   readonly model: string;
+  readonly account: string | undefined;
 
   constructor(private readonly options: CopilotSummarizerOptions = {}) {
     this.model = options.model || DEFAULT_COPILOT_MODEL;
+    this.account = options.account || undefined;
   }
 
   /** One shared client (concurrent callers wait for the same start); a failed start is retried next time. */
@@ -65,11 +83,18 @@ export class CopilotSummarizer implements Summarizer {
     const { CopilotClient } = await import('@github/copilot-sdk');
     const baseDirectory = join(homedir(), '.fomo', 'copilot');
     mkdirSync(baseDirectory, { recursive: true });
-    const token =
-      this.options.gitHubToken ??
-      process.env['COPILOT_GITHUB_TOKEN'] ??
-      process.env['GH_TOKEN'] ??
-      process.env['GITHUB_TOKEN'];
+    const envName = copilotTokenEnv();
+    let token: string | undefined;
+    let source: string | undefined;
+    if (this.options.gitHubToken) {
+      token = this.options.gitHubToken;
+    } else if (this.account) {
+      token = await ghAuthToken(this.account);
+      source = `GitHub account ${this.account}`;
+    } else if (envName) {
+      token = process.env[envName];
+      source = `the token in ${envName}`;
+    }
     const client = new CopilotClient({
       mode: 'empty',
       baseDirectory,
@@ -78,7 +103,21 @@ export class CopilotSummarizer implements Summarizer {
     }) as unknown as CopilotClientLike;
     await client.start();
     this.client = client;
+    this.tokenSource = source;
     return client;
+  }
+
+  /** Adds which credentials were rejected, and where to change them, to an authorization error. */
+  private async explainAuthError(client: CopilotClientLike, err: unknown): Promise<unknown> {
+    if (!(err instanceof Error) || !AUTH_ERROR.test(err.message)) return err;
+    let who = this.tokenSource;
+    if (!who && !this.options.gitHubToken) {
+      const status = await client.getAuthStatus?.().catch(() => undefined);
+      const login = status?.login ? `GitHub account ${status.login}` : 'your GitHub account';
+      who = status?.authType === 'gh-cli' ? `${login} (gh’s active account)` : login;
+    }
+    if (!who) return err;
+    return new Error(`${err.message} — Copilot rejected ${who}; choose another account in Config → Copilot account`, { cause: err });
   }
 
   /** Drops a dead client so the next request starts a new runtime. */
@@ -121,10 +160,14 @@ export class CopilotSummarizer implements Summarizer {
     try {
       session = await this.openSession(client, system, effort);
     } catch (err) {
-      if (!isClosed(client)) throw err;
+      if (!isClosed(client)) throw await this.explainAuthError(client, err);
       this.discard(client);
       client = await this.getClient();
-      session = await this.openSession(client, system, effort);
+      try {
+        session = await this.openSession(client, system, effort);
+      } catch (retryErr) {
+        throw await this.explainAuthError(client, retryErr);
+      }
     }
     try {
       const message = await session.sendAndWait(
@@ -134,6 +177,8 @@ export class CopilotSummarizer implements Summarizer {
       const content = message?.data.content?.trim();
       if (!content) throw new Error('Copilot returned an empty response');
       return JSON.parse(content);
+    } catch (err) {
+      throw await this.explainAuthError(client, err);
     } finally {
       await session.disconnect().catch(() => undefined);
     }
@@ -148,16 +193,17 @@ export class CopilotSummarizer implements Summarizer {
   }
 }
 
-/** Hands out one summarizer per model; replaced ones stay open until `close()` in case a run still uses them. */
+/** Hands out one summarizer per model and account; replaced ones stay open until `close()` in case a run still uses them. */
 export class SummarizerCache {
   private current: CopilotSummarizer | undefined;
   private readonly retired: CopilotSummarizer[] = [];
 
-  get(model?: string): CopilotSummarizer {
+  get(model?: string, account?: string): CopilotSummarizer {
     const wanted = model || DEFAULT_COPILOT_MODEL;
-    if (this.current?.model !== wanted) {
+    const who = account || undefined;
+    if (this.current?.model !== wanted || this.current.account !== who) {
       if (this.current) this.retired.push(this.current);
-      this.current = new CopilotSummarizer({ model: wanted });
+      this.current = new CopilotSummarizer({ model: wanted, account: who });
     }
     return this.current;
   }

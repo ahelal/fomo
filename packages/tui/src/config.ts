@@ -7,6 +7,8 @@ export const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 export const DEFAULT_BACKUP_DIR = join(CONFIG_DIR, 'backups');
 /** Console and stderr output while the UI is open (scraper errors, Copilot runtime logs). */
 export const LOG_FILE = join(CONFIG_DIR, 'fomo.log');
+/** Audit trail of every action and error (JSON lines, viewed with `a`). */
+export const AUDIT_FILE = join(CONFIG_DIR, 'audit.log');
 export const DEFAULT_LINK_DAYS = 365;
 export const DEFAULT_DIGEST_MAX_ITEMS = 300;
 
@@ -17,6 +19,8 @@ export interface LocalConfig {
   webUrl?: string;
   /** Copilot model used for digests. */
   copilotModel?: string;
+  /** GitHub account (gh CLI login) whose Copilot access is used; unset uses a token variable, else gh's active account. */
+  copilotAccount?: string;
   /** Reader interests that nudge digest importance. */
   interests?: string;
   /** Free-text instructions for how the digest groups updates into topics. */
@@ -54,7 +58,7 @@ export function readConfigFile(): LocalConfig {
     throw new Error(`Failed to parse ${CONFIG_FILE}: ${err instanceof Error ? err.message : String(err)}`);
   }
   const out: LocalConfig = {};
-  for (const key of ['connectionString', 'webUrl', 'copilotModel', 'interests', 'groupingHints', 'backupDir'] as const) {
+  for (const key of ['connectionString', 'webUrl', 'copilotModel', 'copilotAccount', 'interests', 'groupingHints', 'backupDir'] as const) {
     if (typeof raw[key] === 'string' && raw[key]) out[key] = raw[key] as string;
   }
   for (const key of ['autoDigest', 'autoFetch'] as const) {

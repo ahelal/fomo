@@ -691,6 +691,22 @@ describe('runDigest', () => {
     expect(updateStore.setTopicId).not.toHaveBeenCalled();
   });
 
+  it('restores existing topics when regroup planning fails before processing any updates', async () => {
+    const original = topic('t1', { title: 'Existing topic' });
+    const { updateStore, topicStore, topicMap } = makeStores(
+      [upd('a__1', { topicId: 't1' }), upd('b__2', { topicId: 't1' }), upd('c__3')],
+      [original],
+    );
+    const summarizer = { generateJson: vi.fn().mockRejectedValue(new Error('quota')) };
+
+    const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer, { reset: true });
+
+    expect(result).toMatchObject({ processed: 0, remaining: 1, errors: ['planning: quota'] });
+    expect(topicMap.get('t1')).toEqual(original);
+    expect(updateStore.setTopicId).toHaveBeenCalledWith('a__1', 't1');
+    expect(updateStore.setTopicId).toHaveBeenCalledWith('b__2', 't1');
+  });
+
   it('respects maxItems and reports the rest as remaining', async () => {
     const { updateStore, topicStore } = makeStores([upd('a__1'), upd('b__2'), upd('c__3')]);
     const { summarizer } = fakeSummarizer([]);

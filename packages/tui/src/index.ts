@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { render } from 'ink';
 import { createElement } from 'react';
-import { CONFIG_FILE, LOG_FILE, loadConfig } from './config.js';
+import { AUDIT_FILE, CONFIG_FILE, LOG_FILE, loadConfig } from './config.js';
+import { createAuditLog } from './audit.js';
 import { SummarizerCache } from './copilot.js';
 import { Root } from './ui/Root.js';
 import { enterFullScreen } from './ui/screen.js';
@@ -15,10 +16,12 @@ Everything happens inside the UI:
   f   fetch all sources and group them into topics with Copilot
   c   config: sources, local settings, link a device, regroup, backup / restore
   t   todos
+  a   audit trail of actions and errors
   h   keyboard help
 
 Local config: ${CONFIG_FILE}
 Log file:     ${LOG_FILE}
+Audit trail:  ${AUDIT_FILE}
 `;
 
 async function main(): Promise<void> {
@@ -36,17 +39,27 @@ async function main(): Promise<void> {
     return;
   }
 
-  const config = loadConfig();
+  const audit = createAuditLog(AUDIT_FILE);
+  audit.log('app', `started v${VERSION}`);
+  // Observes crashes (including unhandled rejections) without changing how they end the process.
+  process.on('uncaughtExceptionMonitor', (err) => audit.error('crash', err instanceof Error && err.stack ? err.stack : err));
   const summarizers = new SummarizerCache();
-  const restoreScreen = enterFullScreen(LOG_FILE);
+  let restoreScreen: (() => void) | undefined;
   try {
+    // Inside the try so startup failures (e.g. a malformed config.json) are audited too.
+    const config = loadConfig();
+    restoreScreen = enterFullScreen(LOG_FILE, (text) => audit.error('console', text));
     // Console output goes to LOG_FILE (see enterFullScreen); Ink's console patch would print it over the UI.
-    const { waitUntilExit } = render(createElement(Root, { initialConfig: config, summarizers }), {
+    const { waitUntilExit } = render(createElement(Root, { initialConfig: config, summarizers, audit, auditFile: AUDIT_FILE }), {
       patchConsole: false,
     });
     await waitUntilExit();
+    audit.log('app', 'quit');
+  } catch (err) {
+    audit.error('crash', err instanceof Error && err.stack ? err.stack : err);
+    throw err;
   } finally {
-    restoreScreen();
+    restoreScreen?.();
     await summarizers.close();
   }
 }

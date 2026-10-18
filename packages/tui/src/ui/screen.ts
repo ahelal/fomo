@@ -36,13 +36,14 @@ function createLogger(file: string): (text: string) => void {
  *
  * Because only changed lines are redrawn, anything else printed to the terminal would
  * leave stale lines behind (or scroll the screen). So while the UI is open:
- * - console output and stderr (scraper errors, Copilot runtime logs) go to `logFile`;
+ * - console output and stderr (scraper errors, Copilot runtime logs) go to `logFile`, and
+ *   console.error is also passed to `onError` (the audit trail);
  *   render Ink with `patchConsole: false` so it doesn't reroute console to the terminal;
  * - line wrapping is off, so a line wider than the terminal is clipped instead of
  *   spilling into the next row;
  * - an unexpected write or a resize forces a full repaint.
  */
-export function enterFullScreen(logFile: string): () => void {
+export function enterFullScreen(logFile: string, onError?: (text: string) => void): () => void {
   const log = createLogger(logFile);
   const raw = process.stdout.write.bind(process.stdout);
   const rawErr = process.stderr.write.bind(process.stderr);
@@ -103,7 +104,11 @@ export function enterFullScreen(logFile: string): () => void {
   const consoleMethods = ['log', 'info', 'warn', 'error', 'debug', 'trace'] as const;
   const originalConsole = consoleMethods.map((name) => console[name]);
   for (const name of consoleMethods) {
-    console[name] = (...args: unknown[]) => log(format(...args));
+    console[name] = (...args: unknown[]) => {
+      const text = format(...args);
+      log(text);
+      if (name === 'error') onError?.(text.replace(ANSI_RE, ''));
+    };
   }
 
   // The terminal may reflow or clear the screen on resize.
