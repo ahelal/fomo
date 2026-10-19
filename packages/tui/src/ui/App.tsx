@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
-import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult } from '@fomo/core';
-import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, nextRowKey, patchDigest, removeAndAdvance, soloUpdate } from '@fomo/core';
-import { FomoDirectService, type PostGistResult } from '@fomo/core/service';
+import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion } from '@fomo/core';
+import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, jumpStep, nextRowKey, patchDigest, removeAndAdvance, shortcutKey, soloUpdate } from '@fomo/core';
+import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { AUDIT_FILE, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
@@ -27,6 +27,8 @@ import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/SettingsPane.js';
 import { TodosView, type TodoFormField } from './components/TodosView.js';
+import { ReferencesView } from './components/ReferencesView.js';
+import { useReferences } from './hooks/useReferences.js';
 
 type FilterStatus = Status | 'all' | 'saved';
 /** Views that can be listed as topics; pressing the view's key again toggles it. */
@@ -46,10 +48,12 @@ interface Props {
   config: LocalConfig;
   /** Save a local config change; returns an error message on failure. */
   onConfigChange(patch: Partial<LocalConfig>): string | undefined;
-  /** Group unread and saved updates with Copilot (runs after an `f`/`F` fetch). */
+  /** Group unread and saved updates with Copilot (runs after an `f` fetch). */
   digest?(onProgress: (message: string) => void, options?: DigestRunOptions): Promise<DigestResult>;
-  /** Summarise a post with Copilot and save it (`g`); `force` regenerates a saved one (`G`). */
+  /** Summarise a post with Copilot and save it (`g`); `force` regenerates a saved one (`g` again). */
   summarize?(id: string, force?: boolean): Promise<PostGistResult>;
+  /** Ask Copilot where to file a link in References and how to describe it. */
+  suggestReference?(req: SuggestReferenceRequest): Promise<ReferenceSuggestion>;
   /** Audit trail of actions and errors (viewed with `a`); in-memory when omitted. */
   audit?: AuditLog;
   /** Where `audit` is stored (shown in the audit view). */
@@ -82,7 +86,7 @@ function rowUpdate(row: DigestRow | undefined): Update | undefined {
 const STATUSBAR_H = 2; // content + border line
 const FILTERBAR_H = 1;
 
-export function App({ service, config, onConfigChange, digest, summarize, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts }: Props) {
+export function App({ service, config, onConfigChange, digest, summarize, suggestReference, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const audit = useMemo(() => auditProp ?? createMemoryAuditLog(), [auditProp]);
@@ -148,9 +152,11 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   // Digest lists skip `content`; it is loaded on demand for the detail pane.
   const [contentCache, setContentCache] = useState<Record<string, string>>({});
-  /** Posts being summarised with Copilot (g / G). */
+  /** Posts being summarised with Copilot (g, and g again to regenerate). */
   const [summarizing, setSummarizing] = useState<ReadonlySet<string>>(new Set());
   const summarizingRef = useRef(new Set<string>());
+  /** The update whose saved summary g just showed: g again on it regenerates the summary. */
+  const regenArmed = useRef<{ id: string; at: number } | undefined>();
   const digestRows = useMemo(() => flattenDigest(digestEntries, expanded), [digestEntries, expanded]);
 
   // ── Todos state ─────────────────────────────────────────────────────────────
@@ -226,6 +232,16 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
     clearTimeout(messageTimer.current);
     messageTimer.current = setTimeout(() => setMessage(undefined), ms);
   }, []);
+
+  const refs = useReferences({
+    service,
+    audit,
+    suggest: suggestReference,
+    notify: showMessage,
+    openUrl: async (url) => { const { default: open } = await import('open'); await open(url); },
+    copy: copyToClipboard,
+    jump: jumpStep(rows),
+  });
 
   const loadSeq = useRef(0);
   const loadUpdates = useCallback(
@@ -639,7 +655,11 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
       return;
     }
     setShowDetail(true);
-    if (selected.gist && !force) { showMessage('Summary already saved · G regenerates it'); return; }
+    const alreadySaved = () => {
+      regenArmed.current = { id: selected.id, at: Date.now() };
+      showMessage('Summary already saved · g again regenerates it', REGROUP_CONFIRM_MS);
+    };
+    if (selected.gist && !force) { alreadySaved(); return; }
     if (!summarize) { showMessage('Copilot is not available'); return; }
     const { id } = selected;
     if (summarizingRef.current.has(id)) { showMessage('⏳ Already summarising this post'); return; }
@@ -659,7 +679,8 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
       patchUpdate(id, { gist: result.update.gist });
       const from = result.from === 'page' ? ' (from the full page)' : result.from === 'preview' ? ' (from the preview)' : '';
       audit.log('summarize', `“${selected.title}”: ${result.outcome === 'cached' ? 'already saved' : `${force ? 'regenerated' : 'saved'}${from}`}`);
-      showMessage(result.outcome === 'cached' ? 'Summary already saved · G regenerates it' : `✓ Summary saved${from}`, 4000);
+      if (result.outcome === 'cached') { alreadySaved(); return; }
+      showMessage(`✓ Summary saved${from}`, 4000);
     } catch (err) {
       audit.error('summarize', `“${selected.title}”: ${errorText(err)}`);
       showMessage(`⚠ Summary failed: ${errorText(err)}`, 10_000);
@@ -904,9 +925,11 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
   }, [service, showMessage, audit]);
 
   // ── Input handler ───────────────────────────────────────────────────────────
-  useInput((input, key) => {
+  useInput((raw, key) => {
+    // Shortcuts ignore case (Shift+b does what b does); typed text keeps `raw`.
+    const input = shortcutKey(raw);
     // ── Quit from any screen (but not while typing) ──
-    if (input === 'q' && !editingKey && !todosAddMode && searchDraft === undefined) { exit(); return; }
+    if (input === 'q' && !editingKey && !todosAddMode && !refs.typing && searchDraft === undefined) { exit(); return; }
 
     // ── Search prompt (opened with /) ──
     if (searchDraft !== undefined) {
@@ -914,12 +937,12 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
       if (key.return) { setSearchDraft(undefined); applySearch(searchDraft); return; }
       if (key.backspace || key.delete) { setSearchDraft((d) => (d ?? '').slice(0, -1)); return; }
       if (key.ctrl && input === 'u') { setSearchDraft(''); return; }
-      if (!input || key.ctrl || key.meta) return;
+      if (!raw || key.ctrl || key.meta) return;
       // Pasted (or fast-typed) text arrives in one chunk; a line break in it submits.
-      const brk = input.search(/[\r\n]/);
-      if (brk === -1) { setSearchDraft((d) => (d ?? '') + input); return; }
+      const brk = raw.search(/[\r\n]/);
+      if (brk === -1) { setSearchDraft((d) => (d ?? '') + raw); return; }
       setSearchDraft(undefined);
-      applySearch(searchDraft + input.slice(0, brk));
+      applySearch(searchDraft + raw.slice(0, brk));
       return;
     }
 
@@ -929,12 +952,15 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
       return;
     }
 
+    // Shift+↑/↓ jumps 5 rows, or 10 on a tall terminal
+    const step = key.shift && (key.upArrow || key.downArrow) ? jumpStep(rows) : 1;
+
     // ── Audit trail (opened with a) ──
     if (showAudit) {
       if (key.escape || key.backspace || key.delete || input === 'a') { setShowAudit(false); return; }
       const last = Math.max(0, auditEntries.length - 1);
-      if (key.upArrow || input === 'k') { setAuditIndex((i) => Math.max(0, i - 1)); return; }
-      if (key.downArrow || input === 'j') { setAuditIndex((i) => Math.min(last, i + 1)); return; }
+      if (key.upArrow || input === 'k') { setAuditIndex((i) => Math.max(0, i - step)); return; }
+      if (key.downArrow || input === 'j') { setAuditIndex((i) => Math.min(last, i + step)); return; }
       if (key.pageUp) { setAuditIndex((i) => Math.max(0, i - 10)); return; }
       if (key.pageDown) { setAuditIndex((i) => Math.min(last, i + 10)); return; }
       if (input === 'e') { setAuditErrorsOnly((on) => !on); setAuditIndex(0); return; }
@@ -1036,6 +1062,17 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
       return;
     }
 
+    // ── References view (b) and the file-a-link form (B) ──
+    if (refs.active) {
+      if (input === 'h' && !refs.typing) {
+        setHelpContext('references');
+        setShowHelp(true);
+        return;
+      }
+      refs.handleInput(raw, key);
+      return;
+    }
+
     // ── Todos view input handling ──
     if (showTodos) {
       if (todosAddMode) {
@@ -1088,10 +1125,10 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
           else if (todosFormField === 'description') setTodosFormDesc((b) => b.slice(0, -1));
           return;
         }
-        if (input && !key.ctrl && !key.meta) {
-          if (todosFormField === 'subject')      setTodosFormSubject((b) => b + input);
-          else if (todosFormField === 'due')     setTodosFormDue((b) => b + input);
-          else if (todosFormField === 'description') setTodosFormDesc((b) => b + input);
+        if (raw && !key.ctrl && !key.meta) {
+          if (todosFormField === 'subject')      setTodosFormSubject((b) => b + raw);
+          else if (todosFormField === 'due')     setTodosFormDue((b) => b + raw);
+          else if (todosFormField === 'description') setTodosFormDesc((b) => b + raw);
         }
         return;
       }
@@ -1102,11 +1139,11 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
         return;
       }
       if (key.upArrow || input === 'k') {
-        setTodosSelectedIndex((i) => Math.max(0, i - 1));
+        setTodosSelectedIndex((i) => Math.max(0, i - step));
         return;
       }
       if (key.downArrow || input === 'j') {
-        setTodosSelectedIndex((i) => Math.min(todosList.length - 1, i + 1));
+        setTodosSelectedIndex((i) => Math.max(0, Math.min(todosList.length - 1, i + step)));
         return;
       }
       if (input === 'a') {
@@ -1157,7 +1194,7 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
         if (key.return) { if (editRow) commitEdit(editRow, editBuffer); return; }
         if (key.backspace || key.delete) { setEditBuffer((b) => b.slice(0, -1)); return; }
         // Pasted text arrives in one chunk; drop line breaks
-        if (input && !key.ctrl && !key.meta) setEditBuffer((b) => b + input.replace(/[\r\n]/g, ''));
+        if (input && !key.ctrl && !key.meta) setEditBuffer((b) => b + raw.replace(/[\r\n]/g, ''));
         return;
       }
 
@@ -1191,7 +1228,7 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
           const currentColor = appSettings.sourceColors?.[sourceId] || COLOR_PALETTE[0];
           const nextColor = COLOR_PALETTE[(COLOR_PALETTE.indexOf(currentColor) + 1) % COLOR_PALETTE.length];
           updateRemoteSettings({ sourceColors: { ...appSettings.sourceColors, [sourceId]: nextColor } }, 'source', `${sourceName(sourceId)} color = ${nextColor}`);
-        } else if (input === 'f' || input === 'F') {
+        } else if (input === 'f') {
           void doFetch([sourceId]);
         } else if (input === 'v') {
           setShowSettings(false);
@@ -1328,9 +1365,21 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
       return;
     }
 
+    // References: b opens them, m files the selected update
+    if (input === 'b') {
+      refs.openView();
+      return;
+    }
+    if (input === 'm') {
+      const sel = currentUpdate();
+      if (sel) refs.fileUpdate(sel);
+      else showMessage(grouped ? 'Expand the topic to file a single update' : 'Nothing selected');
+      return;
+    }
+
     // Navigation
-    if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - 1));                return; }
-    if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.max(0, Math.min(listLength - 1, i + 1))); return; }
+    if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - step));                return; }
+    if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.max(0, Math.min(listLength - 1, i + step))); return; }
 
     // Filters
     const filterMap: Record<string, FilterStatus> = { '1': 'all', '2': 'unread', '3': 'read', '4': 'saved' };
@@ -1362,8 +1411,15 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
       return;
     }
 
-    if (input === 'f' || input === 'F') { void doFetch(); return; }
-    if (input === 'g' || input === 'G') { void doSummarize(input === 'G'); return; }
+    if (input === 'f') { void doFetch(); return; }
+    // g summarises (or shows the saved summary); g again while it's shown regenerates it
+    if (input === 'g') {
+      const sel = currentUpdate();
+      const armed = regenArmed.current;
+      regenArmed.current = undefined;
+      void doSummarize(!!sel?.gist && showDetail && armed?.id === sel.id && Date.now() - armed.at < REGROUP_CONFIRM_MS);
+      return;
+    }
     if (input === 'p' && showDetail) {
       const sel = currentUpdate();
       if (sel && !sel.content && !contentCache[sel.id]) void doFetchContent();
@@ -1494,12 +1550,12 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
     : sourceFilter.length <= 2 ? sourceFilter.map(sourceName).join(', ') : `${sourceFilter.length} sources`;
   const filterBar = (
     <FilterBar
-      active={filter}
+      active={refs.active ? 'refs' : showTodos ? 'todos' : filter}
       grouped={grouped}
       columns={columns}
       sourceLabel={sourceFilterLabel}
-      search={!showTodos && search ? search : undefined}
-      matches={!showTodos && search ? searchMatches : undefined}
+      search={!showTodos && !refs.active && search ? search : undefined}
+      matches={!showTodos && !refs.active && search ? searchMatches : undefined}
       searchDraft={searchDraft}
     />
   );
@@ -1657,6 +1713,17 @@ export function App({ service, config, onConfigChange, digest, summarize, audit:
           height={availableH}
           columns={columns}
         />
+      </Box>
+    );
+  }
+
+  // References view / file-a-link form — replaces main content area
+  if (refs.active) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        {statusBar}
+        {filterBar}
+        <ReferencesView {...refs.view} height={availableH} columns={columns} />
       </Box>
     );
   }

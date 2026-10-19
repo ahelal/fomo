@@ -20,3 +20,17 @@ export {
   type DigestRow,
 } from './digest/view.js';
 export { matchesSearch, searchDigest, searchTerms } from './search.js';
+export { shortcutKey, jumpStep, TALL_SCREEN_LINES } from './keys.js';
+export {
+  MAX_FOLDER_DEPTH,
+  normalizeFolder,
+  normalizeReferenceUrl,
+  isInFolder,
+  moveFolderPath,
+  referenceFolders,
+  matchesReference,
+  buildReferenceRows,
+  rowFolder,
+  parentRowIndex,
+  type ReferenceRow,
+} from './references.js';

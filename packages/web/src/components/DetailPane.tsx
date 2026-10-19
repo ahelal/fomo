@@ -10,6 +10,8 @@ interface Props {
   onReadAndNext?(): void;
   onNextUnread?(): void;
   onOpen?(): void;
+  /** File the update in References (m). */
+  onFileReference?(): void;
   onClose?(): void;
 }
 
@@ -21,7 +23,7 @@ function stripHtml(html: string): string {
     .slice(0, 1000);
 }
 
-export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading, onReadAndNext, onNextUnread, onOpen, onClose }: Props) {
+export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading, onReadAndNext, onNextUnread, onOpen, onFileReference, onClose }: Props) {
   const hasContent = !!update.content;
   const content = hasContent ? stripHtml(update.content) : '';
 
@@ -65,6 +67,9 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading,
           {onOpen && (
             <button className="btn" onClick={onOpen}>↗ Open</button>
           )}
+          {onFileReference && (
+            <button className="btn" onClick={onFileReference}>🔖 Ref</button>
+          )}
           {onClose && (
             <button className="btn" onClick={onClose}>Close</button>
           )}
@@ -85,6 +90,11 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading,
         >
           {update.saved ? '★ Unsave' : '☆ Save'}
         </button>
+        {onFileReference && (
+          <button className="btn" onClick={onFileReference} title="File in References (m)">
+            m · 🔖 Reference
+          </button>
+        )}
       </div>
 
       {update.gist && (

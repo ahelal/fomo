@@ -5,12 +5,15 @@ import {
   nextRowKey,
   removeAndAdvance,
   soloUpdate,
+  shortcutKey,
+  jumpStep,
   type Update,
   type Status,
   type PreviewPosition,
   type SourceInfo,
   type SasConnection,
   type DigestRow,
+  type Reference,
 } from '@fomo/core';
 import {
   consumeConnectLink,
@@ -19,7 +22,7 @@ import {
   clearConnection,
   daysUntilExpiry,
 } from './store/connection.js';
-import { useFomo, canGroup, isGroupedView, type FilterStatus, type GroupableView } from './hooks/useFomo.js';
+import { useFomo, canGroup, isGroupedView, isPaneView, type FilterStatus, type GroupableView } from './hooks/useFomo.js';
 import { StatusBar } from './components/StatusBar.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
 import { DigestList } from './components/DigestList.js';
@@ -28,6 +31,8 @@ import { TopicPane } from './components/TopicPane.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
 import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { TodosPane } from './components/TodosPane.js';
+import { ReferencesPane } from './components/ReferencesPane.js';
+import { ReferenceDialog } from './components/ReferenceDialog.js';
 import { ConnectScreen } from './components/ConnectScreen.js';
 import { SearchBox } from './components/SearchBox.js';
 import { SourcePicker, SourceFilterChip, type SourceOption } from './components/SourcePicker.js';
@@ -38,11 +43,15 @@ const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: '3 Read', value: 'read' },
   { label: '4 Saved', value: 'saved' },
   { label: '5 Todos', value: 'todos' },
+  { label: '6 Refs', value: 'refs' },
 ];
 
 const FILTER_KEYS: Record<string, FilterStatus> = {
-  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'todos', t: 'todos',
+  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'todos', t: 'todos', '6': 'refs', b: 'refs',
 };
+
+/** Rows of text that fit in the window (≈20px each), for `jumpStep`. */
+const screenLines = () => Math.floor(window.innerHeight / 20);
 
 /** The update a digest row points at (items and single-update topics), if any. */
 function rowUpdate(row: DigestRow | undefined): Update | undefined {
@@ -127,17 +136,23 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   /** Open source picker; options are undefined while the counts load. */
   const [sourcePicker, setSourcePicker] = useState<{ options?: SourceOption[] } | undefined>();
   const sourcePickerSeq = useRef(0);
+  /** Filing an update in References (m). */
+  const [refDialog, setRefDialog] = useState<{ update: Update; reference?: Reference; note?: string } | undefined>();
+  const refDialogSeq = useRef(0);
+  /** The view to return to when b leaves References. */
+  const backFilter = useRef<FilterStatus>('unread');
 
   const previewPosition = fomo.settings.previewPosition;
   /** Unread and Saved list topics unless switched to a plain list. */
   const isGrouped = isGroupedView(fomo.filter, fomo.grouped);
   const isSaved = fomo.filter === 'saved';
-  const viewHelp: HelpContext = isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
+  const pane = isPaneView(fomo.filter);
+  const viewHelp: HelpContext = fomo.filter === 'refs' ? 'references' : isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
 
   const digestRows = useMemo(() => flattenDigest(fomo.digest, expanded), [fomo.digest, expanded]);
   const digestRow = digestKey ? digestRows.find((r) => r.key === digestKey) : undefined;
   const digestTopic = digestRow?.kind === 'topic' && digestRow.entry.items.length > 1 ? digestRow.entry : undefined;
-  const detailUpdate = isGrouped ? rowUpdate(digestRow) : fomo.filter === 'todos' ? undefined : selected;
+  const detailUpdate = isGrouped ? rowUpdate(digestRow) : pane ? undefined : selected;
   const hasSelection = isGrouped ? !!digestRow : !!selected;
 
   const swipeBackRef = useRef({ startX: 0, startY: 0 });
@@ -167,6 +182,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   /** Selecting the current Unread or Saved view again switches it between topics and a plain list. */
   const setFilter = useCallback((f: FilterStatus) => {
     clearSelection();
+    if (f === 'refs' && fomo.filter !== 'refs') backFilter.current = fomo.filter;
     if (f === fomo.filter && canGroup(f)) fomo.toggleGrouped();
     else fomo.setFilter(f);
   }, [fomo, clearSelection]);
@@ -203,6 +219,21 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     sourcePickerSeq.current++;
     setSourcePicker(undefined);
   }, []);
+
+  /** m: file an update in References, or edit it when its link is already there. */
+  const fileReference = useCallback(async (update: Update) => {
+    const seq = ++refDialogSeq.current;
+    let existing: Reference | undefined;
+    try {
+      const { references } = await service.listReferences();
+      existing = references.find((r) => r.url === update.url || r.updateId === update.id);
+    } catch {
+      // saving reports any storage problem
+    }
+    if (seq !== refDialogSeq.current) return;
+    const note = existing ? `Already in References${existing.folder ? ` → ${existing.folder}` : ''} — editing it` : undefined;
+    setRefDialog({ update, reference: existing, note });
+  }, [service]);
 
   const applySourceFilter = useCallback((ids: string[] | undefined) => {
     closeSourcePicker();
@@ -367,107 +398,118 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const key = shortcutKey(e.key);
+      // Shift+↑/↓ jumps several rows (more on a tall window).
+      const step = e.shiftKey && (key === 'ArrowDown' || key === 'ArrowUp') ? jumpStep(screenLines()) : 1;
 
-      if (sourcePicker) return;
+      if (sourcePicker || refDialog) return;
       if (showHelp) {
-        if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'h') setShowHelp(false);
+        if (key === 'Escape' || key === 'Backspace' || key === 'h') setShowHelp(false);
         return;
       }
 
       if (showSettings) {
-        if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'c') setShowSettings(false);
-        if (e.key === 'h') {
+        if (key === 'Escape' || key === 'Backspace' || key === 'c') setShowSettings(false);
+        if (key === 'h') {
           setHelpContext('settings');
           setShowHelp(true);
         }
         return;
       }
 
-      if (hasSelection && (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'q')) {
+      if (hasSelection && (key === 'Escape' || key === 'Backspace' || key === 'q')) {
         clearSelection();
         return;
       }
 
-      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && fomo.filter !== 'todos') {
+      if (key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !pane) {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
         return;
       }
-      if (e.key === 'v' && !e.metaKey && !e.ctrlKey && !e.altKey && fomo.filter !== 'todos') {
+      if (key === 'v' && !e.metaKey && !e.ctrlKey && !e.altKey && !pane) {
         openSourcePicker();
         return;
       }
       // Esc clears the search first, then the source filter.
-      if (e.key === 'Escape' && fomo.search && fomo.filter !== 'todos') {
+      if (key === 'Escape' && fomo.search && !pane) {
         setSearch('');
         return;
       }
-      if (e.key === 'Escape' && fomo.sourceFilter && fomo.filter !== 'todos') {
+      if (key === 'Escape' && fomo.sourceFilter && !pane) {
         applySourceFilter(undefined);
         return;
       }
 
-      if (e.key === 'h') {
+      if (key === 'h') {
         setHelpContext(viewHelp);
         setShowHelp(true);
         return;
       }
-      if (e.key === 'c') { setShowSettings(true); return; }
-      if (e.key in FILTER_KEYS) { setFilter(FILTER_KEYS[e.key]!); return; }
-      if (e.key === '.') {
+      if (key === 'c') { setShowSettings(true); return; }
+      if (key === 'b' && fomo.filter === 'refs') { setFilter(backFilter.current); return; }
+      if (key in FILTER_KEYS) { setFilter(FILTER_KEYS[key]!); return; }
+      if (key === '.') {
         const next: PreviewPosition = previewPosition === 'right' ? 'bottom' : 'right';
         void fomo.updateSettings({ previewPosition: next });
         return;
       }
 
-      if (fomo.filter === 'todos') return;
+      if (pane) return;
+
+      if (key === 'm') {
+        const update = isGrouped ? rowUpdate(digestRow) : selected;
+        if (update) void fileReference(update);
+        else fomo.notify(isGrouped && digestRow ? 'Expand the topic to file a single update' : 'Select an update to file it in References');
+        return;
+      }
 
       if (isGrouped) {
         const idx = digestKey ? digestRows.findIndex((r) => r.key === digestKey) : -1;
         const row = idx >= 0 ? digestRows[idx] : undefined;
-        if (e.key === 'j' || e.key === 'ArrowDown') {
+        if (key === 'j' || key === 'ArrowDown') {
           e.preventDefault();
-          const next = digestRows[Math.min(idx + 1, digestRows.length - 1)];
+          const next = digestRows[Math.min(idx + step, digestRows.length - 1)];
           if (next) setDigestKey(next.key);
           return;
         }
-        if (e.key === 'k' || e.key === 'ArrowUp') {
+        if (key === 'k' || key === 'ArrowUp') {
           e.preventDefault();
-          const prev = digestRows[idx === -1 ? digestRows.length - 1 : Math.max(idx - 1, 0)];
+          const prev = digestRows[idx === -1 ? digestRows.length - 1 : Math.max(idx - step, 0)];
           if (prev) setDigestKey(prev.key);
           return;
         }
-        if (e.key === 'n') { digestNextTopic(); return; }
-        if (e.key === 'Enter') {
+        if (key === 'n') { digestNextTopic(); return; }
+        if (key === 'Enter') {
           if (!row) { if (digestRows[0]) setDigestKey(digestRows[0].key); return; }
           if (row.kind === 'topic' && row.entry.items.length > 1) setTopicExpanded(row.entry.topic.id, !expanded.has(row.entry.topic.id));
           else clearSelection();
           return;
         }
         if (!row) return;
-        if (e.key === 'ArrowRight' || e.key === 'l') {
+        if (key === 'ArrowRight' || key === 'l') {
           if (row.kind === 'topic' && row.entry.items.length > 1) setTopicExpanded(row.entry.topic.id, true);
           return;
         }
-        if (e.key === 'ArrowLeft') {
+        if (key === 'ArrowLeft') {
           if (row.kind === 'item') setDigestKey(row.entry.topic.id);
           if (row.entry.items.length > 1) setTopicExpanded(row.entry.topic.id, false);
           return;
         }
         const update = rowUpdate(row);
         if (isSaved) {
-          if (e.key === 'r') { toggleDigestRead(row); return; }
-          if (e.key === 'x') { savedReadAndNext(row); return; }
-        } else if (e.key === 'x') {
+          if (key === 'r') { toggleDigestRead(row); return; }
+          if (key === 'x') { savedReadAndNext(row); return; }
+        } else if (key === 'x') {
           digestReadAndNext(row);
           return;
-        } else if (e.key === 'r') {
+        } else if (key === 'r') {
           toggleDigestRead(row);
           return;
         }
-        if (e.key === 's' && update) { groupedToggleSaved(update); return; }
-        if (e.key === 'o') {
+        if (key === 's' && update) { groupedToggleSaved(update); return; }
+        if (key === 'o') {
           const target = update ?? row.entry.items[0];
           if (target) openUrl(target.url);
           return;
@@ -475,38 +517,38 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         return;
       }
 
-      if (e.key === 'j' || e.key === 'ArrowDown') {
+      if (key === 'j' || key === 'ArrowDown') {
         e.preventDefault();
         if (fomo.updates.length === 0) return;
         const idx = selected ? fomo.updates.findIndex((u) => u.id === selected.id) : -1;
-        setSelected(fomo.updates[Math.min(idx + 1, fomo.updates.length - 1)]);
+        setSelected(fomo.updates[Math.min(idx + step, fomo.updates.length - 1)]);
         return;
       }
-      if (e.key === 'k' || e.key === 'ArrowUp') {
+      if (key === 'k' || key === 'ArrowUp') {
         e.preventDefault();
         if (fomo.updates.length === 0) return;
         const idx = selected ? fomo.updates.findIndex((u) => u.id === selected.id) : fomo.updates.length;
-        setSelected(fomo.updates[Math.max(idx - 1, 0)]);
+        setSelected(fomo.updates[Math.max(idx - step, 0)]);
         return;
       }
-      if (e.key === 'Enter') {
+      if (key === 'Enter') {
         if (selected) setSelected(undefined);
         else if (fomo.updates.length > 0) setSelected(fomo.updates[0]);
         return;
       }
-      if (e.key === 'n') { handleNextUnread(); return; }
+      if (key === 'n') { handleNextUnread(); return; }
 
       if (!selected) return;
-      if (e.key === 'x') { handleReadAndNext(); return; }
-      if (e.key === 'r') { handleSetStatus(selected.id, selected.status === 'unread' ? 'read' : 'unread'); return; }
-      if (e.key === 's') { handleToggleSaved(selected.id, !selected.saved); return; }
-      if (e.key === 'o' && selected.url) { openUrl(selected.url); return; }
+      if (key === 'x') { handleReadAndNext(); return; }
+      if (key === 'r') { handleSetStatus(selected.id, selected.status === 'unread' ? 'read' : 'unread'); return; }
+      if (key === 's') { handleToggleSaved(selected.id, !selected.saved); return; }
+      if (key === 'o' && selected.url) { openUrl(selected.url); return; }
     }
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    fomo, selected, isGrouped, isSaved, viewHelp, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
+    fomo, selected, isGrouped, isSaved, pane, viewHelp, digestRow, refDialog, fileReference, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
     sourcePicker, openSourcePicker, applySourceFilter,
     previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, digestReadAndNext, savedReadAndNext, toggleDigestRead, groupedToggleSaved,
     digestNextTopic, handleNextUnread, handleReadAndNext, handleSetStatus, handleToggleSaved,
@@ -550,7 +592,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   // ── Render ──
 
-  const showPreview = hasSelection && fomo.filter !== 'todos' && previewPosition !== 'off';
+  const showPreview = hasSelection && !pane && previewPosition !== 'off';
   const mainClass = `main main--preview-${showPreview ? previewPosition : 'none'}`;
   const sourceFilterLabel = fomo.sourceFilter
     ? fomo.sourceFilter.length <= 2 ? fomo.sourceFilter.map(sourceName).join(', ') : `${fomo.sourceFilter.length} sources`
@@ -586,6 +628,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           onReadAndNext={() => (isSaved ? savedReadAndNext(digestRow) : digestReadAndNext(digestRow))}
           onNextUnread={digestNextTopic}
           onOpen={() => openUrl(update.url)}
+          onFileReference={() => void fileReference(update)}
           onClose={goBack}
         />
       );
@@ -600,6 +643,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         onReadAndNext={handleReadAndNext}
         onNextUnread={handleNextUnread}
         onOpen={() => selected.url && openUrl(selected.url)}
+        onFileReference={() => void fileReference(selected)}
         onClose={() => setSelected(undefined)}
       />
     );
@@ -694,7 +738,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
             );
           })}
         </div>
-        {fomo.filter !== 'todos' && (
+        {!pane && (
           <SourceFilterChip
             filter={fomo.sourceFilter}
             label={sourceFilterLabel}
@@ -702,7 +746,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
             onClear={() => applySourceFilter(undefined)}
           />
         )}
-        {fomo.filter !== 'todos' && (
+        {!pane && (
           <SearchBox ref={searchInputRef} value={fomo.search} matches={searchMatches} onSearch={setSearch} />
         )}
       </div>
@@ -710,6 +754,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       <div className={mainClass}>
         {fomo.filter === 'todos' ? (
           <TodosPane client={service} />
+        ) : fomo.filter === 'refs' ? (
+          <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
         ) : isGrouped ? (
           <>
             <DigestList
@@ -753,6 +799,25 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           current={fomo.sourceFilter}
           onApply={applySourceFilter}
           onClose={closeSourcePicker}
+        />
+      )}
+
+      {refDialog && (
+        <ReferenceDialog
+          service={service}
+          reference={refDialog.reference}
+          initial={{
+            title: refDialog.update.title,
+            url: refDialog.update.url,
+            description: refDialog.update.gist?.summary ?? refDialog.update.summary ?? '',
+          }}
+          updateId={refDialog.update.id}
+          note={refDialog.note}
+          onSaved={(saved, created) => {
+            setRefDialog(undefined);
+            fomo.notify(`🔖 ${created ? 'Filed' : 'Updated'} in References → ${saved.folder || 'top level'}`, 4000);
+          }}
+          onClose={() => setRefDialog(undefined)}
         />
       )}
 

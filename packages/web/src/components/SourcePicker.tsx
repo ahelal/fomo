@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { shortcutKey } from '@fomo/core';
 
 export interface SourceOption {
   id: string;
@@ -56,15 +57,16 @@ export function SourcePicker({ options, current, onApply, onClose }: Props) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const k = keys.current;
-      if (e.key === 'Escape' || e.key === 'Backspace') { e.preventDefault(); onClose(); return; }
+      const key = shortcutKey(e.key);
+      if (key === 'Escape' || key === 'Backspace') { e.preventDefault(); onClose(); return; }
       if (!k.options) return;
       const last = Math.max(0, k.options.length - 1);
-      if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); setFocus((i) => Math.min(last, i + 1)); }
-      else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); setFocus((i) => Math.max(0, i - 1)); }
-      else if (e.key === ' ') { e.preventDefault(); const o = k.options[k.focus]; if (o) k.toggle(o.id); }
-      else if (e.key === 'a') k.update(new Set(k.options.map((o) => o.id)));
-      else if (e.key === 'n') k.update(new Set());
-      else if (e.key === 'Enter') { e.preventDefault(); k.apply(); }
+      if (key === 'ArrowDown' || key === 'j') { e.preventDefault(); setFocus((i) => Math.min(last, i + 1)); }
+      else if (key === 'ArrowUp' || key === 'k') { e.preventDefault(); setFocus((i) => Math.max(0, i - 1)); }
+      else if (key === ' ') { e.preventDefault(); const o = k.options[k.focus]; if (o) k.toggle(o.id); }
+      else if (key === 'a') k.update(new Set(k.options.map((o) => o.id)));
+      else if (key === 'n') k.update(new Set());
+      else if (key === 'Enter') { e.preventDefault(); k.apply(); }
     }
     // Capture so the app's own shortcuts don't also run while the picker is open.
     const handler = (e: KeyboardEvent) => { e.stopPropagation(); onKey(e); };

@@ -8,11 +8,18 @@ const FILTERS = [
   { key: '4', label: 'Saved',  value: 'saved' },
 ] as const;
 
+/** Views opened over the feed, shown after the tabs. */
+const PANES = [
+  { key: 't', label: 'Todos', value: 'todos' },
+  { key: 'b', label: 'Refs',  value: 'refs' },
+] as const;
+
 /** Views that switch between topics and a plain list when their key is pressed again. */
 const GROUPABLE = new Set<string>(['unread', 'saved']);
 const ESC_HINT = ' · Esc clears';
 
 interface Props {
+  /** Active view: a feed filter, or `todos` / `refs` while one of those is open. */
   active: string;
   /** The active view is listed as topics (Unread and Saved can switch). */
   grouped?: boolean;
@@ -46,8 +53,9 @@ export function FilterBar({ active, grouped, columns, sourceLabel, search, match
     const mode = active === f.value && GROUPABLE.has(f.value) ? (grouped ? ' · topics' : ' · list') : '';
     return { ...f, text: ` ${f.key} ${f.label}${mode} ` };
   });
-  // Width of the tab strip: tabs, single-space gaps, then " t Todos ".
-  const tabsW = tabs.reduce((w, t, i) => w + (i > 0 ? 1 : 0) + t.text.length, 0) + 1 + ' t Todos '.length;
+  const panes = PANES.map((p) => ({ ...p, text: ` ${p.key} ${p.label} ` }));
+  // Width of the tab strip: tabs and panes, single-space gaps.
+  const tabsW = [...tabs, ...panes].reduce((w, t, i) => w + (i > 0 ? 1 : 0) + t.text.length, 0);
 
   // Budget the chip area so the match count survives on narrow terminals:
   // the query is truncated first, and the Esc hint is dropped if it can't fit.
@@ -81,8 +89,14 @@ export function FilterBar({ active, grouped, columns, sourceLabel, search, match
             </React.Fragment>
           );
         })}
-        <Text color="gray"> </Text>
-        <Text color="#8b949e">{` t Todos `}</Text>
+        {panes.map((p) => (
+          <React.Fragment key={p.value}>
+            <Text color="gray"> </Text>
+            <Text color={active === p.value ? '#58a6ff' : '#8b949e'} bold={active === p.value} inverse={active === p.value}>
+              {p.text}
+            </Text>
+          </React.Fragment>
+        ))}
       </Box>
       {(showSource || search) && (
         <Box flexShrink={1} overflow="hidden">

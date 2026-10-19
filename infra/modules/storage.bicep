@@ -55,7 +55,7 @@ resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-0
 
 // The web app's SAS token can't create tables, so they're all provisioned here.
 resource tables 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = [
-  for name in ['updates', 'settings', 'topics', 'todos']: {
+  for name in ['updates', 'settings', 'topics', 'todos', 'references']: {
     parent: tableService
     name: name
   }

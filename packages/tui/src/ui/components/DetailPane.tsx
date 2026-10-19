@@ -7,7 +7,7 @@ interface Props {
   update: Update;
   /** Content is still being loaded. */
   loading?: boolean;
-  /** Copilot is summarising this post (g / G). */
+  /** Copilot is summarising this post (g, or g again to regenerate). */
   summarizing?: boolean;
   height: number;
   columns: number;

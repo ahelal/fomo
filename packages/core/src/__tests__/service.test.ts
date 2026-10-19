@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { FomoDirectService, extractText } from '../service.js';
+import { FomoDirectService, extractText, extractTitle } from '../service.js';
 
 // Mock the store and scrapers
 vi.mock('../store/tables.js', () => {
@@ -72,6 +72,17 @@ vi.mock('../store/topics.js', () => {
   return {
     TopicStore: vi.fn().mockImplementation(() => topicStore),
     __mockTopicStore: topicStore,
+  };
+});
+
+vi.mock('../store/references.js', () => {
+  const referenceStore = {
+    init: vi.fn().mockResolvedValue(undefined),
+    listReferences: vi.fn().mockResolvedValue([]),
+  };
+  return {
+    ReferenceStore: vi.fn().mockImplementation(() => referenceStore),
+    __mockReferenceStore: referenceStore,
   };
 });
 
@@ -479,6 +490,64 @@ describe('FomoDirectService', () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 403 })));
       await expect(svc.summarizePost('github__1', { generateJson: vi.fn() })).rejects.toThrow(/HTTP 403/);
     });
+  });
+
+  describe('suggestReference', () => {
+    const suggestion = { title: 'Agentic code review', folder: ' ai / Code review/ ', description: 'How Copilot review calls tools.' };
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('uses what is stored for a feed item and offers the existing folders', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      const { __mockReferenceStore } = await import('../store/references.js') as any;
+      __mockStore.getUpdate.mockResolvedValue({
+        id: 'github__1', source: 'github', title: 'Copilot code review gets agentic tools', url: 'https://example.com/post',
+        datePublished: '2026-10-01T00:00:00Z', dateAdded: 'x', status: 'unread', saved: false,
+        content: `<p>${'Review details. '.repeat(80)}</p>`, gist: { summary: 'Review can call tools.', points: ['Pro+'] },
+      });
+      __mockReferenceStore.listReferences.mockResolvedValue([{ folder: 'ai/agents' }, { folder: 'azure' }]);
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const summarizer = { generateJson: vi.fn().mockResolvedValue(suggestion) };
+
+      const result = await svc.suggestReference({ updateId: 'github__1' }, summarizer);
+
+      expect(result).toEqual({ title: 'Agentic code review', folder: 'ai/Code review', description: 'How Copilot review calls tools.' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      const prompt: string = summarizer.generateJson.mock.calls[0][0].prompt;
+      expect(prompt).toContain('- ai\n- ai/agents\n- azure');
+      expect(prompt).toContain('TITLE: Copilot code review gets agentic tools');
+      expect(prompt).toContain('Review can call tools. - Pro+ Review details.');
+    });
+
+    it('fetches a manual link for its title and text', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+        `<html><head><title>Tips &amp; tricks</title></head><body><article>${'Useful tip. '.repeat(40)}</article></body></html>`,
+      )));
+      const summarizer = { generateJson: vi.fn().mockResolvedValue(suggestion) };
+      await svc.suggestReference({ url: ' https://example.com/tips ' }, summarizer);
+      const prompt: string = summarizer.generateJson.mock.calls[0][0].prompt;
+      expect(prompt).toContain('URL: https://example.com/tips');
+      expect(prompt).toContain('TITLE: Tips & tricks');
+      expect(prompt).toContain('Useful tip.');
+    });
+
+    it('rejects links that are not http(s) and reports unreachable ones', async () => {
+      const summarizer = { generateJson: vi.fn() };
+      await expect(svc.suggestReference({ url: 'notaurl' }, summarizer)).rejects.toThrow(/full URL/);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 404 })));
+      await expect(svc.suggestReference({ url: 'https://example.com/x' }, summarizer)).rejects.toThrow(/HTTP 404/);
+      expect(summarizer.generateJson).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('extractTitle', () => {
+  it('prefers og:title, then <title>, decoding entities', () => {
+    expect(extractTitle('<meta property="og:title" content="OG"><title>Plain</title>')).toBe('OG');
+    expect(extractTitle('<meta content="Rev" property="og:title">')).toBe('Rev');
+    expect(extractTitle('<title>\n  A &amp; B </title>')).toBe('A & B');
+    expect(extractTitle('<p>none</p>')).toBe('');
   });
 });
 

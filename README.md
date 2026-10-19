@@ -13,6 +13,7 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
 - [Architecture](#architecture)
 - [Copilot Digest](#copilot-digest)
   - [Post Summaries](#post-summaries)
+  - [References](#references)
 - [Installation](#installation)
   - [Azure Deployment](#azure-deployment)
   - [TUI Setup](#tui-setup)
@@ -41,7 +42,7 @@ flowchart LR
     Copilot["GitHub Copilot SDK"]
   end
   subgraph azure[Azure Storage account]
-    Tables[("Table Storage<br/>updates · topics · settings · todos")]
+    Tables[("Table Storage<br/>updates · topics · settings · todos · references")]
     Web["Static website ($web)<br/>PWA"]
   end
   Phone["Browser / Android PWA"]
@@ -134,9 +135,24 @@ Press `g` on an update in the TUI to have Copilot summarise it: one sentence wit
 - FOMO fetches the linked page and summarises whichever is longer: the page text or the stored preview. The page is only used if it mentions the post's title, so sign-in walls and pages that only render with JavaScript fall back to the preview.
 - Azure Updates pages render with JavaScript and the feed cuts their descriptions to about 250 characters, so their full text comes from the Azure release communications API instead (with status and preview / GA dates).
 - Posts with less than 1,000 characters of text aren't summarised, because a summary wouldn't be any shorter.
-- The summary is saved on the update, so pressing `g` again shows it without calling Copilot. `G` regenerates it.
+- The summary is saved on the update, so pressing `g` again shows it without calling Copilot. Press `g` once more while it's shown to regenerate it.
 - Summaries appear at the top of the detail pane in the TUI and the web app, and search matches them too. The web app only shows saved summaries; it can't create them.
 - When Copilot groups a post or writes its topic, it reads the post's summary instead of the start of the feed preview. Summarise posts before they're grouped (or before **Regroup all topics**) to have it take effect.
+
+### References
+
+**References** is a bookmark library. It keeps links you want to come back to, filed in a folder tree like `ai/agents` or `azure/iac` (up to 6 levels deep). **Saved** is still for reading later; References is for links worth keeping.
+
+- **File a feed update:** press `m` on an update in the TUI or the web app, or use the 🔖 button in the detail pane. The title, URL and any summary are filled in.
+  - In the TUI, Copilot also suggests a folder (reusing your existing folders where they fit) and a one-line description. Edit either before saving.
+  - If the link is already filed, `m` opens it for editing instead of adding a duplicate.
+- **Add any link:** open References (`b` in the TUI, `6` or `b` on the web) and press `a`. The new link goes in the selected folder.
+  - In the TUI form, `^G` asks Copilot to suggest a folder and description, and a title if one is missing. FOMO fetches the page to do this.
+- **Folders** exist only as long as they hold links; they're not stored separately. Type a new path to create one.
+  - `e` on a folder renames or moves it together with its subfolders. `e` on a link edits it.
+  - `d` twice deletes a link.
+- **Search** (`/`) matches titles, URLs, folders and descriptions.
+- Copilot suggestions run only in the TUI. In the web app, you type the folder and description yourself, picking from existing folders.
 
 ---
 
@@ -154,7 +170,7 @@ bash deploy.sh fomo swedencentral        # add -y to skip the what-if prompt
 The script:
 
 1. Builds the web app.
-2. Deploys `infra/main.bicep`: one Storage Account with the `updates`, `topics`, `settings` and `todos` tables, plus Table Storage CORS for the static website origin (and `localhost:5173`/`4173` for dev).
+2. Deploys `infra/main.bicep`: one Storage Account with the `updates`, `topics`, `settings`, `todos` and `references` tables, plus Table Storage CORS for the static website origin (and `localhost:5173`/`4173` for dev).
 3. Enables the static website and uploads the PWA to `$web`.
 4. Prints the web app URL and the next steps.
 
@@ -231,10 +247,13 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `1` `2` `3` `4` | All / Unread / Read / Saved               |
 | `2` / `4` again | Switch Unread / Saved between topics and a list (or click the active tab) |
 | `5` / `t`       | Todos                                     |
+| `6` / `b`       | [References](#references) (`b` again returns to the previous view) |
+| `m`             | File the selected update in References    |
 | `/`             | Search titles & content in the current view (`Enter` searches, `Esc` clears) |
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply); `Esc` clears it after the search |
 | `j` / `↓`       | Next row                                  |
 | `k` / `↑`       | Previous row                              |
+| `Shift`+`↑` / `↓` | Jump 5 rows (10 on a tall window)       |
 | `Enter`         | Topics: expand topic · Lists: toggle detail |
 | `→` / `l`, `←`  | Topics: expand / collapse topic           |
 | `x`             | Mark read (the whole topic when grouped) & next |
@@ -245,6 +264,8 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `.`             | Toggle preview position (right / bottom)  |
 | `c`             | Config                                    |
 | `h`             | Help (also shows the version)             |
+
+Letter keys work in either case: `B` does the same as `b`.
 
 Fetching isn't done in the browser. Run `fomo` on your computer and press `f`, then pull to refresh.
 Post summaries made in the TUI (`g`) show at the top of the detail pane.
@@ -264,6 +285,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `1`–`4`         | All / Unread / Read / Saved               |
 | `2` / `4` again | Switch Unread / Saved between topics and a list |
 | `j`/`↓`, `k`/`↑`| Move                                      |
+| `Shift`+`↑` / `↓` | Jump 5 rows (10 on a terminal 40+ lines tall) |
 | `Enter`         | Expand topic and open it / toggle detail  |
 | `→`/`l`, `←`    | Expand / collapse topic                   |
 | `x` / `r`       | Mark topic (or update) read & next (grouped Saved: `r` marks read in place) |
@@ -272,11 +294,13 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `s`             | Save / unsave (unsave in Saved)           |
 | `o`             | Open in browser (newest update of a topic)|
 | `p`             | Fetch full content (detail view)          |
-| `g` / `G`       | [Summarise the update with Copilot](#post-summaries) (saved) / regenerate |
-| `f` / `F`       | Fetch latest updates + Copilot digest     |
+| `g`             | [Summarise the update with Copilot](#post-summaries) (saved); `g` again while it's shown regenerates it |
+| `f`             | Fetch latest updates + Copilot digest     |
 | `z` twice       | Regroup all topics with Copilot (`Esc` after the first `z` cancels) |
 | `c`             | Config: sources, link a device, backup / restore, local settings |
 | `t`             | Todos (`a` add, `Enter` cycle status, `d` delete) |
+| `b`             | [References](#references): links filed into folders |
+| `m`             | File the selected update in References (Copilot suggests a folder and note) |
 | `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply) |
 | `Esc`           | Clear the search, then the source filter  |
@@ -284,6 +308,8 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `a`             | [Audit trail](#audit-trail) of actions and errors (`e` errors only, `Esc` closes) |
 | `h`             | Help (also shows the version)             |
 | `q`             | Quit                                      |
+
+Letter keys work in either case: `B` does the same as `b`, so `Shift`+`j`/`k` still moves one row. macOS Terminal.app has no default mapping for `Shift`+`↑`/`↓`: add one under Settings → Profiles → Keyboard that sends `\033[1;2A` / `\033[1;2B` (press `Esc` to type `\033`).
 
 The status bar shows counts by status; the config screen shows counts per source.
 Search (`/`) works like the web app: it's scoped to the current view, matches every word against the title, summary and content, and shows the query and match count in the filter bar until `Esc` clears it.
@@ -298,7 +324,7 @@ Every action and every error is recorded in `~/.fomo/audit.log`, one JSON object
 
 - **Runs:** manual and automatic fetches (including skipped runs and each failed source), Copilot digests and regroups (each failed Copilot call), summaries, backups and restores.
 - **Reading:** read / unread / save changes (with the update title), opening links, views, searches and source filters.
-- **Settings and todos:** todos, source and config changes, linking a device and setup.
+- **Settings, todos and references:** todos, references, source and config changes, linking a device and setup.
 - **Errors:** storage errors, `console.error` output and crashes.
 
 Press `a` to browse it, newest first. Use `↑`/`↓` to move (the full message of the selected entry shows below the list), `e` to show errors only and `Esc` to close. The view updates while it's open.
@@ -456,6 +482,7 @@ All are optional. The TUI config screen (`c` → **This computer**) stores the s
 | `topics`   | `topic`                            | Topic id                     | Copilot title, summary, highlights    |
 | `settings` | —                                  | —                            | Shared UI/source settings             |
 | `todos`    | —                                  | —                            | Personal todos                        |
+| `references` | `ref`                            | UUID                         | Bookmarked links: title, URL, folder path (`ai/agents`), description, source `updateId` |
 
 Status updates use ETag-based optimistic concurrency.
 

@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved';
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references';
 
 interface Props {
   context: HelpContext;
@@ -54,12 +54,29 @@ const DETAIL_KEYS: [string, string][] = [
   ['o',     'Open URL in browser'],
 ];
 
+const REFERENCE_KEYS: [string, string][] = [
+  ['↵',     'Open folder / open link'],
+  ['→/l',   'Open folder'],
+  ['←',     'Close folder, or go to its parent'],
+  ['a',     'Add a link (in the selected folder)'],
+  ['e',     'Edit link / rename or move folder'],
+  ['d d',   'Delete link (press twice)'],
+  ['o',     'Open link in browser'],
+  ['y',     'Copy link'],
+  ['/',     'Search titles, links, folders & descriptions'],
+  ['Esc',   'Clear the search'],
+  ['b',     'Back to the previous view'],
+];
+
 const GLOBAL_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
+  ['⇧↑/⇧↓','Jump 5 rows (10 on a tall window)'],
   ['1–4',  'All / unread / read / saved'],
   ['2 / 4','Again: switch Unread / Saved between topics and a list'],
   ['5/t',  'Todos'],
+  ['6/b',  'References: links filed into folders'],
+  ['m',    'File the selected update in References'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],
   ['Esc',  'Clear the search, then the source filter'],
@@ -80,6 +97,9 @@ function buildSections(context: Props['context']): Section[] {
   if (context === 'digest') {
     return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
+  if (context === 'references') {
+    return [{ title: 'References', keys: REFERENCE_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+  }
   if (context === 'saved') {
     return [{ title: 'Saved topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
@@ -98,6 +118,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   settings: 'Config',
   digest: 'Unread · topics',
   saved: 'Saved · topics',
+  references: 'References',
 };
 
 export function HelpOverlay({ context, onClose }: Props) {
@@ -127,7 +148,7 @@ export function HelpOverlay({ context, onClose }: Props) {
         ))}
 
         <div className="help-panel__footer">
-          Press <kbd>Esc</kbd> or <kbd>⌫</kbd> to close
+          Press <kbd>Esc</kbd> or <kbd>⌫</kbd> to close · letter keys work in either case
         </div>
       </div>
     </div>

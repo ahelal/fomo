@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh — Deploy FOMO to Azure (a single Storage Account, no compute)
 #
-#   • Table Storage  — the data (updates, topics, settings, todos)
+#   • Table Storage  — the data (updates, topics, settings, todos, references)
 #   • Static website — the web app / installable PWA ($web container)
 #
 # Fetching and Copilot digests run locally in the `fomo` TUI.

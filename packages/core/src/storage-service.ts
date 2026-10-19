@@ -1,5 +1,6 @@
 import { UpdateStore, TodoStore } from './store/tables.js';
 import { TopicStore } from './store/topics.js';
+import { ReferenceStore } from './store/references.js';
 import { getAllSources } from './scraper/registry.js';
 import { buildDigest } from './digest/view.js';
 import { searchDigest, searchTerms } from './search.js';
@@ -22,6 +23,10 @@ import type {
   UpdateTodoRequest,
   ListTodosOptions,
   ListTodosResponse,
+  Reference,
+  CreateReferenceRequest,
+  UpdateReferenceRequest,
+  ListReferencesResponse,
 } from './types.js';
 
 /**
@@ -32,12 +37,14 @@ export class FomoStorageService implements FomoService {
   protected readonly store: UpdateStore;
   protected readonly todoStore: TodoStore;
   protected readonly topicStore: TopicStore;
+  protected readonly referenceStore: ReferenceStore;
   private initPromise: Promise<void> | undefined;
 
   constructor(conn: StoreConnection) {
     this.store = new UpdateStore(conn);
     this.todoStore = new TodoStore(conn);
     this.topicStore = new TopicStore(conn);
+    this.referenceStore = new ReferenceStore(conn);
   }
 
   protected async ensureInit(): Promise<void> {
@@ -46,6 +53,7 @@ export class FomoStorageService implements FomoService {
         this.store.init(),
         this.todoStore.init(),
         this.topicStore.init(),
+        this.referenceStore.init(),
       ]).then(() => undefined);
     }
     await this.initPromise;
@@ -169,5 +177,39 @@ export class FomoStorageService implements FomoService {
   async deleteTodo(id: string): Promise<void> {
     await this.ensureInit();
     return this.todoStore.deleteTodo(id);
+  }
+
+  // ─── References ────────────────────────────────────────────────────────────
+
+  async listReferences(): Promise<ListReferencesResponse> {
+    await this.ensureInit();
+    return { references: await this.referenceStore.listReferences() };
+  }
+
+  async getReference(id: string): Promise<Reference> {
+    await this.ensureInit();
+    const ref = await this.referenceStore.getReference(id);
+    if (!ref) throw new Error(`Reference not found: ${id}`);
+    return ref;
+  }
+
+  async createReference(req: CreateReferenceRequest): Promise<Reference> {
+    await this.ensureInit();
+    return this.referenceStore.createReference(req);
+  }
+
+  async updateReference(id: string, patch: UpdateReferenceRequest): Promise<Reference> {
+    await this.ensureInit();
+    return this.referenceStore.updateReference(id, patch);
+  }
+
+  async deleteReference(id: string): Promise<void> {
+    await this.ensureInit();
+    return this.referenceStore.deleteReference(id);
+  }
+
+  async moveReferenceFolder(from: string, to: string): Promise<number> {
+    await this.ensureInit();
+    return this.referenceStore.moveFolder(from, to);
   }
 }

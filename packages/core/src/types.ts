@@ -225,6 +225,59 @@ export interface FomoService {
   createTodo(req: CreateTodoRequest): Promise<Todo>;
   updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo>;
   deleteTodo(id: string): Promise<void>;
+  listReferences(): Promise<ListReferencesResponse>;
+  getReference(id: string): Promise<Reference>;
+  /** Throws when a reference with the same URL already exists. */
+  createReference(req: CreateReferenceRequest): Promise<Reference>;
+  updateReference(id: string, patch: UpdateReferenceRequest): Promise<Reference>;
+  deleteReference(id: string): Promise<void>;
+  /** Rename a folder: every reference in it (and its subfolders) moves under `to`. Returns how many moved. */
+  moveReferenceFolder(from: string, to: string): Promise<number>;
+}
+
+// ─── References (bookmarks filed into folders) ───────────────────────────────
+
+export interface Reference {
+  /** Opaque ID: stored as RowKey in Azure Table Storage. */
+  id: string;
+  title: string;
+  url: string;
+  /** Folder path, segments joined with `/` (e.g. `ai/agents`); `''` is the top level. */
+  folder: string;
+  /** Your own note, or the one Copilot suggested. */
+  description: string;
+  /** The feed update this was filed from, if any. */
+  updateId?: string;
+  /** ISO 8601 datetime */
+  createdAt: string;
+  /** ISO 8601 datetime */
+  updatedAt: string;
+}
+
+export interface CreateReferenceRequest {
+  title: string;
+  url: string;
+  folder?: string;
+  description?: string;
+  updateId?: string;
+}
+
+export interface UpdateReferenceRequest {
+  title?: string;
+  url?: string;
+  folder?: string;
+  description?: string;
+}
+
+export interface ListReferencesResponse {
+  references: Reference[];
+}
+
+/** Copilot's proposal for filing a link (TUI only). */
+export interface ReferenceSuggestion {
+  title: string;
+  folder: string;
+  description: string;
 }
 
 // ─── Todos ───────────────────────────────────────────────────────────────────

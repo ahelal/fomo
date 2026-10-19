@@ -16,6 +16,7 @@ Everything happens inside the UI:
   f   fetch all sources and group them into topics with Copilot
   c   config: sources, local settings, link a device, regroup, backup / restore
   t   todos
+  b   references: links filed into folders (m files the selected update)
   a   audit trail of actions and errors
   h   keyboard help
 

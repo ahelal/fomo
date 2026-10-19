@@ -11,7 +11,10 @@ import {
   type DigestEntry,
 } from '@fomo/core';
 
-export type FilterStatus = Status | 'all' | 'saved' | 'todos';
+export type FilterStatus = Status | 'all' | 'saved' | 'todos' | 'refs';
+/** Views with their own pane instead of a list of updates. */
+export type PaneView = 'todos' | 'refs';
+export const isPaneView = (f: FilterStatus): f is PaneView => f === 'todos' || f === 'refs';
 /** Views that can be listed as topics; selecting the view again toggles it. */
 export type GroupableView = 'unread' | 'saved';
 export type GroupedViews = Record<GroupableView, boolean>;
@@ -59,6 +62,8 @@ export interface FomoActions {
   loadContent(id: string): Promise<void>;
   updateSettings(patch: Partial<AppSettings>): Promise<void>;
   refresh(): Promise<void>;
+  /** Show a short message in the status bar. */
+  notify(msg: string, ms?: number): void;
 }
 
 function errorText(err: unknown): string {
@@ -97,7 +102,7 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
 
   const loadView = useCallback(
     async (f: FilterStatus) => {
-      if (f === 'todos') return;
+      if (isPaneView(f)) return;
       // Searches are slower full scans; drop responses superseded by a newer load.
       const seq = ++loadSeq.current;
       setLoading(true);
@@ -194,7 +199,7 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
   const countSources = useCallback(() => {
     const f = filterRef.current;
     return service.countSources({
-      ...(f === 'saved' ? { saved: true } : { status: f === 'todos' ? 'all' : f }),
+      ...(f === 'saved' ? { saved: true } : { status: isPaneView(f) ? 'all' : f }),
       search: searchRef.current || undefined,
       grouped: isGroupedView(f, groupedRef.current),
     });
@@ -293,5 +298,6 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     loadContent,
     updateSettings,
     refresh,
+    notify: showMessage,
   };
 }

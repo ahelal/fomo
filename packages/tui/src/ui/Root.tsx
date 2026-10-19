@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { FomoDirectService, type PostGistResult } from '@fomo/core/service';
+import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
+import type { ReferenceSuggestion } from '@fomo/core';
 import type { DigestResult } from '@fomo/core/digest';
 import { connectionStringProblem, saveConfig, type LocalConfig } from '../config.js';
 import type { SummarizerCache } from '../copilot.js';
@@ -60,6 +61,14 @@ export function Root({ initialConfig, summarizers, audit, auditFile }: Props) {
     [service, summarizers, config.copilotModel, config.copilotAccount],
   );
 
+  const suggestReference = useCallback(
+    (req: SuggestReferenceRequest): Promise<ReferenceSuggestion> => {
+      if (!service) return Promise.reject(new Error('Not connected to storage'));
+      return service.suggestReference(req, summarizers.get(config.copilotModel, config.copilotAccount));
+    },
+    [service, summarizers, config.copilotModel, config.copilotAccount],
+  );
+
   const connect = useCallback(
     async (connectionString: string, skipCheck: boolean): Promise<string | undefined> => {
       const fail = (problem: string) => {
@@ -95,6 +104,7 @@ export function Root({ initialConfig, summarizers, audit, auditFile }: Props) {
       onConfigChange={updateConfig}
       digest={digest}
       summarize={summarize}
+      suggestReference={suggestReference}
       audit={audit}
       auditFile={auditFile}
     />

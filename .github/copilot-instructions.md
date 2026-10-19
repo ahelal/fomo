@@ -9,7 +9,7 @@
 - Infra/deployment files: `infra/` (storage-only Bicep), `deploy.sh`, `.env.example`.
 
 ## Architecture
-- Azure is a single Storage Account: Table Storage (`updates`, `topics`, `settings`, `todos`) + static website (`$web`) hosting the PWA.
+- Azure is a single Storage Account: Table Storage (`updates`, `topics`, `settings`, `todos`, `references`) + static website (`$web`) hosting the PWA.
 - There is no compute in Azure. Fetching and the Copilot digest run locally in the TUI (`f`).
 - The browser authenticates with an account SAS (`ss=t`, `srt=o`) delivered by the TUI's “Link a device” action (`c`) in the URL fragment; Table CORS is set in Bicep.
 - `@fomo/core` main entry (`FomoStorageService`, digest view helpers, connection helpers) must stay browser-safe. Node-only code lives in `FomoDirectService` (`@fomo/core/service`), scrapers, and `@fomo/core/store/sas`.
@@ -26,6 +26,8 @@
 - Keep changes package-scoped; `packages/core` is the shared dependency for web and TUI.
 - Prefer reusing shared logic from `@fomo/core` instead of duplicating it in web/cli.
 - Keep the web and TUI keyboard behaviour in sync.
+- Shortcuts are case-insensitive: never bind different actions to the upper and lower case of one letter (`b`/`B`). Match keys with `shortcutKey()` from `@fomo/core`; keep the raw key only for text input.
+- In list views, Shift+↑/↓ jumps `jumpStep(screenLines)` rows (5, or 10 on a tall screen) from `@fomo/core`.
 - Do not edit generated `dist/` output manually; rebuild instead.
 - If dependencies change, update `pnpm-lock.yaml` via `pnpm install`.
 

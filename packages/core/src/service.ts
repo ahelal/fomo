@@ -3,13 +3,24 @@ import { getAllSources, getSource, getSourceIds } from './scraper/registry.js';
 import { FomoStorageService } from './storage-service.js';
 import { runDigest, type Summarizer, type DigestOptions, type DigestResult } from './digest/run.js';
 import { GIST_MAX_INPUT_CHARS, GIST_MIN_CHARS, gistSource, writeGist } from './digest/gist.js';
+import { REFERENCE_MAX_INPUT_CHARS, suggestReferenceWith } from './digest/reference.js';
+import { excerpt } from './digest/prompt.js';
+import { normalizeReferenceUrl, referenceFolders } from './references.js';
 import type {
   StoreConnection,
   Update,
   FetchRequest,
   FetchResponse,
   SourceFetchResult,
+  ReferenceSuggestion,
 } from './types.js';
+
+/** What to file: a feed update (`updateId`) or any link (`url`, optional `title`). */
+export interface SuggestReferenceRequest {
+  updateId?: string;
+  url?: string;
+  title?: string;
+}
 
 /** What `summarizePost` did: wrote a new gist, returned the saved one, or skipped a post too short to condense. */
 export type PostGistOutcome = 'created' | 'cached' | 'short';
@@ -68,6 +79,43 @@ export class FomoDirectService extends FomoStorageService {
     const gist = await writeGist(update, source.text, summarizer);
     await this.store.setGist(id, gist);
     return { update: { ...update, gist }, outcome: 'created', from: source.from };
+  }
+
+  /**
+   * Ask Copilot for a title, folder and description to file a link under. Existing folders are
+   * passed along so it reuses them. Feed updates use what is stored (gist, summary, preview) and
+   * fetch the page only when that is thin; other links are fetched.
+   */
+  async suggestReference(req: SuggestReferenceRequest, summarizer: Summarizer): Promise<ReferenceSuggestion> {
+    await this.ensureInit();
+    const folders = referenceFolders(await this.referenceStore.listReferences());
+
+    let url = req.url?.trim() ?? '';
+    let title = req.title?.trim() ?? '';
+    const known: string[] = [];
+    if (req.updateId) {
+      const update = await this.store.getUpdate(req.updateId);
+      if (!update) throw new Error(`Update not found: ${req.updateId}`);
+      url ||= update.url;
+      title ||= update.title;
+      if (update.gist) known.push(update.gist.summary, ...update.gist.points.map((p) => `- ${p}`));
+      if (update.summary) known.push(update.summary);
+      const preview = excerpt(update.content, REFERENCE_MAX_INPUT_CHARS);
+      if (preview) known.push(preview);
+    }
+    url = normalizeReferenceUrl(url);
+
+    let text = known.join('\n');
+    if (text.length < GIST_MIN_CHARS) {
+      try {
+        const page = await fetchPage(url, REFERENCE_MAX_INPUT_CHARS);
+        title ||= page.title;
+        if (page.text.length > text.length) text = [text, page.text].filter(Boolean).join('\n\n');
+      } catch (err) {
+        if (!text && !title) throw new Error(`Could not fetch the link: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return suggestReferenceWith({ url, title, text, folders }, summarizer);
   }
 
   async fetch(req: FetchRequest = {}): Promise<FetchResponse> {
@@ -192,16 +240,40 @@ async function fetchAzureUpdateText(id: string): Promise<string> {
   return [item.title, facts.join('. '), htmlToText(item.description ?? '')].filter(Boolean).join('\n\n');
 }
 
-/** Fetch a page and return its main text (empty when nothing could be extracted). */
-async function fetchPageText(url: string, maxChars = 5000): Promise<string> {
-  const azureId = azureUpdateId(url);
-  if (azureId) return (await fetchAzureUpdateText(azureId)).slice(0, maxChars);
+async function fetchHtml(url: string): Promise<string> {
   const resp = await globalThis.fetch(url, {
     signal: AbortSignal.timeout(15_000),
     headers: { 'User-Agent': 'fomo/1.0' },
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return extractText(await resp.text(), maxChars);
+  return resp.text();
+}
+
+/** Fetch a page and return its main text (empty when nothing could be extracted). */
+async function fetchPageText(url: string, maxChars = 5000): Promise<string> {
+  const azureId = azureUpdateId(url);
+  if (azureId) return (await fetchAzureUpdateText(azureId)).slice(0, maxChars);
+  return extractText(await fetchHtml(url), maxChars);
+}
+
+/** Fetch a page's title and main text. */
+async function fetchPage(url: string, maxChars: number): Promise<{ title: string; text: string }> {
+  const azureId = azureUpdateId(url);
+  if (azureId) {
+    const text = await fetchAzureUpdateText(azureId);
+    return { title: text.split('\n', 1)[0] ?? '', text: text.slice(0, maxChars) };
+  }
+  const html = await fetchHtml(url);
+  return { title: extractTitle(html), text: extractText(html, maxChars) };
+}
+
+/** The page's title: `og:title`, else `<title>` (empty when neither is set). */
+export function extractTitle(html: string): string {
+  const og =
+    html.match(/<meta\b[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i) ??
+    html.match(/<meta\b[^>]*content=["']([^"']*)["'][^>]*property=["']og:title["']/i);
+  const title = og?.[1] ?? html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '';
+  return htmlToText(title);
 }
 
 /** Opening tag whose attribute values may contain `>` (e.g. Tailwind classes). */

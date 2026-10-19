@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { VERSION } from '../../version.js';
 
-export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved';
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references';
 
 interface Props {
   context: HelpContext;
@@ -23,7 +23,7 @@ const DIGEST_KEYS: [string, string][] = [
   ['x',    'Mark read & next unread'],
   ['n',    'Jump to next topic'],
   ['s',    'Save / unsave update'],
-  ['g / G','Summarise update with Copilot / redo'],
+  ['g',    'Summarise update with Copilot (g again: regenerate)'],
   ['o',    'Open in browser (newest in topic)'],
   ['Esc/⌫','Close detail'],
   ['q',    'Quit'],
@@ -37,7 +37,7 @@ const SAVED_KEYS: [string, string][] = [
   ['x',    'Mark read & next'],
   ['n',    'Jump to next topic'],
   ['s',    'Unsave update'],
-  ['g / G','Summarise update with Copilot / redo'],
+  ['g',    'Summarise update with Copilot (g again: regenerate)'],
   ['o',    'Open in browser (newest in topic)'],
   ['Esc/⌫','Close detail'],
   ['q',    'Quit'],
@@ -47,7 +47,7 @@ const LIST_KEYS: [string, string][] = [
   ['↵',    'Open detail view'],
   ['r',    'Toggle read / unread'],
   ['s',    'Save / unsave'],
-  ['g / G','Summarise with Copilot (saved) / redo'],
+  ['g',    'Summarise with Copilot (saved; g again: regenerate)'],
   ['x',    'Mark read & next unread'],
   ['n',    'Jump to next unread'],
   ['o',    'Open in browser'],
@@ -58,7 +58,7 @@ const DETAIL_KEYS: [string, string][] = [
   ['Esc/⌫', 'Close detail view'],
   ['r',     'Toggle read / unread'],
   ['s',     'Save / unsave'],
-  ['g / G', 'Summarise with Copilot (saved) / redo'],
+  ['g',     'Summarise with Copilot (saved; g again: regenerate)'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next unread'],
   ['o',     'Open URL in browser'],
@@ -68,18 +68,44 @@ const DETAIL_KEYS: [string, string][] = [
 const GLOBAL_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
+  ['⇧↑/⇧↓','Jump 5 rows (10 on a tall terminal)'],
   ['1–4',  'All / unread / read / saved'],
   ['2 / 4','Again: switch Unread / Saved between topics and a list'],
-  ['f / F','Fetch latest updates + group with Copilot'],
+  ['f',    'Fetch latest updates + group with Copilot'],
   ['z',    'Regroup all topics with Copilot (press twice)'],
   ['c',    'Config: sources, link a device, backup / restore'],
   ['t',    'Todos'],
+  ['b',    'References: links filed into folders'],
+  ['m',    'File the selected update in References (Copilot suggests folder + note)'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],
   ['Esc',  'Clear the search, then the source filter'],
   ['.',    'Show preview / toggle its position'],
   ['a',    'Audit trail: every action and error (e: errors only)'],
   ['h',    'Show this help'],
+];
+
+const REFERENCE_KEYS: [string, string][] = [
+  ['↑/k ↓/j', 'Move (⇧↑/⇧↓ jumps 5, or 10 on a tall terminal)'],
+  ['↵',    'Open / close folder · open link in browser'],
+  ['→/l ←','Open folder · close folder / go to parent'],
+  ['o',    'Open link in browser'],
+  ['y',    'Copy link'],
+  ['a',    'Add a link (in the selected folder)'],
+  ['e',    'Edit link · rename or move folder (with its subfolders)'],
+  ['d',    'Delete link (press twice)'],
+  ['/',    'Search titles, links, folders & notes'],
+  ['Esc',  'Clear the search, then close'],
+  ['b/⌫',  'Close'],
+];
+
+const REFERENCE_FORM_KEYS: [string, string][] = [
+  ['Tab/↑↓','Next field (Shift+Tab: previous)'],
+  ['↑↓',   'In Folder: pick an existing folder'],
+  ['^G',   'Ask Copilot for folder, note (and title)'],
+  ['^U',   'Clear field'],
+  ['↵',    'Save'],
+  ['Esc',  'Cancel'],
 ];
 
 const SETTINGS_KEYS: [string, string][] = [
@@ -97,6 +123,9 @@ const SETTINGS_KEYS: [string, string][] = [
 function buildSections(context: Props['context']): Section[] {
   if (context === 'settings') {
     return [{ title: 'Config', keys: SETTINGS_KEYS }];
+  }
+  if (context === 'references') {
+    return [{ title: 'References', keys: REFERENCE_KEYS }, { title: 'Add / edit form', keys: REFERENCE_FORM_KEYS }];
   }
   if (context === 'digest') {
     return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
@@ -119,6 +148,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   settings: 'Config',
   digest: 'Unread · topics',
   saved: 'Saved · topics',
+  references: 'References',
 };
 
 const KEY_W = 8;
@@ -160,7 +190,7 @@ export function HelpOverlay({ context, height, columns }: Props) {
           <Text color="#58a6ff" bold>Esc</Text>
           {' or '}
           <Text color="#58a6ff" bold>⌫</Text>
-          {' to close'}
+          {' to close · letter keys work in either case'}
         </Text>
       </Box>
     </Box>
