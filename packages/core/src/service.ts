@@ -166,6 +166,12 @@ export class FomoDirectService extends FomoStorageService {
           result.error = err instanceof Error ? err.message : String(err);
         }
 
+        try {
+          await this.store.recordFetch(source.id, result.error);
+        } catch {
+          // best-effort — the fetch itself already happened
+        }
+
         results[source.id] = result;
         totalAdded += result.added;
       }),

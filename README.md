@@ -333,16 +333,17 @@ Connection-string keys and SAS signatures are masked, and the device link itself
 
 ### Config Screen
 
-Press `c`. The bottom line shows the keys for the selected row.
+Press `c`. The bottom line shows the keys for the selected row. Each section header folds: `Enter`/`←` collapses it, `Enter`/`→` expands it, and `←` on any row folds its section. The list scrolls with the focus; `Shift+↑/↓` jumps 5 rows (10 on a tall screen) and `PgUp`/`PgDn` move a page.
 
 | Section | Row | Keys |
 |---------|-----|------|
 | **Actions** | Link a device | `Enter`: magic link + QR code for the web app (`o` open, `y` copy) |
+| | Show web app QR | `Enter`: QR code of the plain web app URL (no access token) to open it on your phone · `o` opens it in the browser |
 | | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread and saved update |
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
-| **Sources** (shared with the web app) | One row per source, with its item count and last fetch result | `Enter` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates |
+| **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
-| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (15 min), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Auto-fetch and Group after fetch; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. |
+| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (15 min), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Auto-fetch and Group after fetch; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. |
 
 ### Backup & Restore
 

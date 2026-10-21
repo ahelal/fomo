@@ -103,3 +103,50 @@ describe('UpdateStore.listUpdates source filter', () => {
     expect(seen).toEqual([]);
   });
 });
+
+describe('UpdateStore fetch history', () => {
+  const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+  const rows = (items: object[]) => () => (async function* () { yield* items; })();
+
+  it('records each fetch and reports it in stats with the newest added time', async () => {
+    const store = new UpdateStore(conn as any);
+    const upserts: Record<string, unknown>[] = [];
+    (store as any).settingsClient = {
+      upsertEntity: async (e: Record<string, unknown>, mode: string) => { upserts.push({ ...e, mode }); },
+      listEntities: rows([
+        { partitionKey: 'fetch', rowKey: 'github', lastFetchAt: '2026-10-21T10:00:00Z', lastError: '' },
+        { partitionKey: 'fetch', rowKey: 'azure', lastFetchAt: '2026-10-21T11:00:00Z', lastError: 'HTTP 500' },
+      ]),
+    };
+    (store as any).client = {
+      listEntities: rows([
+        { partitionKey: 'github', rowKey: 'a', status: 'unread', saved: false, dateAdded: '2026-10-01T00:00:00Z' },
+        { partitionKey: 'github', rowKey: 'b', status: 'read', saved: false, dateAdded: '2026-10-05T00:00:00Z' },
+        { partitionKey: 'vscode', rowKey: 'c', status: 'read', saved: false, dateAdded: '2026-09-01T00:00:00Z' },
+      ]),
+    };
+
+    await store.recordFetch('azure', 'HTTP 500');
+    await store.recordFetch('github');
+    expect(upserts).toEqual([
+      expect.objectContaining({ partitionKey: 'fetch', rowKey: 'azure', lastError: 'HTTP 500', mode: 'Merge' }),
+      expect.objectContaining({ partitionKey: 'fetch', rowKey: 'github', lastError: '', mode: 'Merge' }),
+    ]);
+
+    const stats = await store.getStats();
+    expect(stats.sourceStatus).toEqual({
+      github: { lastFetchAt: '2026-10-21T10:00:00Z', lastAddedAt: '2026-10-05T00:00:00Z' },
+      azure: { lastFetchAt: '2026-10-21T11:00:00Z', lastError: 'HTTP 500' },
+      vscode: { lastAddedAt: '2026-09-01T00:00:00Z' },
+    });
+  });
+
+  it('still returns stats when the fetch history cannot be read', async () => {
+    const store = new UpdateStore(conn as any);
+    (store as any).settingsClient = { listEntities: () => { throw Object.assign(new Error('nope'), { statusCode: 403 }); } };
+    (store as any).client = { listEntities: rows([{ partitionKey: 'github', rowKey: 'a', status: 'unread', dateAdded: '2026-10-01T00:00:00Z' }]) };
+    const stats = await store.getStats();
+    expect(stats.total).toBe(1);
+    expect(stats.sourceStatus).toEqual({ github: { lastAddedAt: '2026-10-01T00:00:00Z' } });
+  });
+});

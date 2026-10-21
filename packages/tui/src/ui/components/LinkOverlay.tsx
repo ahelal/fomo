@@ -2,8 +2,13 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 export interface LinkView {
+  /** Audit log action name. */
+  action: string;
+  title: string;
+  intro: string;
   url: string;
-  expiresOn: Date;
+  /** Shown under the URL, e.g. when the link expires. */
+  note?: string;
   qr: string;
 }
 
@@ -16,13 +21,13 @@ interface Props {
 export function LinkOverlay({ link, height, columns }: Props) {
   const qrLines = link.qr.replace(/\n+$/, '').split('\n');
   const qrWidth = Math.max(...qrLines.map((l) => l.length));
-  // title + blank + url + blank + expiry + blank + footer + padding
+  // title + intro + blank + url + note + blank + footer + padding
   const fits = qrLines.length + 9 <= height && qrWidth + 4 <= columns;
 
   return (
     <Box flexDirection="column" height={height} width={columns} paddingX={2} paddingTop={1}>
-      <Text color="#f0f6fc" bold>{'📱 Link a device'}</Text>
-      <Text color="#8b949e">Scan the QR code on your phone, or open the link on any device, to connect the web app.</Text>
+      <Text color="#f0f6fc" bold>{`📱 ${link.title}`}</Text>
+      <Text color="#8b949e">{link.intro}</Text>
       <Box height={1} />
       {fits ? (
         <Box flexDirection="column">
@@ -35,9 +40,7 @@ export function LinkOverlay({ link, height, columns }: Props) {
       )}
       <Box height={1} />
       <Text color="#58a6ff" wrap="truncate-middle">{link.url}</Text>
-      <Text color="#8b949e">
-        {`Valid until ${link.expiresOn.toISOString().slice(0, 10)}. Anyone with this link can read and change your FOMO data.`}
-      </Text>
+      {link.note && <Text color="#8b949e">{link.note}</Text>}
       <Box flexGrow={1} />
       <Text color="#8b949e">
         <Text color="#58a6ff" bold>o</Text>{' open in browser   '}

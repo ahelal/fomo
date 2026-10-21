@@ -53,6 +53,17 @@ const clip = (s: string, w: number) => (w <= 0 ? '' : s.length > w ? `${s.slice(
 /** Keep the end of the text visible while typing. */
 const tail = (s: string, w: number) => (w <= 0 ? '' : s.length > w ? `…${s.slice(s.length - w + 1)}` : s);
 
+/** `iso` as a short age, e.g. `just now`, `5m ago`, `3h ago`, `2d ago`. */
+export function timeAgo(iso: string, now = Date.now()): string {
+  const mins = Math.floor((now - Date.parse(iso)) / 60_000);
+  if (!Number.isFinite(mins)) return '';
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 export const SettingsPane = React.memo(function SettingsPane({
   rows,
   settings,
@@ -85,18 +96,19 @@ export const SettingsPane = React.memo(function SettingsPane({
   );
 
   const renderRow = (row: SettingsRow, index: number) => {
+    const isFocused = index === focusIndex;
     if (row.kind === 'header') {
-      const label = ` ${row.label} `;
+      const label = ` ${row.collapsed ? '▸' : '▾'} ${row.label}${row.collapsed ? ` (${row.count})` : ''} `;
+      const hbg = isFocused ? FOCUS_BG : undefined;
       return (
         <Text key={row.key} wrap="truncate">
-          <Text color="#30363d">{'──'}</Text>
-          <Text color="#58a6ff" bold>{label}</Text>
-          <Text color="#30363d">{'─'.repeat(Math.max(0, innerW - label.length - 2))}</Text>
+          <Text color="#30363d" backgroundColor={hbg}>{'──'}</Text>
+          <Text color="#58a6ff" backgroundColor={hbg} bold>{label}</Text>
+          <Text color="#30363d" backgroundColor={hbg}>{'─'.repeat(Math.max(0, innerW - label.length - 2))}</Text>
         </Text>
       );
     }
 
-    const isFocused = index === focusIndex;
     const bg = isFocused ? FOCUS_BG : BG;
     const cursor = <Text color="#1c7cd6" backgroundColor={bg}>{isFocused ? '▸ ' : '  '}</Text>;
     const name = (label: string, color = '#f0f6fc') => (
@@ -135,7 +147,14 @@ export const SettingsPane = React.memo(function SettingsPane({
       const label = clip(settings.sourceLabels[id] ?? '', 12).padEnd(14);
       const count = `${stats?.bySource[id] ?? 0} items`.padEnd(11);
       const result = lastFetch[id];
-      const last = clip(result ? (result.error ? `⚠ ${result.error}` : `+${result.added} new`) : '', Math.max(0, restW - 37));
+      const history = stats?.sourceStatus?.[id];
+      const error = history ? history.lastError : result?.error;
+      const added = (result && !result.error ? `+${result.added} new` : '').padEnd(9);
+      const newest = (history?.lastAddedAt ? `last new ${timeAgo(history.lastAddedAt)}` : '').padEnd(17);
+      const fetchedAt = history?.lastFetchAt ? timeAgo(history.lastFetchAt) : '';
+      const fetched = error ? `⚠ ${fetchedAt ? `${fetchedAt}: ` : ''}${error}` : fetchedAt ? `✓ fetched ${fetchedAt}` : '';
+      const used = 37 + added.length + newest.length;
+      const last = clip(fetched, Math.max(0, restW - used));
       return (
         <Text key={row.key} wrap="truncate">
           {cursor}
@@ -145,8 +164,10 @@ export const SettingsPane = React.memo(function SettingsPane({
           <Text color={settings.sourceColors?.[id] || COLOR_PALETTE[0]} backgroundColor={bg}>{'■ '}</Text>
           <Text color="#58a6ff" backgroundColor={bg}>{label}</Text>
           <Text color="#8b949e" backgroundColor={bg}>{count}</Text>
-          <Text color={result?.error ? '#f85149' : '#3fb950'} backgroundColor={bg}>{last}</Text>
-          {fill(37 + last.length)}
+          <Text color="#3fb950" backgroundColor={bg}>{added}</Text>
+          <Text color="#c9d1d9" backgroundColor={bg}>{newest}</Text>
+          <Text color={error ? '#f85149' : '#8b949e'} backgroundColor={bg}>{last}</Text>
+          {fill(used + last.length)}
         </Text>
       );
     }
@@ -197,6 +218,11 @@ export const SettingsPane = React.memo(function SettingsPane({
     <Box flexDirection="column" height={height} width={columns}>
       <Box paddingX={2} paddingTop={1}>
         <Text color="#f0f6fc" bold>{'⚙️  Config'}</Text>
+        {rows.length > listH && (
+          <Text color="#8b949e">
+            {`   ${start > 0 ? '↑' : ' '}${start + listH < rows.length ? '↓' : ' '} rows ${start + 1}–${Math.min(rows.length, start + listH)} of ${rows.length}`}
+          </Text>
+        )}
       </Box>
       <Box height={1} />
 

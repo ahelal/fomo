@@ -10,6 +10,7 @@ import type {
   ListOptions,
   ListResponse,
   StatsResponse,
+  SourceFetchStatus,
   AppSettings,
   Todo,
   TodoStatus,
@@ -24,6 +25,10 @@ const TABLE_NAME = 'updates';
 const SETTINGS_TABLE = 'settings';
 const SETTINGS_PK = 'app';
 const SETTINGS_RK = 'global';
+/** Settings-table partition with one row per source: its last fetch time and error. */
+const FETCH_STATUS_PK = 'fetch';
+
+type FetchStatusEntity = TableEntity<{ lastFetchAt: string; lastError: string }>;
 
 // ─── Entity shape stored in Azure Table Storage ────────────────────────────
 type UpdateEntity = TableEntity<{
@@ -353,11 +358,13 @@ export class UpdateStore {
 
   async getStats(): Promise<StatsResponse> {
     const iter = this.client.listEntities<UpdateEntity>({
-      queryOptions: { select: ['PartitionKey', 'RowKey', 'status', 'saved'] },
+      queryOptions: { select: ['PartitionKey', 'RowKey', 'status', 'saved', 'dateAdded'] },
     });
 
     const byStatus: Record<string, number> = { unread: 0, read: 0 };
     const bySource: Record<string, number> = {};
+    const fetchStatus = this.getFetchStatus();
+    const lastAdded: Record<string, string> = {};
     let saved = 0;
     let total = 0;
 
@@ -367,14 +374,44 @@ export class UpdateStore {
       bySource[e.partitionKey] = (bySource[e.partitionKey] ?? 0) + 1;
       if (e.saved ?? e.status === 'saved') saved++;
       total++;
+      const prev = lastAdded[e.partitionKey];
+      if (e.dateAdded && (!prev || e.dateAdded > prev)) lastAdded[e.partitionKey] = e.dateAdded;
     }
+
+    const sourceStatus = await fetchStatus;
+    for (const [source, at] of Object.entries(lastAdded)) (sourceStatus[source] ??= {}).lastAddedAt = at;
 
     return {
       total,
       byStatus: byStatus as Record<Status, number>,
       bySource,
       saved,
+      sourceStatus,
     };
+  }
+
+  /** Remember the outcome of fetching `source` (no `error` means it succeeded). */
+  async recordFetch(source: string, error?: string): Promise<void> {
+    await this.settingsClient.upsertEntity<FetchStatusEntity>(
+      { partitionKey: FETCH_STATUS_PK, rowKey: source, lastFetchAt: new Date().toISOString(), lastError: error ?? '' },
+      'Merge',
+    );
+  }
+
+  /** Last fetch time and error per source, as written by `recordFetch` (best-effort: `{}` on failure). */
+  private async getFetchStatus(): Promise<Record<string, SourceFetchStatus>> {
+    const out: Record<string, SourceFetchStatus> = {};
+    try {
+      const iter = this.settingsClient.listEntities<FetchStatusEntity>({
+        queryOptions: { filter: odata`PartitionKey eq ${FETCH_STATUS_PK}` },
+      });
+      for await (const e of iter) {
+        out[e.rowKey] = { lastFetchAt: e.lastFetchAt, ...(e.lastError ? { lastError: e.lastError } : {}) };
+      }
+    } catch {
+      // missing table or no access — show no fetch history
+    }
+    return out;
   }
 
   /** Export every entity from the table as a serializable backup payload. */

@@ -15,10 +15,10 @@ import {
 } from '../config.js';
 
 export type ConfigField = keyof LocalConfig;
-export type ActionId = 'link' | 'regroup' | 'backup' | 'restore';
+export type ActionId = 'link' | 'webapp' | 'regroup' | 'backup' | 'restore';
 
 export type SettingsRow =
-  | { kind: 'header'; key: string; label: string }
+  | { kind: 'header'; key: string; label: string; collapsed: boolean; count: number }
   | { kind: 'action'; key: string; action: ActionId; label: string; hint: string }
   | { kind: 'source'; key: string; source: SourceInfo }
   | { kind: 'preview'; key: string }
@@ -26,6 +26,7 @@ export type SettingsRow =
 
 const ACTIONS: { action: ActionId; label: string; hint: string }[] = [
   { action: 'link', label: 'Link a device', hint: 'magic link + QR code that connects the web app' },
+  { action: 'webapp', label: 'Show web app QR', hint: 'QR code of the web app URL to open it on your phone · o opens it here' },
   { action: 'regroup', label: 'Regroup all topics', hint: 'rerun Copilot on every unread and saved update (takes a few minutes)' },
   { action: 'backup', label: 'Back up updates', hint: 'save all updates as JSON in the backup folder' },
   { action: 'restore', label: 'Restore from backup', hint: 'pick a backup file from the backup folder' },
@@ -45,29 +46,44 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
   { field: 'backupDir', label: 'Backup folder' },
 ];
 
-export function buildSettingsRows(sources: SourceInfo[]): SettingsRow[] {
+/** Section header keys, used to collapse a section. */
+export const SECTION_KEYS = ['h-actions', 'h-sources', 'h-display', 'h-local'] as const;
+
+/** Config screen rows; rows of the sections in `collapsed` (header keys) are left out. */
+export function buildSettingsRows(sources: SourceInfo[], collapsed: ReadonlySet<string> = new Set()): SettingsRow[] {
+  const section = (key: string, label: string, rows: SettingsRow[]): SettingsRow[] => [
+    { kind: 'header', key, label, collapsed: collapsed.has(key), count: rows.length },
+    ...(collapsed.has(key) ? [] : rows),
+  ];
   return [
-    { kind: 'header', key: 'h-actions', label: 'Actions' },
-    ...ACTIONS.map((a) => ({ kind: 'action' as const, key: `a-${a.action}`, ...a })),
-    { kind: 'header', key: 'h-sources', label: 'Sources · shared with the web app' },
-    ...sources.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source })),
-    { kind: 'header', key: 'h-display', label: 'Display · shared with the web app' },
-    { kind: 'preview', key: 'preview' },
-    { kind: 'header', key: 'h-local', label: `This computer · ${tildify(CONFIG_FILE)}` },
-    ...CONFIG_FIELDS.map((f) => ({ kind: 'config' as const, key: `c-${f.field}`, ...f })),
+    ...section('h-actions', 'Actions', ACTIONS.map((a) => ({ kind: 'action' as const, key: `a-${a.action}`, ...a }))),
+    ...section('h-sources', 'Sources · shared with the web app', sources.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source }))),
+    ...section('h-display', 'Display · shared with the web app', [{ kind: 'preview', key: 'preview' }]),
+    ...section('h-local', `This computer · ${tildify(CONFIG_FILE)}`, CONFIG_FIELDS.map((f) => ({ kind: 'config' as const, key: `c-${f.field}`, ...f }))),
   ];
 }
 
+/** The first row that is not a section header (or the first header when every section is collapsed). */
 export function firstFocusable(rows: SettingsRow[]): number {
   return Math.max(0, rows.findIndex((r) => r.kind !== 'header'));
 }
 
-/** Move the focus by `delta`, skipping section headers. */
-export function moveFocus(rows: SettingsRow[], index: number, delta: 1 | -1): number {
-  for (let i = index + delta; i >= 0 && i < rows.length; i += delta) {
-    if (rows[i]!.kind !== 'header') return i;
-  }
-  return index;
+/** Move the focus by `delta` rows (headers included, so sections can be collapsed), staying in range. */
+export function moveFocus(rows: SettingsRow[], index: number, delta: number): number {
+  return Math.max(0, Math.min(rows.length - 1, index + delta));
+}
+
+/** Index of the header of the section `index` is in. */
+export function sectionHeaderIndex(rows: SettingsRow[], index: number): number {
+  for (let i = Math.min(index, rows.length - 1); i >= 0; i--) if (rows[i]!.kind === 'header') return i;
+  return 0;
+}
+
+/** Header key of the section that holds the row `key` (rows of collapsed sections included). */
+export function sectionOf(sources: SourceInfo[], key: string): string | undefined {
+  const rows = buildSettingsRows(sources);
+  const i = findRow(rows, key);
+  return i < 0 ? undefined : rows[sectionHeaderIndex(rows, i)]!.key;
 }
 
 export function findRow(rows: SettingsRow[], key: string): number {
@@ -168,11 +184,13 @@ export function parseConfigEdit(field: ConfigField, text: string): { patch: Part
 /** One-line key hint for the focused row. */
 export function rowHint(row: SettingsRow | undefined): string {
   switch (row?.kind) {
-    case 'action': return '↵ run';
+    case 'header': return row.collapsed ? '↵/→ expand' : '↵/← collapse';
+    case 'action': return row.action === 'webapp' ? '↵ show QR   o open in browser' : '↵ run';
     case 'source': return '↵ enable/disable   e label   d color   f fetch now   v show its updates';
     case 'preview': return '↵ cycle';
     case 'config':
       if (isToggleField(row.field)) return '↵ toggle';
+      if (row.field === 'webUrl') return '↵ edit   o open in browser   (save empty to reset to the default)';
       return isPickerField(row.field) ? '↵ choose' : '↵ edit   (save empty to reset to the default)';
     default: return '';
   }

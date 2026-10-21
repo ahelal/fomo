@@ -10,7 +10,7 @@ import { AUDIT_FILE, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConne
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
 import { AuditView } from './components/AuditView.js';
-import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, type SettingsRow } from './settings.js';
+import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
 import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
@@ -109,7 +109,28 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const [settingsFocusIndex, setSettingsFocusIndex] = useState(0);
   const [appSettings, setAppSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
   const [sources, setSources] = useState<SourceInfo[]>([]);
-  const settingsRows = useMemo(() => buildSettingsRows(sources), [sources]);
+  const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(() => new Set());
+  const settingsRows = useMemo(() => buildSettingsRows(sources, collapsedSections), [sources, collapsedSections]);
+
+  /** Collapse or expand a config section; the focus stays on its header. */
+  const setSectionCollapsed = useCallback((header: string, collapsed: boolean) => {
+    setCollapsedSections((prev) => {
+      if (prev.has(header) === collapsed) return prev;
+      const next = new Set(prev);
+      if (collapsed) next.add(header);
+      else next.delete(header);
+      return next;
+    });
+  }, []);
+
+  /** Focus a config row, expanding its section first. */
+  const focusSettingsRow = useCallback((key: string) => {
+    const section = sectionOf(sources, key);
+    const collapsed = new Set(collapsedSections);
+    if (section) collapsed.delete(section);
+    setCollapsedSections(collapsed);
+    setSettingsFocusIndex(Math.max(0, findRow(buildSettingsRows(sources, collapsed), key)));
+  }, [sources, collapsedSections]);
   /** Key of the config row being edited (source label or local setting). */
   const [editingKey, setEditingKey] = useState<string | undefined>();
   const [editBuffer, setEditBuffer] = useState('');
@@ -518,28 +539,71 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     }
   }, [service, refresh, showMessage, claimBusy, releaseBusy, audit]);
 
+  /** Ask for the Web app URL when it is missing; returns false then. */
+  const needWebUrl = useCallback((what: string): boolean => {
+    if (config.webUrl) return true;
+    focusSettingsRow('c-webUrl');
+    audit.error(what, 'Web app URL is not set');
+    showMessage('Set “Web app URL” first (deploy.sh prints it)', 6000);
+    return false;
+  }, [config.webUrl, focusSettingsRow, showMessage, audit]);
+
+  const qrCode = useCallback(async (url: string) => {
+    const { default: qrcode } = await import('qrcode-terminal');
+    return new Promise<string>((resolve) => qrcode.generate(url, { small: true }, resolve));
+  }, []);
+
+  /** Open `url` in the default browser. */
+  const openInBrowser = useCallback((url: string, what: string) => {
+    void import('open')
+      .then(({ default: open }) => open(url))
+      .then(() => audit.log(what, 'opened in the browser'))
+      .catch((err) => {
+        audit.error(what, `open in browser: ${errorText(err)}`);
+        showMessage('Could not open browser');
+      });
+  }, [audit, showMessage]);
+
+  /** Show the plain web app URL (no access token) as a QR code to open it on a phone. */
+  const doWebAppQr = useCallback(async () => {
+    if (!needWebUrl('web-app') || !config.webUrl) return;
+    try {
+      setLinkView({
+        action: 'web-app',
+        title: 'Web app',
+        intro: 'Scan the QR code to open the web app on your phone. A new device also needs “Link a device” once.',
+        url: config.webUrl,
+        qr: await qrCode(config.webUrl),
+      });
+      audit.log('web-app', 'showed the web app QR code');
+    } catch (err) {
+      audit.error('web-app', err);
+      showMessage(`Can’t show the QR code: ${errorText(err)}`, 6000);
+    }
+  }, [config.webUrl, needWebUrl, qrCode, showMessage, audit]);
+
   /** Create a magic link (account SAS in the URL fragment) for the web app and show it as a QR code. */
   const doLink = useCallback(async () => {
-    if (!config.webUrl) {
-      setSettingsFocusIndex(findRow(settingsRows, 'c-webUrl'));
-      audit.error('link-device', 'Web app URL is not set');
-      showMessage('Set “Web app URL” first (deploy.sh prints it), then link again', 6000);
-      return;
-    }
+    if (!needWebUrl('link-device') || !config.webUrl) return;
     try {
       const { createWebSas } = await import('@fomo/core/store/sas');
       const conn = createWebSas(config.connectionString ?? '', { days: config.linkDays ?? DEFAULT_LINK_DAYS });
       const url = buildConnectLink(config.webUrl, conn);
-      const { default: qrcode } = await import('qrcode-terminal');
-      const qr = await new Promise<string>((resolve) => qrcode.generate(url, { small: true }, resolve));
-      setLinkView({ url, expiresOn: conn.expiresOn, qr });
+      setLinkView({
+        action: 'link-device',
+        title: 'Link a device',
+        intro: 'Scan the QR code on your phone, or open the link on any device, to connect the web app.',
+        url,
+        note: `Valid until ${conn.expiresOn.toISOString().slice(0, 10)}. Anyone with this link can read and change your FOMO data.`,
+        qr: await qrCode(url),
+      });
       // Never record the link itself: it carries the access token.
       audit.log('link-device', `created a web app link valid until ${conn.expiresOn}`);
     } catch (err) {
       audit.error('link-device', err);
       showMessage(`Can’t create a link: ${errorText(err)}`, 6000);
     }
-  }, [config.webUrl, config.connectionString, config.linkDays, settingsRows, showMessage, audit]);
+  }, [config.webUrl, config.connectionString, config.linkDays, needWebUrl, qrCode, showMessage, audit]);
 
   const applySourceFilter = useCallback((ids: string[] | undefined, f: FilterStatus = filterRef.current) => {
     audit.log('filter', ids ? `sources: ${ids.map(sourceName).join(', ')}` : 'sources: all');
@@ -1006,16 +1070,10 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       if (key.escape || key.backspace || key.delete) {
         setLinkView(undefined);
       } else if (input === 'o') {
-        void import('open')
-          .then(({ default: open }) => open(linkView.url))
-          .then(() => audit.log('link-device', 'opened the link in the browser'))
-          .catch((err) => {
-            audit.error('link-device', `open in browser: ${errorText(err)}`);
-            showMessage('Could not open browser');
-          });
+        openInBrowser(linkView.url, linkView.action);
       } else if (input === 'y') {
         copyToClipboard(linkView.url);
-        audit.log('link-device', 'copied the link');
+        audit.log(linkView.action, 'copied the link');
         showMessage('✓ Link copied');
       }
       return;
@@ -1204,14 +1262,30 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         setConfirmKey(undefined);
         return;
       }
-      if (key.upArrow || input === 'k') { setSettingsFocusIndex((i) => moveFocus(settingsRows, i, -1)); setConfirmKey(undefined); return; }
-      if (key.downArrow || input === 'j') { setSettingsFocusIndex((i) => moveFocus(settingsRows, i, 1)); setConfirmKey(undefined); return; }
+      const page = Math.max(1, rows - STATUSBAR_H - FILTERBAR_H - 5);
+      const move = key.upArrow || input === 'k' ? -step : key.downArrow || input === 'j' ? step : key.pageUp ? -page : key.pageDown ? page : 0;
+      if (move) { setSettingsFocusIndex((i) => moveFocus(settingsRows, i, move)); setConfirmKey(undefined); return; }
       if (input === 'h') {
         setHelpContext('settings');
         setShowHelp(true);
         return;
       }
       if (!row) return;
+
+      if (row.kind === 'header') {
+        if (key.return || input === ' ') setSectionCollapsed(row.key, !row.collapsed);
+        else if (key.leftArrow) setSectionCollapsed(row.key, true);
+        else if (key.rightArrow) setSectionCollapsed(row.key, false);
+        setConfirmKey(undefined);
+        return;
+      }
+      if (key.leftArrow) {
+        const header = sectionHeaderIndex(settingsRows, settingsFocusIndex);
+        setSettingsFocusIndex(header);
+        setSectionCollapsed(settingsRows[header]!.key, true);
+        setConfirmKey(undefined);
+        return;
+      }
 
       if (row.kind === 'source') {
         const sourceId = row.source.id;
@@ -1247,6 +1321,10 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
 
       if (row.kind === 'config') {
+        if (row.field === 'webUrl' && input === 'o') {
+          if (needWebUrl('web-app') && config.webUrl) openInBrowser(config.webUrl, 'web-app');
+          return;
+        }
         if (!key.return && input !== 'e') return;
         if (isToggleField(row.field)) {
           const field = row.field;
@@ -1269,9 +1347,14 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         return;
       }
 
+      if (row.kind === 'action' && row.action === 'webapp' && input === 'o') {
+        if (needWebUrl('web-app') && config.webUrl) openInBrowser(config.webUrl, 'web-app');
+        return;
+      }
       if (row.kind === 'action' && key.return) {
         switch (row.action) {
           case 'link': void doLink(); break;
+          case 'webapp': void doWebAppQr(); break;
           case 'backup': void doBackup(); break;
           case 'restore': void openRestore(); break;
           case 'regroup':

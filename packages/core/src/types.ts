@@ -118,11 +118,23 @@ export interface FetchResponse {
   results: Record<SourceId, SourceFetchResult>;
 }
 
+/** Fetch history of one source, kept in storage across runs. */
+export interface SourceFetchStatus {
+  /** ISO 8601 time of the last fetch attempt. */
+  lastFetchAt?: string;
+  /** ISO 8601 time the newest update from this source was added. */
+  lastAddedAt?: string;
+  /** Error of the last fetch attempt; unset when it succeeded. */
+  lastError?: string;
+}
+
 export interface StatsResponse {
   total: number;
   byStatus: Record<Status, number>;
   bySource: Record<SourceId, number>;
   saved: number;
+  /** Fetch history per source. */
+  sourceStatus?: Record<SourceId, SourceFetchStatus>;
 }
 
 // ─── Digest (AI topic grouping) ──────────────────────────────────────────────

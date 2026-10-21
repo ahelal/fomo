@@ -2,6 +2,9 @@ import React, { act } from 'react';
 import { PassThrough } from 'node:stream';
 import { render } from 'ink';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const openMock = vi.hoisted(() => vi.fn(async (_url: string) => {}));
+vi.mock('open', () => ({ default: openMock }));
 import { DEFAULT_SETTINGS } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
@@ -250,5 +253,102 @@ describe('Config → Copilot account', () => {
     await press('\r');
     expect(frame()).not.toContain('👤 Copilot account');
     expect(onConfigChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('Config → web app', () => {
+  const webUrl = 'https://fomo.example.com/';
+
+  async function focusRow(press: (key: string) => Promise<void>, key: string) {
+    await press('c');
+    const rows = buildSettingsRows([]);
+    const target = findRow(rows, key);
+    for (let i = firstFocusable(rows); i < target; i = moveFocus(rows, i, 1)) await press('j');
+  }
+
+  beforeEach(() => openMock.mockClear());
+
+  it('shows the web app URL as a QR code and opens it with o', async () => {
+    const { press, frame } = await renderApp(undefined, { config: { webUrl } });
+    await focusRow(press, 'a-webapp');
+    expect(frame()).toContain('o open in browser');
+
+    await press('\r');
+    expect(frame()).toContain('📱 Web app');
+    expect(frame()).toContain(webUrl);
+
+    await press('o');
+    expect(openMock).toHaveBeenCalledWith(webUrl);
+    await press('\u001B');
+    expect(frame()).not.toContain('📱 Web app');
+  });
+
+  it('opens the browser with o on the action and the Web app URL rows', async () => {
+    const { press } = await renderApp(undefined, { config: { webUrl } });
+    await focusRow(press, 'a-webapp');
+    await press('O');
+    expect(openMock).toHaveBeenCalledWith(webUrl);
+    await press('\u001B');
+    await focusRow(press, 'c-webUrl');
+    await press('o');
+    expect(openMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks for the Web app URL when it is not set', async () => {
+    const { press, frame } = await renderApp();
+    await focusRow(press, 'a-webapp');
+    await press('\r');
+    expect(frame()).toContain('Set “Web app URL” first');
+    expect(openMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Config sections', () => {
+  it('collapses and expands a section from its header', async () => {
+    const { press, frame } = await renderApp();
+    await press('c');
+    expect(frame()).toContain('Link a device');
+    await press('k'); // first row → Actions header
+    expect(frame()).toContain('↵/← collapse');
+    await press('\r');
+    expect(frame()).toContain('▸ Actions (5)');
+    expect(frame()).not.toContain('Link a device');
+    await press('\u001B[C'); // →
+    expect(frame()).toContain('▾ Actions');
+    expect(frame()).toContain('Link a device');
+  });
+
+  it('← on a row folds its section and focuses the header', async () => {
+    const { press, frame } = await renderApp();
+    await press('c');
+    await press('j');
+    await press('\u001B[D'); // ←
+    expect(frame()).toContain('▸ Actions (5)');
+    expect(frame()).toContain('↵/→ expand');
+  });
+
+  it('expands a folded section to focus a row in it', async () => {
+    const { press, frame } = await renderApp();
+    await press('c');
+    const rows = buildSettingsRows([]);
+    for (let i = firstFocusable(rows); i < findRow(rows, 'h-local'); i = moveFocus(rows, i, 1)) await press('j');
+    await press('\r');
+    expect(frame()).toContain('▸ This computer');
+    const folded = buildSettingsRows([], new Set(['h-local']));
+    for (let i = findRow(folded, 'h-local'); i > findRow(folded, 'a-webapp'); i--) await press('k');
+    await press('\r');
+    expect(frame()).toContain('Set “Web app URL” first');
+    expect(frame()).toContain('▾ This computer');
+    expect(frame()).toMatch(/Web app URL\s+\(not set/);
+  });
+});
+
+describe('settings rows', () => {
+  it('leaves out the rows of collapsed sections', () => {
+    const rows = buildSettingsRows([], new Set(['h-local', 'h-actions']));
+    expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'h-display', 'preview', 'h-local']);
+    expect(rows[0]).toMatchObject({ collapsed: true, count: 5 });
+    expect(moveFocus(rows, 4, 10)).toBe(4);
+    expect(moveFocus(rows, 1, -10)).toBe(0);
   });
 });

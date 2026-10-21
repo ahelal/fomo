@@ -111,11 +111,15 @@ const REFERENCE_FORM_KEYS: [string, string][] = [
 const SETTINGS_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
-  ['↵',    'Run action / toggle source / edit setting'],
+  ['⇧↑/⇧↓', 'Jump 5 rows (10 on a tall screen)'],
+  ['PgUp/Dn', 'Scroll a page'],
+  ['↵',    'Run action / toggle source / edit setting / fold section'],
+  ['←/→',  'Collapse / expand a section'],
   ['e',    'Edit source label or setting'],
   ['d',    'Cycle source color'],
   ['f',    'Fetch this source now'],
   ['v',    'Show only this source’s updates'],
+  ['o',    'Open the web app in the browser (web app rows)'],
   ['Esc/⌫','Cancel / close config'],
   ['h',    'Show this help'],
 ];
