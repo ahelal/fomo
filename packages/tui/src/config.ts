@@ -11,6 +11,18 @@ export const LOG_FILE = join(CONFIG_DIR, 'fomo.log');
 export const AUDIT_FILE = join(CONFIG_DIR, 'audit.log');
 export const DEFAULT_LINK_DAYS = 365;
 export const DEFAULT_DIGEST_MAX_ITEMS = 300;
+export const DEFAULT_AUTO_FETCH_MINUTES = 15;
+export const MIN_AUTO_FETCH_MINUTES = 5;
+export const MAX_AUTO_FETCH_MINUTES = 1440;
+
+export const isAutoFetchMinutes = (n: number): boolean =>
+  Number.isInteger(n) && n >= MIN_AUTO_FETCH_MINUTES && n <= MAX_AUTO_FETCH_MINUTES;
+
+/** Minutes between automatic fetches, or undefined when auto-fetch is off. */
+export function autoFetchInterval(config: LocalConfig): number | undefined {
+  if (config.autoFetch === false) return undefined;
+  return config.autoFetchMinutes ?? DEFAULT_AUTO_FETCH_MINUTES;
+}
 
 /** Local, per-machine settings stored in ~/.fomo/config.json (edited from the config screen). */
 export interface LocalConfig {
@@ -27,8 +39,10 @@ export interface LocalConfig {
   groupingHints?: string;
   /** Group new updates with Copilot after each fetch. Default true. */
   autoDigest?: boolean;
-  /** Fetch automatically every 15 minutes while the TUI is open. Default true. */
+  /** Fetch automatically while the TUI is open; false turns it off. Default true. */
   autoFetch?: boolean;
+  /** Minutes between automatic fetches (5–1440). Default 15. */
+  autoFetchMinutes?: number;
   /** Most updates one digest run sends to Copilot; the rest wait for the next run. Default 300. */
   digestMaxItems?: number;
   /** Magic link validity in days. Default 365. */
@@ -67,6 +81,7 @@ export function readConfigFile(): LocalConfig {
   for (const key of ['linkDays', 'digestMaxItems'] as const) {
     if (typeof raw[key] === 'number' && (raw[key] as number) > 0) out[key] = raw[key] as number;
   }
+  if (typeof raw.autoFetchMinutes === 'number' && isAutoFetchMinutes(raw.autoFetchMinutes)) out.autoFetchMinutes = raw.autoFetchMinutes;
   return out;
 }
 

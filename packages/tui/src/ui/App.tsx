@@ -6,7 +6,7 @@ import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSet
 import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, jumpStep, nextRowKey, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
-import { AUDIT_FILE, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
+import { AUDIT_FILE, autoFetchInterval, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
 import { AuditView } from './components/AuditView.js';
@@ -456,7 +456,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     }
   }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy, audit, logDigest]);
 
-  const autoFetchEnabled = config.autoFetch !== false;
   const nextAutoFetchAt = useAutoFetch(() => {
     if (busyRef.current) {
       return;
@@ -465,7 +464,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       audit.error('auto-fetch', err);
       showMessage(`Auto-fetch error: ${errorText(err)}`, 8000);
     });
-  }, autoFetchEnabled);
+  }, autoFetchInterval(config));
   const fetchInfo = useMemo(() => {
     const hhmm = (t: number) => new Date(t).toTimeString().slice(0, 5);
     const last = lastFetchAt ? `fetched ${hhmm(lastFetchAt)}` : '';

@@ -1,25 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 
-export const AUTO_FETCH_INTERVAL_MS = 15 * 60 * 1000;
-
-/** Calls `fetch` every 15 minutes while `enabled`; returns when the next run is due (epoch ms). */
-export function useAutoFetch(fetch: () => void, enabled = true): number | undefined {
+/** Calls `fetch` every `minutes` (none when undefined); returns when the next run is due (epoch ms). */
+export function useAutoFetch(fetch: () => void, minutes: number | undefined): number | undefined {
   const fetchRef = useRef(fetch);
   useEffect(() => { fetchRef.current = fetch; }, [fetch]);
   const [nextAt, setNextAt] = useState<number | undefined>();
 
   useEffect(() => {
-    if (!enabled) {
+    if (!minutes) {
       setNextAt(undefined);
       return;
     }
-    setNextAt(Date.now() + AUTO_FETCH_INTERVAL_MS);
+    const intervalMs = minutes * 60_000;
+    setNextAt(Date.now() + intervalMs);
     const timer = setInterval(() => {
-      setNextAt(Date.now() + AUTO_FETCH_INTERVAL_MS);
+      setNextAt(Date.now() + intervalMs);
       fetchRef.current();
-    }, AUTO_FETCH_INTERVAL_MS);
+    }, intervalMs);
     return () => clearInterval(timer);
-  }, [enabled]);
+  }, [minutes]);
 
   return nextAt;
 }

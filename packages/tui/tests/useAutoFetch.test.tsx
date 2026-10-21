@@ -2,10 +2,10 @@ import React, { act } from 'react';
 import { PassThrough } from 'node:stream';
 import { render } from 'ink';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AUTO_FETCH_INTERVAL_MS, useAutoFetch } from '../src/ui/hooks/useAutoFetch.js';
+import { useAutoFetch } from '../src/ui/hooks/useAutoFetch.js';
 
 function Harness({ fetch }: { fetch: () => void }) {
-  useAutoFetch(fetch);
+  useAutoFetch(fetch, 15);
   return null;
 }
 
@@ -33,7 +33,6 @@ describe('automatic fetch timer', () => {
       });
     });
     try {
-      expect(AUTO_FETCH_INTERVAL_MS).toBe(900_000);
       expect(first).not.toHaveBeenCalled();
       await act(async () => { vi.advanceTimersByTime(899_999); });
       expect(first).not.toHaveBeenCalled();
@@ -65,7 +64,7 @@ describe('automatic fetch timer', () => {
     const fetch = vi.fn();
     const seen: (number | undefined)[] = [];
     function Probe({ enabled }: { enabled: boolean }) {
-      seen.push(useAutoFetch(fetch, enabled));
+      seen.push(useAutoFetch(fetch, enabled ? 15 : undefined));
       return null;
     }
     const stdout = new PassThrough();
@@ -90,6 +89,37 @@ describe('automatic fetch timer', () => {
       await act(async () => { vi.advanceTimersByTime(3 * 900_000); });
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(seen.at(-1)).toBeUndefined();
+    } finally {
+      instance.unmount();
+      instance.cleanup();
+      stdout.destroy();
+      stdin.destroy();
+      stderr.destroy();
+    }
+  });
+
+  it('uses the configured number of minutes', async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn();
+    function Probe({ minutes }: { minutes: number }) {
+      useAutoFetch(fetch, minutes);
+      return null;
+    }
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    const stderr = new PassThrough();
+    let instance!: ReturnType<typeof render>;
+    await act(async () => {
+      instance = render(<Probe minutes={5} />, { stdout, stdin, stderr, debug: true, exitOnCtrlC: false, patchConsole: false });
+    });
+    try {
+      await act(async () => { vi.advanceTimersByTime(300_000); });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await act(async () => { instance.rerender(<Probe minutes={60} />); });
+      await act(async () => { vi.advanceTimersByTime(3_599_999); });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(fetch).toHaveBeenCalledTimes(2);
     } finally {
       instance.unmount();
       instance.cleanup();

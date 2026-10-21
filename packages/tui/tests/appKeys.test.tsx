@@ -12,7 +12,7 @@ import { App, REGROUP_CONFIRM_MS } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
 import type { LocalConfig } from '../src/config.js';
 import type { GhAccount } from '../src/ghAccounts.js';
-import { buildSettingsRows, findRow, firstFocusable, moveFocus } from '../src/ui/settings.js';
+import { buildSettingsRows, configDisplay, findRow, firstFocusable, moveFocus, parseConfigEdit } from '../src/ui/settings.js';
 
 /** The built-in sources the config screen lists with the default settings. */
 const SOURCES = sourceInfos(DEFAULT_SETTINGS);
@@ -503,6 +503,23 @@ describe('Config → web app', () => {
     await press('\r');
     expect(frame()).toContain('Set “Web app URL” first');
     expect(openMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Config → auto-fetch', () => {
+  it('takes whole minutes from 5 to 1440, off, or empty for the default', () => {
+    expect(parseConfigEdit('autoFetch', '30')).toEqual({ patch: { autoFetch: undefined, autoFetchMinutes: 30 } });
+    expect(parseConfigEdit('autoFetch', '5')).toEqual({ patch: { autoFetch: undefined, autoFetchMinutes: 5 } });
+    expect(parseConfigEdit('autoFetch', '1440')).toEqual({ patch: { autoFetch: undefined, autoFetchMinutes: 1440 } });
+    expect(parseConfigEdit('autoFetch', 'off')).toEqual({ patch: { autoFetch: false } });
+    expect(parseConfigEdit('autoFetch', '')).toEqual({ patch: { autoFetch: undefined, autoFetchMinutes: undefined } });
+    for (const bad of ['4', '1441', '7.5', 'soon', '-10']) expect(parseConfigEdit('autoFetch', bad)).toHaveProperty('error');
+  });
+
+  it('shows the interval or off', () => {
+    expect(configDisplay({}, 'autoFetch', {}).value).toBe('every 15 minutes while open (default)');
+    expect(configDisplay({ autoFetchMinutes: 60 }, 'autoFetch', {}).value).toBe('every 60 minutes while open');
+    expect(configDisplay({ autoFetch: false, autoFetchMinutes: 60 }, 'autoFetch', {}).value).toMatch(/^off/);
   });
 });
 

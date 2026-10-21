@@ -1,12 +1,17 @@
 import type { SourceInfo } from '@fomo/core';
 import { copilotTokenEnv, DEFAULT_COPILOT_MODEL } from '../copilot.js';
 import {
+  autoFetchInterval,
   CONFIG_FILE,
   connectionStringProblem,
+  DEFAULT_AUTO_FETCH_MINUTES,
   DEFAULT_BACKUP_DIR,
   DEFAULT_DIGEST_MAX_ITEMS,
   DEFAULT_LINK_DAYS,
   envSource,
+  isAutoFetchMinutes,
+  MAX_AUTO_FETCH_MINUTES,
+  MIN_AUTO_FETCH_MINUTES,
   maskConnectionString,
   readConfigFile,
   tildify,
@@ -41,7 +46,7 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
   { field: 'copilotAccount', label: 'Copilot account' },
   { field: 'interests', label: 'Interests' },
   { field: 'groupingHints', label: 'Grouping hints' },
-  { field: 'autoFetch', label: 'Auto-fetch (15 min)' },
+  { field: 'autoFetch', label: 'Auto-fetch (minutes)' },
   { field: 'autoDigest', label: 'Group after fetch' },
   { field: 'digestMaxItems', label: 'Max items per run' },
   { field: 'linkDays', label: 'Link valid (days)' },
@@ -145,7 +150,12 @@ export function configDisplay(
     case 'groupingHints':
       return config.groupingHints ? { value: config.groupingHints, muted: false, env } : muted('(none — e.g. one topic per Copilot surface)');
     case 'autoFetch':
-      return { value: config.autoFetch === false ? '[ ] off' : '[x] on — every 15 minutes while open', muted: false };
+    case 'autoFetchMinutes': {
+      const minutes = autoFetchInterval(config);
+      if (minutes === undefined) return muted('off — fetch only with f');
+      const value = `every ${minutes} minute${minutes === 1 ? '' : 's'} while open`;
+      return config.autoFetchMinutes ? { value, muted: false } : muted(`${value} (default)`);
+    }
     case 'autoDigest':
       return { value: config.autoDigest === false ? 'off — fetch only' : 'on', muted: false };
     case 'digestMaxItems':
@@ -158,7 +168,7 @@ export function configDisplay(
 }
 
 /** On/off settings toggled with ↵ instead of edited as text. */
-export const TOGGLE_FIELDS = ['autoFetch', 'autoDigest'] as const;
+export const TOGGLE_FIELDS = ['autoDigest'] as const;
 export type ToggleField = (typeof TOGGLE_FIELDS)[number];
 export const isToggleField = (field: ConfigField): field is ToggleField =>
   (TOGGLE_FIELDS as readonly ConfigField[]).includes(field);
@@ -182,6 +192,10 @@ export const ADD_SOURCE_PROMPTS: Record<AddSourceStep, string> = {
 
 export function editStartValue(field: ConfigField): string {
   if (field === 'connectionString' || isToggleField(field)) return '';
+  if (field === 'autoFetch') {
+    const file = readConfigFile();
+    return file.autoFetch === false ? 'off' : file.autoFetchMinutes ? String(file.autoFetchMinutes) : '';
+  }
   const value = readConfigFile()[field];
   if (value === undefined) return '';
   return field === 'backupDir' ? tildify(String(value)) : String(value);
@@ -190,6 +204,15 @@ export function editStartValue(field: ConfigField): string {
 /** Turn edited text into a config patch. An empty value restores the default. */
 export function parseConfigEdit(field: ConfigField, text: string): { patch: Partial<LocalConfig> } | { error: string } {
   const value = text.trim();
+  if (field === 'autoFetch' || field === 'autoFetchMinutes') {
+    if (!value) return { patch: { autoFetch: undefined, autoFetchMinutes: undefined } };
+    if (/^(off|no|0)$/i.test(value)) return { patch: { autoFetch: false } };
+    const n = Number(value);
+    if (!isAutoFetchMinutes(n)) {
+      return { error: `Auto-fetch takes whole minutes from ${MIN_AUTO_FETCH_MINUTES} to ${MAX_AUTO_FETCH_MINUTES}, or off` };
+    }
+    return { patch: { autoFetch: undefined, autoFetchMinutes: n === DEFAULT_AUTO_FETCH_MINUTES ? undefined : n } };
+  }
   if (!value) {
     if (field === 'connectionString') return { error: 'Connection string can’t be empty' };
     return { patch: { [field]: undefined } };
@@ -211,7 +234,6 @@ export function parseConfigEdit(field: ConfigField, text: string): { patch: Part
       return problem ? { error: problem } : { patch: { connectionString: value } };
     }
     case 'autoDigest':
-    case 'autoFetch':
       return { error: 'Press ↵ to toggle' };
     default:
       return { patch: { [field]: value } };
@@ -244,6 +266,7 @@ export function rowHint(row: SettingsRow | undefined): string {
     case 'preview': return '↵ cycle';
     case 'config':
       if (isToggleField(row.field)) return '↵ toggle';
+      if (row.field === 'autoFetch') return `↵ edit   minutes ${MIN_AUTO_FETCH_MINUTES}–${MAX_AUTO_FETCH_MINUTES} or off   (save empty for every ${DEFAULT_AUTO_FETCH_MINUTES} minutes)`;
       if (row.field === 'webUrl') return '↵ edit   o open in browser   (save empty to reset to the default)';
       return isPickerField(row.field) ? '↵ choose' : '↵ edit   (save empty to reset to the default)';
     default: return '';
