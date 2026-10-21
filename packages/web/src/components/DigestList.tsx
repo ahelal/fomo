@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { soloUpdate, type DigestRow, type Update } from '@fomo/core';
 import { usePullToRefresh } from '../hooks/usePullToRefresh.js';
+import { DupBadge } from './UpdatesTable.js';
 
 interface Props {
   rows: DigestRow[];
@@ -50,6 +51,7 @@ export function DigestList({
       {u.status === 'unread'
         ? <span className="digest-row__unread" title="Unread">● </span>
         : <span className="digest-row__isread" title="Read; press r to mark unread">○ </span>}
+      {u.duplicateOf && <DupBadge of={u.duplicateOf} />}
     </>
   );
   const readButton = (row: DigestRow) => {

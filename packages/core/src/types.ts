@@ -30,6 +30,8 @@ export interface Update {
   summary?: string;
   /** Copilot summary of the full post, written on request in the TUI (`g`) and kept. */
   gist?: PostGist;
+  /** Id of the earlier update this one repeats (same page or same title), set at fetch. */
+  duplicateOf?: string;
 }
 
 /** The gist of one post: what the feature or change is, plus its key facts. */
@@ -171,6 +173,8 @@ export interface FetchRequest {
 export interface SourceFetchResult {
   fetched: number;
   added: number;
+  /** Items skipped because the same page is already stored (under another URL or source). */
+  duplicates?: number;
   error?: string;
 }
 

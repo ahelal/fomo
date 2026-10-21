@@ -422,10 +422,12 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       setLastFetch((prev) => ({ ...prev, ...resp.results }));
       const failedResults = Object.entries(resp.results).filter(([, r]) => r.error);
       const failed = failedResults.map(([id]) => sourceName(id));
-      audit.log(action, `${what}: added ${resp.added} from ${Object.keys(resp.results).length} source(s)${failed.length ? `, ${failed.length} failed` : ''}`);
+      const dupCount = Object.values(resp.results).reduce((n, r) => n + (r.duplicates ?? 0), 0);
+      const dupNote = dupCount ? ` · ${dupCount} duplicate${dupCount !== 1 ? 's' : ''} skipped` : '';
+      audit.log(action, `${what}: added ${resp.added} from ${Object.keys(resp.results).length} source(s)${dupNote}${failed.length ? `, ${failed.length} failed` : ''}`);
       for (const [id, r] of failedResults) audit.error(action, `${sourceName(id)}: ${r.error}`);
       const failedNote = failed.length ? ` · ⚠ ${failed.join(', ')} failed` : '';
-      const added = `✓ ${auto ? 'Auto-fetch: added' : 'Added'} ${resp.added} update${resp.added !== 1 ? 's' : ''}${failedNote}`;
+      const added = `✓ ${auto ? 'Auto-fetch: added' : 'Added'} ${resp.added} update${resp.added !== 1 ? 's' : ''}${dupNote}${failedNote}`;
       if (!digest || config.autoDigest === false) {
         showMessage(added, failed.length ? 6000 : 3000);
         await refresh();

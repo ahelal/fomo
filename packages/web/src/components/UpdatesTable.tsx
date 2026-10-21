@@ -2,6 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { Update } from '@fomo/core';
 import { usePullToRefresh } from '../hooks/usePullToRefresh.js';
 
+/** Marks an update that repeats an earlier one, naming the source of the original. */
+export function DupBadge({ of }: { of: string }) {
+  const source = of.slice(0, of.indexOf('__'));
+  return <span className="dup-badge" title={`Duplicate of an earlier update from ${source}`}>dup</span>;
+}
+
 const STATUS_ICON: Record<string, { icon: string; cls: string }> = {
   unread: { icon: '●', cls: 'unread' },
   read:   { icon: '○', cls: 'read' },
@@ -110,7 +116,7 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
               <span className={`update-row__status-dot update-row__status-dot--${STATUS_ICON[u.status]?.cls ?? u.status}`}>
                 {u.saved ? '⭐' : ''}{STATUS_ICON[u.status]?.icon ?? u.status}
               </span>
-              <span className="update-row__title">{u.title}</span>
+              <span className="update-row__title">{u.duplicateOf && <DupBadge of={u.duplicateOf} />}{u.title}</span>
             </div>
             {isSwiped && (
               <div className="update-row__actions" onClick={(e) => e.stopPropagation()}>

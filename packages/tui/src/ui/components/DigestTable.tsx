@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Box, Text } from 'ink';
 import { soloUpdate, type DigestEntry, type DigestRow } from '@fomo/core';
-import { DEFAULT_SOURCE_COLOR, updateLook } from './UpdatesTable.js';
+import { DEFAULT_SOURCE_COLOR, DUP_BADGE, DUP_COLOR, updateLook } from './UpdatesTable.js';
 
 interface Props {
   rows: DigestRow[];
@@ -147,7 +147,8 @@ export function DigestTable({
                 <Text color={color(u.source)} bold={look.unread} backgroundColor={bg}>{label(u.source).padEnd(SOURCE_W)}</Text>
                 <Text color={look.textColor} bold={look.unread} backgroundColor={bg}>{u.datePublished.slice(0, 10).padEnd(DATE_W)}</Text>
                 <Text color={look.statusColor} backgroundColor={bg}>{look.status.padEnd(COUNT_W)}</Text>
-                <Text color={look.textColor} bold={look.unread} backgroundColor={bg} wrap="truncate">{clip(u.title, titleW)}</Text>
+                {u.duplicateOf && <Text color={DUP_COLOR} backgroundColor={bg}>{DUP_BADGE}</Text>}
+                <Text color={look.textColor} bold={look.unread} backgroundColor={bg} wrap="truncate">{clip(u.title, u.duplicateOf ? titleW - DUP_BADGE.length : titleW)}</Text>
               </Box>
               {u.summary && (
                 <Box paddingX={1}>
@@ -191,8 +192,9 @@ export function DigestTable({
               <Text color={textColor} bold={unread} backgroundColor={bg}>{entry.latestDate.slice(0, 10).padEnd(DATE_W)}</Text>
               <Text color={countColor} bold={!soloLook && unread} backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
               {importance === 'high' && <Text color={unread ? '#f0883e' : READ_COLOR} bold={unread} backgroundColor={bg}>{'▲ '}</Text>}
+              {solo?.duplicateOf && <Text color={DUP_COLOR} backgroundColor={bg}>{DUP_BADGE}</Text>}
               <Text color={titleColor} bold={unread && titleColor !== READ_COLOR} backgroundColor={bg} wrap="truncate">
-                {clip(title, importance === 'high' ? titleW - 2 : titleW)}
+                {clip(title, titleW - (importance === 'high' ? 2 : 0) - (solo?.duplicateOf ? DUP_BADGE.length : 0))}
               </Text>
             </Box>
             {summary && (

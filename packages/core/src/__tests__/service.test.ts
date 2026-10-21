@@ -14,6 +14,8 @@ vi.mock('../store/tables.js', () => {
     setSaved: vi.fn(),
     updateContent: vi.fn(),
     insertUpdate: vi.fn().mockResolvedValue(true),
+    listDuplicateRows: vi.fn().mockResolvedValue([]),
+    setDuplicateOf: vi.fn().mockResolvedValue(undefined),
     getStats: vi.fn().mockResolvedValue({
       total: 0,
       byStatus: { unread: 0, read: 0 },
@@ -139,6 +141,36 @@ describe('FomoDirectService', () => {
   it('fetch with specific sources filters to those sources', async () => {
     const result = await svc.fetch({ sources: ['mock-source'] });
     expect(result.added).toBe(1);
+  });
+
+  it('fetch skips a page already stored under another source and fixes stored duplicates', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    __mockStore.listDuplicateRows.mockResolvedValueOnce([
+      { id: 'azure__a', url: 'https://www.example.com/item/', title: 'Test Item', datePublished: '2025-01-01', dateAdded: '2025-01-01' },
+      { id: 'other__b', url: 'https://example.com/item?utm_source=x', title: 'Test Item', datePublished: '2025-01-01', dateAdded: '2025-02-01' },
+    ]);
+
+    const result = await svc.fetch();
+
+    expect(result.results['mock-source']).toEqual({ fetched: 1, added: 0, duplicates: 1 });
+    expect(__mockStore.insertUpdate).not.toHaveBeenCalled();
+    expect(__mockStore.setDuplicateOf).toHaveBeenCalledWith('other__b', 'azure__a');
+  });
+
+  it('fetch flags a new update whose title repeats a recent one', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const { __mockSource } = await import('../scraper/registry.js') as any;
+    __mockStore.listDuplicateRows.mockResolvedValueOnce([
+      { id: 'azure__a', url: 'https://example.com/old', title: 'Generally available: the new thing', datePublished: '2025-01-01', dateAdded: '2025-01-01' },
+    ]);
+    __mockSource.fetch.mockResolvedValueOnce([
+      { title: 'Generally Available — the NEW thing', url: 'https://example.com/new', datePublished: new Date('2025-01-10') },
+    ]);
+
+    const result = await svc.fetch();
+
+    expect(result.results['mock-source'].added).toBe(1);
+    expect(__mockStore.insertUpdate).toHaveBeenCalledWith(expect.objectContaining({ duplicateOf: 'azure__a' }));
   });
 
   it('returns per-source fetch failures instead of treating them as empty results', async () => {

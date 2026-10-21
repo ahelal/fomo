@@ -328,6 +328,15 @@ body {
   color: var(--text);
 }
 .update-row__source { color: var(--cyan); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dup-badge {
+  color: #d29922;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
 .update-row__date { color: var(--text-dim); font-size: 12px; }
 
 /* ─── Digest list ────────────────────────────────────────────────────────────── */

@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { Update } from '@fomo/core';
 import { textWidth } from '../text.js';
+import { DUP_COLOR } from './UpdatesTable.js';
 
 interface Props {
   update: Update;
@@ -99,6 +100,12 @@ export function DetailPane({ update, loading = false, summarizing = false, heigh
           <Text color={sourceColor} bold>{update.source}</Text>
           {'   Published '}
           <Text color="#c9d1d9">{update.datePublished.slice(0, 10)}</Text>
+          {update.duplicateOf && (
+            <>
+              {'   '}
+              <Text color={DUP_COLOR} bold>{`duplicate of ${update.duplicateOf.slice(0, update.duplicateOf.indexOf('__'))}`}</Text>
+            </>
+          )}
         </Text>
       </Box>
 

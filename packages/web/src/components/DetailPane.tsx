@@ -44,6 +44,12 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading,
           <span>Status</span>
           <span className="detail-pane__meta-val">{update.status}{update.saved ? ' ⭐' : ''}</span>
         </div>
+        {update.duplicateOf && (
+          <div className="detail-pane__meta-row">
+            <span>Duplicate</span>
+            <span className="detail-pane__meta-val dup-badge">of {update.duplicateOf.slice(0, update.duplicateOf.indexOf('__'))}</span>
+          </div>
+        )}
       </div>
 
       <a

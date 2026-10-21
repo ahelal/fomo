@@ -20,6 +20,7 @@ import type {
   ListTodosResponse,
 } from '../types.js';
 import { DEFAULT_SETTINGS } from '../types.js';
+import type { DuplicateRow } from '../duplicates.js';
 
 const TABLE_NAME = 'updates';
 const SETTINGS_TABLE = 'settings';
@@ -43,9 +44,11 @@ type UpdateEntity = TableEntity<{
   summary?: string;
   /** `PostGist` as JSON. */
   gist?: string;
+  /** Id of the update this one repeats; `''` or unset when it is not a duplicate. */
+  duplicateOf?: string;
 }>;
 
-const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'topicId', 'summary', 'gist'];
+const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'topicId', 'summary', 'gist', 'duplicateOf'];
 
 /**
  * Table Storage caps a string property at 64 KiB of UTF-16 (32,768 code units) and rejects the
@@ -113,6 +116,7 @@ function entityToUpdate(e: UpdateEntity): Update {
     ...(e.topicId ? { topicId: e.topicId } : {}),
     ...(e.summary ? { summary: e.summary } : {}),
     ...(gist ? { gist } : {}),
+    ...(e.duplicateOf ? { duplicateOf: e.duplicateOf } : {}),
   };
 }
 
@@ -132,6 +136,7 @@ export interface BackupEntity {
   topicId?: string;
   summary?: string;
   gist?: string;
+  duplicateOf?: string;
 }
 
 export interface BackupPayload {
@@ -184,6 +189,7 @@ export class UpdateStore {
         status: 'unread',
         saved: false,
         content,
+        ...(update.duplicateOf ? { duplicateOf: update.duplicateOf } : {}),
       });
       return true;
     } catch (err: unknown) {
@@ -315,6 +321,31 @@ export class UpdateStore {
   async setGist(id: string, gist: PostGist): Promise<void> {
     const { source, rowKey } = parseId(id);
     await this.client.updateEntity({ partitionKey: source, rowKey, gist: JSON.stringify(gist) }, 'Merge');
+  }
+
+  /** Mark an update as repeating `duplicateOf` (`''` clears it). */
+  async setDuplicateOf(id: string, duplicateOf: string): Promise<void> {
+    const { source, rowKey } = parseId(id);
+    await this.client.updateEntity({ partitionKey: source, rowKey, duplicateOf }, 'Merge');
+  }
+
+  /** Every update with just what duplicate detection needs. */
+  async listDuplicateRows(): Promise<DuplicateRow[]> {
+    const iter = this.client.listEntities<UpdateEntity>({
+      queryOptions: { select: ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'duplicateOf'] },
+    });
+    const rows: DuplicateRow[] = [];
+    for await (const e of iter) {
+      rows.push({
+        id: `${e.partitionKey}__${e.rowKey}`,
+        url: e.url ?? '',
+        title: e.title ?? '',
+        datePublished: e.datePublished ?? '',
+        dateAdded: e.dateAdded ?? '',
+        ...(e.duplicateOf ? { duplicateOf: e.duplicateOf } : {}),
+      });
+    }
+    return rows;
   }
 
   async getUpdate(id: string): Promise<Update | null> {
@@ -453,6 +484,7 @@ export class UpdateStore {
         ...(e.topicId ? { topicId: e.topicId } : {}),
         ...(e.summary ? { summary: e.summary } : {}),
         ...(e.gist ? { gist: e.gist } : {}),
+        ...(e.duplicateOf ? { duplicateOf: e.duplicateOf } : {}),
       });
     }
 
@@ -487,6 +519,7 @@ export class UpdateStore {
           ...(e.topicId ? { topicId: e.topicId } : {}),
           ...(e.summary ? { summary: e.summary } : {}),
           ...(e.gist ? { gist: e.gist } : {}),
+          ...(e.duplicateOf ? { duplicateOf: e.duplicateOf } : {}),
         },
         'Replace',
       );

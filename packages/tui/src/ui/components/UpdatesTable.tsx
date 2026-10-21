@@ -7,6 +7,10 @@ const STATUS_ICON: Record<string, { icon: string; color: string }> = {
   read:   { icon: '○', color: '#8b949e' },
 };
 
+/** Marks an update that repeats an earlier one (`duplicateOf`). */
+export const DUP_BADGE = 'dup ';
+export const DUP_COLOR = '#d29922';
+
 export const DEFAULT_SOURCE_COLOR: Record<string, string> = {
   github:                 '#58a6ff', // blue
   'github-blog':          '#7ee787', // mint
@@ -104,8 +108,9 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
         const sourceColor = sourceColors[update.source] ?? DEFAULT_SOURCE_COLOR[update.source] ?? '#58a6ff';
         const dateStr = update.datePublished.slice(0, 10);
         const source = (sourceLabels[update.source] ?? update.source).slice(0, 11).padEnd(sourceW);
-        const titleRaw = update.title.length > titleW
-          ? `${update.title.slice(0, titleW - 1)}…`
+        const rowTitleW = update.duplicateOf ? titleW - DUP_BADGE.length : titleW;
+        const titleRaw = update.title.length > rowTitleW
+          ? `${update.title.slice(0, rowTitleW - 1)}…`
           : update.title;
 
         return (
@@ -126,6 +131,9 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
               <Text color={sourceColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{source}</Text>
               <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{dateStr.padEnd(dateW)}</Text>
               <Text color={statusColor} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{statusLabel.padEnd(statusW)}</Text>
+              {update.duplicateOf && (
+                <Text color={DUP_COLOR} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{DUP_BADGE}</Text>
+              )}
               <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined} wrap="truncate">{titleRaw}</Text>
             </Box>
           </React.Fragment>

@@ -1,4 +1,7 @@
 import type { BackupPayload } from './store/tables.js';
+import { makeId } from './store/tables.js';
+import { DuplicateIndex } from './duplicates.js';
+import { mapLimit } from './util.js';
 import { getAllSources, getSource, getSourceIds } from './scraper/registry.js';
 import { FomoStorageService } from './storage-service.js';
 import { runDigest, type Summarizer, type DigestOptions, type DigestResult } from './digest/run.js';
@@ -144,6 +147,16 @@ export class FomoDirectService extends FomoStorageService {
     let totalAdded = 0;
     const results: Record<string, SourceFetchResult> = {};
 
+    // Every stored update, so a page already stored (under another URL or source) is not added again.
+    const dups = new DuplicateIndex(await this.store.listDuplicateRows());
+    await mapLimit(dups.corrections(), 8, async ({ id, duplicateOf }) => {
+      try {
+        await this.store.setDuplicateOf(id, duplicateOf);
+      } catch {
+        // best-effort — retried on the next fetch
+      }
+    });
+
     await Promise.all(
       sources.map(async (source) => {
         const result: SourceFetchResult = { fetched: 0, added: 0 };
@@ -153,12 +166,19 @@ export class FomoDirectService extends FomoStorageService {
           result.fetched = items.length;
 
           for (const item of items) {
+            const datePublished = item.datePublished.toISOString();
+            const check = dups.check(await makeId(source.id, item.url), item.url, item.title, datePublished);
+            if (check.kind === 'skip') {
+              result.duplicates = (result.duplicates ?? 0) + 1;
+              continue;
+            }
             const inserted = await this.store.insertUpdate({
               source: source.id,
               title: item.title,
               url: item.url,
-              datePublished: item.datePublished.toISOString(),
+              datePublished,
               content: item.content ?? '',
+              ...(check.kind === 'new' && check.duplicateOf ? { duplicateOf: check.duplicateOf } : {}),
             });
             if (inserted) result.added++;
           }
