@@ -12,6 +12,10 @@ interface Props {
   /** Result of the last fetch per source in this session. */
   lastFetch: Record<string, SourceFetchResult>;
   focusIndex: number;
+  /** `/` filter of the rows. */
+  search?: string;
+  /** The filter is being typed. */
+  searchTyping?: boolean;
   /** Text being typed into the focused row, when editing. */
   editBuffer?: string;
   /** Key of the action row waiting for a second ↵. */
@@ -71,6 +75,8 @@ export const SettingsPane = React.memo(function SettingsPane({
   stats,
   lastFetch,
   focusIndex,
+  search = '',
+  searchTyping = false,
   editBuffer,
   confirmKey,
   height,
@@ -210,14 +216,18 @@ export const SettingsPane = React.memo(function SettingsPane({
     );
   };
 
-  const footer = editing
+  const footer = searchTyping
+    ? `/${search}▏   ↵ keep   ↑↓ move   Esc clear`
+    : editing
     ? `type ${focused?.kind === 'source' ? 'a label' : 'a value'}   ↵ save   Esc cancel   (empty resets to the default)`
-    : `${rowHint(focused)}${rowHint(focused) ? '   ' : ''}Esc close   h help`;
+    : `${rowHint(focused)}${rowHint(focused) ? '   ' : ''}/ search   ${search ? 'Esc clear search' : 'Esc close'}   h help`;
 
   return (
     <Box flexDirection="column" height={height} width={columns}>
       <Box paddingX={2} paddingTop={1}>
         <Text color="#f0f6fc" bold>{'⚙️  Config'}</Text>
+        {search && !searchTyping && <Text color="#e3b341">{`   / ${search}`}</Text>}
+        {search && rows.length === 0 && <Text color="#8b949e">{'   no matches'}</Text>}
         {rows.length > listH && (
           <Text color="#8b949e">
             {`   ${start > 0 ? '↑' : ' '}${start + listH < rows.length ? '↓' : ' '} rows ${start + 1}–${Math.min(rows.length, start + listH)} of ${rows.length}`}
@@ -232,7 +242,7 @@ export const SettingsPane = React.memo(function SettingsPane({
 
       <Box height={1} />
       <Box paddingX={2}>
-        <Text color="#8b949e" wrap="truncate">{footer}</Text>
+        <Text color={searchTyping ? '#e3b341' : '#8b949e'} wrap="truncate">{footer}</Text>
       </Box>
     </Box>
   );

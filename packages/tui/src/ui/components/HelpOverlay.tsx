@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { searchTerms } from '@fomo/core';
 import { VERSION } from '../../version.js';
 
 export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references';
@@ -8,6 +9,10 @@ interface Props {
   context: HelpContext;
   height: number;
   columns: number;
+  /** `/` filter of the keys. */
+  search?: string;
+  /** The filter is being typed. */
+  searchTyping?: boolean;
 }
 
 interface Section {
@@ -120,6 +125,7 @@ const SETTINGS_KEYS: [string, string][] = [
   ['f',    'Fetch this source now'],
   ['v',    'Show only this source’s updates'],
   ['o',    'Open the web app in the browser (web app rows)'],
+  ['/',    'Search rows (a matching section header keeps its rows)'],
   ['Esc/⌫','Cancel / close config'],
   ['h',    'Show this help'],
 ];
@@ -157,8 +163,18 @@ const CONTEXT_LABEL: Record<string, string> = {
 
 const KEY_W = 8;
 
-export function HelpOverlay({ context, height, columns }: Props) {
-  const sections = buildSections(context);
+/** Sections with only the keys matching every word of `search` (all keys of a matching section title). */
+export function filterHelp(sections: Section[], search: string): Section[] {
+  const terms = searchTerms(search);
+  if (terms.length === 0) return sections;
+  const has = (text: string) => terms.every((t) => text.toLowerCase().includes(t));
+  return sections
+    .map((s) => (has(s.title) ? s : { ...s, keys: s.keys.filter(([key, label]) => has(`${key} ${label}`)) }))
+    .filter((s) => s.keys.length > 0);
+}
+
+export function HelpOverlay({ context, height, columns, search = '', searchTyping = false }: Props) {
+  const sections = filterHelp(buildSections(context), search);
 
   return (
     <Box flexDirection="column" height={height} width={columns}>
@@ -168,6 +184,15 @@ export function HelpOverlay({ context, height, columns }: Props) {
       </Box>
       <Box justifyContent="center">
         <Text color="#8b949e">{`${CONTEXT_LABEL[context]} · FOMO v${VERSION}`}</Text>
+      </Box>
+      <Box justifyContent="center">
+        {searchTyping ? (
+          <Text color="#e3b341">{`/${search}▏   ↵ keep   Esc clear`}</Text>
+        ) : search ? (
+          <Text color="#e3b341">{`/ ${search}${sections.length ? '' : ' — no matches'}   Esc clear`}</Text>
+        ) : (
+          <Text color="#8b949e">{'/ search'}</Text>
+        )}
       </Box>
       <Box height={1} />
 

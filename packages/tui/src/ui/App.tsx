@@ -3,14 +3,14 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion } from '@fomo/core';
-import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, jumpStep, nextRowKey, patchDigest, removeAndAdvance, shortcutKey, soloUpdate } from '@fomo/core';
+import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, jumpStep, nextRowKey, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { AUDIT_FILE, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
 import { AuditView } from './components/AuditView.js';
-import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, type SettingsRow } from './settings.js';
+import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
 import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
@@ -28,7 +28,7 @@ import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/SettingsPane.js';
 import { TodosView, type TodoFormField } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
-import { useReferences } from './hooks/useReferences.js';
+import { editText, useReferences } from './hooks/useReferences.js';
 
 type FilterStatus = Status | 'all' | 'saved';
 /** Views that can be listed as topics; pressing the view's key again toggles it. */
@@ -110,7 +110,20 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const [appSettings, setAppSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(() => new Set());
-  const settingsRows = useMemo(() => buildSettingsRows(sources, collapsedSections), [sources, collapsedSections]);
+  /** `/` filter of the config screen (and whether it is being typed). */
+  const [settingsSearch, setSettingsSearch] = useState('');
+  const [settingsSearchTyping, setSettingsSearchTyping] = useState(false);
+  /** `/` filter of the help screen (and whether it is being typed). */
+  const [helpSearch, setHelpSearch] = useState('');
+  const [helpSearchTyping, setHelpSearchTyping] = useState(false);
+  const settingsRows = useMemo(() => {
+    const terms = searchTerms(settingsSearch);
+    const matches = terms.length === 0 ? undefined : (row: SettingsRow) => {
+      const text = settingsRowText(row, config, (id) => appSettings.sourceLabels[id] ?? '').toLowerCase();
+      return terms.every((t) => text.includes(t));
+    };
+    return buildSettingsRows(sources, collapsedSections, matches);
+  }, [sources, collapsedSections, settingsSearch, config, appSettings.sourceLabels]);
 
   /** Collapse or expand a config section; the focus stays on its header. */
   const setSectionCollapsed = useCallback((header: string, collapsed: boolean) => {
@@ -123,11 +136,13 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     });
   }, []);
 
-  /** Focus a config row, expanding its section first. */
+  /** Focus a config row, clearing the search and expanding its section first. */
   const focusSettingsRow = useCallback((key: string) => {
     const section = sectionOf(sources, key);
     const collapsed = new Set(collapsedSections);
     if (section) collapsed.delete(section);
+    setSettingsSearch('');
+    setSettingsSearchTyping(false);
     setCollapsedSections(collapsed);
     setSettingsFocusIndex(Math.max(0, findRow(buildSettingsRows(sources, collapsed), key)));
   }, [sources, collapsedSections]);
@@ -993,7 +1008,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     // Shortcuts ignore case (Shift+b does what b does); typed text keeps `raw`.
     const input = shortcutKey(raw);
     // ── Quit from any screen (but not while typing) ──
-    if (input === 'q' && !editingKey && !todosAddMode && !refs.typing && searchDraft === undefined) { exit(); return; }
+    if (input === 'q' && !editingKey && !todosAddMode && !refs.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
 
     // ── Search prompt (opened with /) ──
     if (searchDraft !== undefined) {
@@ -1012,7 +1027,16 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
 
     // ── Help overlay — Esc or h to close, consume all other input ──
     if (showHelp) {
-      if (key.escape || key.backspace || key.delete || input === 'h') setShowHelp(false);
+      if (helpSearchTyping) {
+        if (key.escape) { setHelpSearch(''); setHelpSearchTyping(false); return; }
+        if (key.return) { setHelpSearchTyping(false); return; }
+        const next = editText(helpSearch, raw, key);
+        if (next !== undefined) setHelpSearch(next);
+        return;
+      }
+      if (input === '/') { setHelpSearchTyping(true); return; }
+      if (key.escape && helpSearch) { setHelpSearch(''); return; }
+      if (key.escape || key.backspace || key.delete || input === 'h') { setShowHelp(false); setHelpSearch(''); }
       return;
     }
 
@@ -1256,10 +1280,25 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         return;
       }
 
+      if (settingsSearchTyping) {
+        if (key.escape) { setSettingsSearch(''); setSettingsSearchTyping(false); setSettingsFocusIndex(firstFocusable(buildSettingsRows(sources, collapsedSections))); return; }
+        if (key.return) { setSettingsSearchTyping(false); return; }
+        if (key.upArrow || key.downArrow) {
+          setSettingsSearchTyping(false);
+        } else {
+          const next = editText(settingsSearch, raw, key);
+          if (next !== undefined) { setSettingsSearch(next); setSettingsFocusIndex(1); }
+          return;
+        }
+      }
+
       if (key.escape && confirmKey) { setConfirmKey(undefined); return; }
+      if (key.escape && settingsSearch) { setSettingsSearch(''); setSettingsFocusIndex(firstFocusable(buildSettingsRows(sources, collapsedSections))); return; }
+      if (input === '/') { setSettingsSearchTyping(true); setConfirmKey(undefined); return; }
       if (key.escape || key.backspace || key.delete || input === 'c') {
         setShowSettings(false);
         setConfirmKey(undefined);
+        setSettingsSearch('');
         return;
       }
       const page = Math.max(1, rows - STATUSBAR_H - FILTERBAR_H - 5);
@@ -1272,6 +1311,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
       if (!row) return;
 
+      // Sections stay open while searching
+      if (settingsSearch && (row.kind === 'header' || key.leftArrow || key.rightArrow)) return;
       if (row.kind === 'header') {
         if (key.return || input === ' ') setSectionCollapsed(row.key, !row.collapsed);
         else if (key.leftArrow) setSectionCollapsed(row.key, true);
@@ -1716,7 +1757,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       <Box flexDirection="column" height={rows}>
         {statusBar}
         {filterBar}
-        <HelpOverlay context={helpContext} height={availableH} columns={columns} />
+        <HelpOverlay context={helpContext} height={availableH} columns={columns} search={helpSearch} searchTyping={helpSearchTyping} />
       </Box>
     );
   }
@@ -1846,6 +1887,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           stats={stats}
           lastFetch={lastFetch}
           focusIndex={settingsFocusIndex}
+          search={settingsSearch}
+          searchTyping={settingsSearchTyping}
           editBuffer={editingKey ? editBuffer : undefined}
           confirmKey={confirmKey}
           height={availableH}

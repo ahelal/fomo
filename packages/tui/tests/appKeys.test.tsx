@@ -343,7 +343,58 @@ describe('Config sections', () => {
   });
 });
 
+describe('/ search', () => {
+  it('filters the config rows per section and Esc clears it', async () => {
+    const { press, frame } = await renderApp();
+    await press('c');
+    await press('/');
+    for (const ch of 'backup') await press(ch);
+    expect(frame()).toContain('Back up updates');
+    expect(frame()).toContain('Backup folder');
+    expect(frame()).not.toContain('Link a device');
+    expect(frame()).not.toContain('Copilot model');
+    await press('q'); // typed, does not quit
+    expect(frame()).toContain('no matches');
+    await press('\u007F'); // ⌫
+    await press('\r');
+    expect(frame()).toContain('/ backup');
+    await press('\u001B');
+    expect(frame()).toContain('Link a device');
+    expect(frame()).toContain('⚙️  Config');
+  });
+
+  it('keeps the whole section when its header matches', async () => {
+    const { press, frame } = await renderApp();
+    await press('c');
+    await press('/');
+    for (const ch of 'actions') await press(ch);
+    expect(frame()).toContain('Link a device');
+    expect(frame()).toContain('Restore from backup');
+    expect(frame()).not.toContain('Copilot model');
+  });
+
+  it('filters the help keys', async () => {
+    const { press, frame } = await renderApp();
+    await press('c');
+    await press('h');
+    expect(frame()).toContain('Cycle source color');
+    await press('/');
+    for (const ch of 'color') await press(ch);
+    expect(frame()).toContain('Cycle source color');
+    expect(frame()).not.toContain('Fetch this source now');
+    await press('\u001B'); // clears the search
+    await press('\u001B'); // closes help
+    expect(frame()).toContain('⚙️  Config');
+  });
+});
+
 describe('settings rows', () => {
+  it('filters rows and drops sections without matches', () => {
+    const rows = buildSettingsRows([], new Set(['h-actions']), (r) => r.kind === 'config' && r.field === 'webUrl');
+    expect(rows.map((r) => r.key)).toEqual(['h-local', 'c-webUrl']);
+    expect(rows[0]).toMatchObject({ collapsed: false, count: 1 });
+  });
+
   it('leaves out the rows of collapsed sections', () => {
     const rows = buildSettingsRows([], new Set(['h-local', 'h-actions']));
     expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'h-display', 'preview', 'h-local']);

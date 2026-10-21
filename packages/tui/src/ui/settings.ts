@@ -49,12 +49,26 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
 /** Section header keys, used to collapse a section. */
 export const SECTION_KEYS = ['h-actions', 'h-sources', 'h-display', 'h-local'] as const;
 
-/** Config screen rows; rows of the sections in `collapsed` (header keys) are left out. */
-export function buildSettingsRows(sources: SourceInfo[], collapsed: ReadonlySet<string> = new Set()): SettingsRow[] {
-  const section = (key: string, label: string, rows: SettingsRow[]): SettingsRow[] => [
-    { kind: 'header', key, label, collapsed: collapsed.has(key), count: rows.length },
-    ...(collapsed.has(key) ? [] : rows),
-  ];
+/**
+ * Config screen rows; rows of the sections in `collapsed` (header keys) are left out.
+ * With `matches`, only matching rows are kept (all of a section whose title matches), sections without
+ * any are dropped, and every section is shown open.
+ */
+export function buildSettingsRows(
+  sources: SourceInfo[],
+  collapsed: ReadonlySet<string> = new Set(),
+  matches?: (row: SettingsRow) => boolean,
+): SettingsRow[] {
+  const section = (key: string, label: string, all: SettingsRow[]): SettingsRow[] => {
+    let rows = all;
+    if (matches) {
+      const header: SettingsRow = { kind: 'header', key, label, collapsed: false, count: all.length };
+      if (!matches(header)) rows = all.filter(matches);
+      if (rows.length === 0) return [];
+    }
+    const folded = !matches && collapsed.has(key);
+    return [{ kind: 'header', key, label, collapsed: folded, count: rows.length }, ...(folded ? [] : rows)];
+  };
   return [
     ...section('h-actions', 'Actions', ACTIONS.map((a) => ({ kind: 'action' as const, key: `a-${a.action}`, ...a }))),
     ...section('h-sources', 'Sources · shared with the web app', sources.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source }))),
@@ -178,6 +192,17 @@ export function parseConfigEdit(field: ConfigField, text: string): { patch: Part
       return { error: 'Press ↵ to toggle' };
     default:
       return { patch: { [field]: value } };
+  }
+}
+
+/** The text of a row that `/` searches. `sourceLabel` gives a source's custom label. */
+export function settingsRowText(row: SettingsRow, config: LocalConfig, sourceLabel: (id: string) => string = () => ''): string {
+  switch (row.kind) {
+    case 'header': return row.label;
+    case 'action': return `${row.label} ${row.hint}`;
+    case 'source': return `${row.source.displayName} ${row.source.id} ${sourceLabel(row.source.id)}`;
+    case 'preview': return 'Preview position right bottom off';
+    case 'config': return `${row.label} ${row.field} ${configDisplay(config, row.field).value}`;
   }
 }
 
