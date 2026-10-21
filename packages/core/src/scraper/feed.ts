@@ -23,20 +23,30 @@ export function parseFeed(xml: string, filter: FeedFilter = {}): ScrapedItem[] {
     const url = link(block);
     if (!title || !url) continue;
 
+    const encodedContent = tag(block, 'content:encoded');
+    const atomContent = tag(block, 'content');
+    const fullContent = encodedContent || atomContent;
     const content = htmlToText(
-      tag(block, 'content:encoded') || tag(block, 'description') || tag(block, 'content') || tag(block, 'summary')
+      encodedContent || tag(block, 'description') || atomContent || tag(block, 'summary')
         || tag(block, 'media:description'),
-    ).slice(0, MAX_CONTENT);
+    );
     if (include && !include.test(`${title} ${content}`)) continue;
 
     items.push({
       title,
       url,
       datePublished: parseDate(tag(block, 'pubDate') || tag(block, 'published') || tag(block, 'dc:date') || tag(block, 'updated')),
-      content,
+      content: content.slice(0, MAX_CONTENT),
+      ...(fullContent ? { readingTimeMinutes: estimateReadingTimeMinutes(htmlToText(fullContent)) } : {}),
     });
   }
   return items;
+}
+
+/** Estimate reading time at 230 words per minute, rounding up to a whole minute. */
+function estimateReadingTimeMinutes(content: string): number {
+  const words = content.match(/\S+/g)?.length ?? 0;
+  return Math.max(1, Math.ceil(words / 230));
 }
 
 /** Inner text of the first `<name>`, unwrapping CDATA. */

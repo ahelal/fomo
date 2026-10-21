@@ -1,3 +1,5 @@
+import type { Update } from './types.js';
+
 /** `iso` as a short age, e.g. `just now`, `5m ago`, `3h ago`, `2d ago`. */
 export function timeAgo(iso: string, now = Date.now()): string {
   const mins = Math.floor((now - Date.parse(iso)) / 60_000);
@@ -7,4 +9,20 @@ export function timeAgo(iso: string, now = Date.now()): string {
   const hours = Math.floor(mins / 60);
   if (hours < 48) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** Show exact media duration, or an approximate article reading time. */
+export function formatUpdateTime(update: Pick<Update, 'readingTimeMinutes' | 'durationSeconds'>): string {
+  if (typeof update.durationSeconds === 'number' && update.durationSeconds > 0) {
+    const seconds = Math.floor(update.durationSeconds);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    return hours > 0
+      ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+      : `${minutes}:${String(remainder).padStart(2, '0')}`;
+  }
+  return typeof update.readingTimeMinutes === 'number' && update.readingTimeMinutes > 0
+    ? `~${update.readingTimeMinutes}m`
+    : '';
 }

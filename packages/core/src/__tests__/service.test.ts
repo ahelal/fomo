@@ -138,6 +138,25 @@ describe('FomoDirectService', () => {
     expect(result.results['mock-source'].added).toBe(1);
   });
 
+  it('persists reading time and video duration from scraped items', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const { __mockSource } = await import('../scraper/registry.js') as any;
+    __mockSource.fetch.mockResolvedValueOnce([{
+      title: 'Timed item',
+      url: 'https://example.com/timed',
+      datePublished: new Date('2025-01-01'),
+      readingTimeMinutes: 3,
+      durationSeconds: 849,
+    }]);
+
+    await svc.fetch();
+
+    expect(__mockStore.insertUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      readingTimeMinutes: 3,
+      durationSeconds: 849,
+    }));
+  });
+
   it('fetch with specific sources filters to those sources', async () => {
     const result = await svc.fetch({ sources: ['mock-source'] });
     expect(result.added).toBe(1);

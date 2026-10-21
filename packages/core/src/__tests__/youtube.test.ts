@@ -130,7 +130,16 @@ describe('YouTube fetch', () => {
     });
     const items = await createSource(spec()).fetch();
     expect(items.map((i) => i.title)).toEqual(['Newest video', 'Stream', 'Older video']);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it('reads exact duration metadata from video pages', async () => {
+    mockYoutube({
+      [feedUrl('playlist_id=PL123456789012')]: atom(entry('v1', 'Lesson', '2026-10-10T00:00:00Z')),
+      'https://www.youtube.com/watch?v=v1': '<meta itemprop="duration" content="PT1H2M3S">',
+    });
+    const items = await createSource(spec({ channel: undefined, playlist: 'PL123456789012' })).fetch();
+    expect(items[0]?.durationSeconds).toBe(3723);
   });
 
   it('copes with a channel that never streamed (no live playlist)', async () => {

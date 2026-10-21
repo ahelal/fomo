@@ -41,6 +41,8 @@ type UpdateEntity = TableEntity<{
   status: string;
   saved: boolean;
   content: string;
+  readingTimeMinutes?: number;
+  durationSeconds?: number;
   topicId?: string;
   summary?: string;
   /** `PostGist` as JSON. */
@@ -49,7 +51,7 @@ type UpdateEntity = TableEntity<{
   duplicateOf?: string;
 }>;
 
-const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'topicId', 'summary', 'gist', 'duplicateOf'];
+const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'readingTimeMinutes', 'durationSeconds', 'topicId', 'summary', 'gist', 'duplicateOf'];
 
 /**
  * Table Storage caps a string property at 64 KiB of UTF-16 (32,768 code units) and rejects the
@@ -114,6 +116,8 @@ function entityToUpdate(e: UpdateEntity): Update {
     status: (e.status === 'saved' ? 'read' : e.status) as Status,
     saved: e.saved ?? (e.status as string) === 'saved',
     content: e.content ?? '',
+    ...(typeof e.readingTimeMinutes === 'number' && e.readingTimeMinutes > 0 ? { readingTimeMinutes: e.readingTimeMinutes } : {}),
+    ...(typeof e.durationSeconds === 'number' && e.durationSeconds > 0 ? { durationSeconds: e.durationSeconds } : {}),
     ...(e.topicId ? { topicId: e.topicId } : {}),
     ...(e.summary ? { summary: e.summary } : {}),
     ...(gist ? { gist } : {}),
@@ -134,6 +138,8 @@ export interface BackupEntity {
   status: string;
   saved: boolean;
   content: string;
+  readingTimeMinutes?: number;
+  durationSeconds?: number;
   topicId?: string;
   summary?: string;
   gist?: string;
@@ -190,6 +196,8 @@ export class UpdateStore {
         status: 'unread',
         saved: false,
         content,
+        ...(update.readingTimeMinutes ? { readingTimeMinutes: update.readingTimeMinutes } : {}),
+        ...(update.durationSeconds ? { durationSeconds: update.durationSeconds } : {}),
         ...(update.duplicateOf ? { duplicateOf: update.duplicateOf } : {}),
       });
       return true;
@@ -482,6 +490,8 @@ export class UpdateStore {
         status: e.status,
         saved: e.saved ?? false,
         content: e.content ?? '',
+        ...(e.readingTimeMinutes ? { readingTimeMinutes: e.readingTimeMinutes } : {}),
+        ...(e.durationSeconds ? { durationSeconds: e.durationSeconds } : {}),
         ...(e.topicId ? { topicId: e.topicId } : {}),
         ...(e.summary ? { summary: e.summary } : {}),
         ...(e.gist ? { gist: e.gist } : {}),
@@ -517,6 +527,8 @@ export class UpdateStore {
           status: e.status,
           saved: e.saved,
           content: clampContent(e.content ?? ''),
+          ...(e.readingTimeMinutes ? { readingTimeMinutes: e.readingTimeMinutes } : {}),
+          ...(e.durationSeconds ? { durationSeconds: e.durationSeconds } : {}),
           ...(e.topicId ? { topicId: e.topicId } : {}),
           ...(e.summary ? { summary: e.summary } : {}),
           ...(e.gist ? { gist: e.gist } : {}),

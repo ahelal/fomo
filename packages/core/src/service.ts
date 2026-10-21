@@ -178,6 +178,8 @@ export class FomoDirectService extends FomoStorageService {
               url: item.url,
               datePublished,
               content: item.content ?? '',
+              ...(item.readingTimeMinutes ? { readingTimeMinutes: item.readingTimeMinutes } : {}),
+              ...(item.durationSeconds ? { durationSeconds: item.durationSeconds } : {}),
               ...(check.kind === 'new' && check.duplicateOf ? { duplicateOf: check.duplicateOf } : {}),
             });
             if (inserted) result.added++;

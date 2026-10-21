@@ -762,6 +762,16 @@ describe('feed parser', () => {
     const xml = `<rdf:RDF><item rdf:about="x"><title>T</title><link>https://e.x/t</link><dc:date>2026-01-02T00:00:00Z</dc:date></item></rdf:RDF>`;
     expect(parseFeed(xml)).toMatchObject([{ title: 'T', url: 'https://e.x/t', datePublished: new Date('2026-01-02T00:00:00Z') }]);
   });
+
+  it('estimates reading time from full feed content before truncating the preview', () => {
+    const words = Array.from({ length: 700 }, (_, i) => `word${i}`).join(' ');
+    const [item] = parseFeed(`<rss><channel><item>
+      <title>Article</title><link>https://e.x/article</link>
+      <content:encoded><![CDATA[${words}]]></content:encoded>
+    </item></channel></rss>`);
+    expect(item?.readingTimeMinutes).toBe(4);
+    expect(item?.content?.length).toBeLessThan(words.length);
+  });
 });
 
 describe('anthropic custom module', () => {

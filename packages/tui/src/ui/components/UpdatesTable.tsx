@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Box, Text } from 'ink';
-import type { Update } from '@fomo/core';
+import { formatUpdateTime, type Update } from '@fomo/core';
 
 const STATUS_ICON: Record<string, { icon: string; color: string }> = {
   unread: { icon: '●', color: '#58a6ff' },
@@ -64,8 +64,9 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
   const sourceW = 13;
   const dateW = 12;
   const statusW = 4;
+  const timeW = 8;
   const prefixW = 3;
-  const fixedW = prefixW + sourceW + dateW + statusW + 2;
+  const fixedW = prefixW + sourceW + dateW + statusW + timeW + 2;
   const titleW = Math.max(10, columns - fixedW - 2);
   const separatorW = Math.max(columns - 2, 10);
 
@@ -96,6 +97,7 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
           {'SOURCE'.padEnd(sourceW)}
           {'DATE'.padEnd(dateW)}
           {'ST'.padEnd(statusW)}
+          {'TIME'.padEnd(timeW)}
           {'TITLE'}
         </Text>
       </Box>
@@ -131,6 +133,7 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
               <Text color={sourceColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{source}</Text>
               <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{dateStr.padEnd(dateW)}</Text>
               <Text color={statusColor} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{statusLabel.padEnd(statusW)}</Text>
+              <Text color={textColor} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{formatUpdateTime(update).padEnd(timeW)}</Text>
               {update.duplicateOf && (
                 <Text color={DUP_COLOR} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{DUP_BADGE}</Text>
               )}

@@ -56,7 +56,7 @@ export {
   parentRowIndex,
   type ReferenceRow,
 } from './references.js';
-export { timeAgo } from './time.js';
+export { timeAgo, formatUpdateTime } from './time.js';
 export { canonicalUrl, titleKey, DuplicateIndex, TITLE_MATCH_DAYS, type DuplicateRow, type DuplicateCheck } from './duplicates.js';
 export {
   UPDATE_SORTS,

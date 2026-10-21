@@ -26,6 +26,10 @@ export interface Update {
   saved: boolean;
   /** Empty when listed with `includeContent: false` — load via `getUpdate()`. */
   content: string;
+  /** Approximate minutes to read, derived from full article content in the feed. */
+  readingTimeMinutes?: number;
+  /** Exact video length in seconds, when available from the video page. */
+  durationSeconds?: number;
   /** Digest topic this update was grouped into (set by the Copilot digest). */
   topicId?: string;
   /** One-sentence Copilot summary written when the update joins a topic. */
@@ -59,6 +63,10 @@ export interface ScrapedItem {
   datePublished: Date;
   /** Content/summary for preview. Only meaningful when the source has `capabilities.preview`. */
   content?: string;
+  /** Approximate minutes to read, derived from full article content in the feed. */
+  readingTimeMinutes?: number;
+  /** Exact video length in seconds, when available from the video page. */
+  durationSeconds?: number;
 }
 
 /**

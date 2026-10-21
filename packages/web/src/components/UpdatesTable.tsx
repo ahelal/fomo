@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Update } from '@fomo/core';
+import { formatUpdateTime, type Update } from '@fomo/core';
 import { usePullToRefresh } from '../hooks/usePullToRefresh.js';
 
 /** Marks an update that repeats an earlier one, naming the source of the original. */
@@ -91,6 +91,7 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
         <span>Source</span>
         <span>Date</span>
         <span>ST</span>
+        <span>Time</span>
         <span>Title</span>
       </div>
       {updates.map((u) => {
@@ -116,6 +117,7 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
               <span className={`update-row__status-dot update-row__status-dot--${STATUS_ICON[u.status]?.cls ?? u.status}`}>
                 {u.saved ? '⭐' : ''}{STATUS_ICON[u.status]?.icon ?? u.status}
               </span>
+              <span className="update-row__time" title={u.durationSeconds ? 'Video duration' : u.readingTimeMinutes ? 'Estimated reading time' : undefined}>{formatUpdateTime(u)}</span>
               <span className="update-row__title">{u.duplicateOf && <DupBadge of={u.duplicateOf} />}{u.title}</span>
             </div>
             {isSwiped && (

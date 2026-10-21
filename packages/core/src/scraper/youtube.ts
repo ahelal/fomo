@@ -2,6 +2,7 @@ import type { ScrapedItem, YoutubeSourceSpec } from '../types.js';
 import { parseFeed } from './feed.js';
 import { TIMEOUT_MS, USER_AGENT } from './http.js';
 import { dedupByUrl } from './text.js';
+import { mapLimit } from '../util.js';
 
 /** What a YouTube URL points at: a channel (`UC…` id, `@handle`, `c/Name`, `user/Name`) or a playlist. */
 export type YoutubeTarget = { channel: string } | { playlist: string };
@@ -51,6 +52,7 @@ const FEED = 'https://www.youtube.com/feeds/videos.xml';
 const CONSENT = 'SOCS=CAI';
 /** Stop reading a channel page after this much without finding its id (the page is ~2.5 MB). */
 const MAX_PAGE_BYTES = 4_000_000;
+const MAX_VIDEO_PAGE_BYTES = 512_000;
 
 const resolved = new Map<string, string>();
 
@@ -98,6 +100,58 @@ async function feed(query: string): Promise<string | undefined> {
   return res.text();
 }
 
+/** Read duration metadata from a watch page, stopping once the player metadata is found. */
+async function videoDuration(url: string): Promise<number | undefined> {
+  const res = await globalThis.fetch(url, {
+    headers: { 'User-Agent': USER_AGENT, Cookie: CONSENT },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!res.ok) return undefined;
+
+  const reader = res.body?.getReader();
+  if (!reader) return parseVideoDuration(await res.text());
+
+  const decoder = new TextDecoder();
+  let page = '';
+  let duration: number | undefined;
+  while (!duration && page.length < MAX_VIDEO_PAGE_BYTES) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    page += decoder.decode(value, { stream: true });
+    duration = parseVideoDuration(page);
+  }
+  await reader.cancel().catch(() => undefined);
+  return duration;
+}
+
+function parseVideoDuration(page: string): number | undefined {
+  const seconds = page.match(/"lengthSeconds"\s*:\s*"(\d+)"/)?.[1];
+  if (seconds) {
+    const duration = Number(seconds);
+    if (Number.isSafeInteger(duration) && duration > 0) return duration;
+  }
+
+  const meta = page.match(/<meta\b(?=[^>]*\bitemprop=["']duration["'])[^>]*>/i)?.[0];
+  const iso = meta?.match(/\bcontent=["'](PT(?=[\dHMS])[\dHMS.]+)["']/i)?.[1];
+  if (!iso) return undefined;
+  const parts = iso.match(/^PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?$/i);
+  if (!parts) return undefined;
+  const duration = Number(parts[1] ?? 0) * 3600 + Number(parts[2] ?? 0) * 60 + Number(parts[3] ?? 0);
+  return Number.isSafeInteger(duration) && duration > 0 ? duration : undefined;
+}
+
+/** Duration metadata is best-effort; an unavailable watch page must not drop a feed item. */
+async function withVideoDurations(items: ScrapedItem[]): Promise<ScrapedItem[]> {
+  return mapLimit(items, 4, async (item) => {
+    try {
+      const durationSeconds = await videoDuration(item.url);
+      return durationSeconds ? { ...item, durationSeconds } : item;
+    } catch {
+      return item;
+    }
+  });
+}
+
 /**
  * The newest videos (YouTube's feeds hold 15). Without Shorts it merges the channel's “Videos”
  * (`UULF…`) and “Live” (`UULV…`) playlists; either is missing (404) when the channel has none.
@@ -107,7 +161,7 @@ export async function fetchYoutube(spec: YoutubeSourceSpec): Promise<ScrapedItem
   if (spec.playlist) {
     const xml = await feed(`playlist_id=${spec.playlist}`);
     if (!xml) throw new Error(`YouTube playlist ${spec.playlist} not found`);
-    return parseFeed(xml, filter);
+    return withVideoDurations(parseFeed(xml, filter));
   }
   if (!spec.channel) throw new Error('No YouTube channel or playlist');
   const id = await resolveChannelId(spec.channel);
@@ -116,11 +170,12 @@ export async function fetchYoutube(spec: YoutubeSourceSpec): Promise<ScrapedItem
   if (spec.shorts) {
     const xml = await feed(`channel_id=${id}`);
     if (!xml) throw new Error(`YouTube channel ${spec.channel} not found`);
-    return parseFeed(xml, filter);
+    return withVideoDurations(parseFeed(xml, filter));
   }
 
   const [videos, live] = await Promise.all([feed(`playlist_id=UULF${uploads}`), feed(`playlist_id=UULV${uploads}`)]);
   if (!videos && !live && !(await feed(`channel_id=${id}`))) throw new Error(`YouTube channel ${spec.channel} not found`);
-  const items = [videos, live].flatMap((xml) => (xml ? parseFeed(xml, filter) : []));
-  return dedupByUrl(items).sort((a, b) => b.datePublished.getTime() - a.datePublished.getTime());
+  const items = dedupByUrl([videos, live].flatMap((xml) => (xml ? parseFeed(xml, filter) : [])));
+  const enriched = await withVideoDurations(items);
+  return enriched.sort((a, b) => b.datePublished.getTime() - a.datePublished.getTime());
 }

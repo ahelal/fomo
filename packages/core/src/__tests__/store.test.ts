@@ -26,17 +26,20 @@ describe('UpdateStore.insertUpdate', () => {
   it('stores oversized content cut to the Table Storage limit', async () => {
     const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
     const store = new UpdateStore(conn as any);
-    const created: { content: string }[] = [];
-    (store as any).client = { createEntity: async (e: { content: string }) => { created.push(e); } };
+    const created: { content: string; readingTimeMinutes?: number; durationSeconds?: number }[] = [];
+    (store as any).client = { createEntity: async (e: { content: string; readingTimeMinutes?: number; durationSeconds?: number }) => { created.push(e); } };
     const inserted = await store.insertUpdate({
       source: 'azure-sre-agent',
       title: 'Zero Ops',
       url: 'https://example.com/zero-ops',
       datePublished: '2026-10-18T00:00:00Z',
       content: 'y'.repeat(51_991),
+      readingTimeMinutes: 4,
+      durationSeconds: 849,
     });
     expect(inserted).toBe(true);
     expect(created[0]!.content).toHaveLength(MAX_CONTENT_CHARS);
+    expect(created[0]).toMatchObject({ readingTimeMinutes: 4, durationSeconds: 849 });
   });
 });
 
@@ -123,6 +126,28 @@ describe('UpdateStore.listUpdates sort', () => {
   it('defaults to newest first', async () => {
     const resp = await store().listUpdates();
     expect(resp.updates.map((u) => u.title)).toEqual(['Banana', 'apple', 'cherry']);
+  });
+
+  it('returns reading time and video duration on listed updates', async () => {
+    const s = store();
+    (s as any).client = {
+      listEntities: () => (async function* () {
+        yield {
+          partitionKey: 'youtube',
+          rowKey: 'video',
+          title: 'Video',
+          url: 'https://youtube.com/watch?v=1',
+          datePublished: '2026-01-01',
+          dateAdded: '2026-01-01',
+          status: 'unread',
+          saved: false,
+          readingTimeMinutes: 3,
+          durationSeconds: 849,
+        };
+      })(),
+    };
+    const result = await s.listUpdates({ includeContent: false });
+    expect(result.updates[0]).toMatchObject({ readingTimeMinutes: 3, durationSeconds: 849 });
   });
 
   it('sorts every row before applying the limit', async () => {
