@@ -74,7 +74,7 @@ export function TodosView({
       <Box width={columns} borderStyle="single" borderBottom borderTop={false} borderLeft={false} borderRight={false} borderColor="gray">
         <Text color="#58a6ff" bold> ✓ Todos </Text>
         <Text color="#8b949e"> · {todos.length} item{todos.length !== 1 ? 's' : ''} </Text>
-        {!addMode && <Text color="#8b949e"> [a] add  [Enter] cycle status  [d] delete  [t] close </Text>}
+        {!addMode && <Text color="#8b949e"> [a] add  [Enter] cycle status  [d] delete  [6] close </Text>}
       </Box>
 
       {/* Add form */}

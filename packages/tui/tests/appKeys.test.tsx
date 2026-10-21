@@ -158,23 +158,30 @@ describe('a audit trail', () => {
     await press('z');
     await press('z');
     expect(audit.entries).toEqual(expect.arrayContaining([
-      expect.objectContaining({ level: 'info', action: 'view', detail: 'read' }),
-      expect.objectContaining({ level: 'info', action: 'regroup' }),
+      expect.objectContaining({ level: 'info', action: 'regroup', detail: expect.stringContaining('grouped') }),
       expect.objectContaining({ level: 'error', action: 'regroup', detail: 'planning: quota exceeded' }),
     ]));
 
     await press('a');
     expect(frame()).toContain('Audit trail');
     expect(frame()).toContain('planning: quota exceeded');
-    expect(frame()).toContain('view');
+    expect(frame()).toContain('update(s)');
 
     await press('e');
     expect(frame()).toContain('errors only');
     expect(frame()).toContain('planning: quota exceeded');
-    expect(frame()).not.toMatch(/·\s+view\b/);
+    expect(frame()).not.toContain('update(s)');
 
     await press('\u001B');
     expect(frame()).not.toContain('Audit trail');
+  });
+
+  it('does not record normal operation such as switching views or moving the preview', async () => {
+    const { audit, press } = await renderApp();
+    await press('3');
+    await press('2');
+    await press('.');
+    expect(audit.entries).toEqual([]);
   });
 
   it('shows new entries while it is open', async () => {

@@ -254,7 +254,6 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
         ? await service.updateReference(current.id, req)
         : await service.createReference({ ...req, updateId: current.updateId });
       const where = saved.folder || 'top level';
-      audit.log('reference', `${current.id ? 'updated' : 'filed'} “${saved.title}” in ${where}`);
       closeForm(current);
       if (current.fromFeed) {
         notify(`🔖 ${current.id ? 'Updated' : 'Filed'} in References → ${where}`, 4000);
@@ -303,7 +302,6 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
     try {
       const moved = await service.moveReferenceFolder(from, to);
       const dest = normalizeFolder(to);
-      audit.log('reference', `folder “${from}” → “${dest || 'top level'}” (${moved} link${moved === 1 ? '' : 's'})`);
       setRename(undefined);
       pendingKey.current = dest ? `folder:${dest}` : undefined;
       await load();
@@ -316,7 +314,6 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
 
   const doDelete = (ref: Reference) => {
     setRefs((list) => list.filter((r) => r.id !== ref.id));
-    audit.log('reference', `deleted “${ref.title}”`);
     say(`Deleted “${ref.title}”`);
     void service.deleteReference(ref.id)
       .catch((err) => {
@@ -328,7 +325,6 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
 
   const open_ = (ref: Reference) => {
     openUrl(ref.url)
-      .then(() => audit.log('open', `“${ref.title}” ${ref.url}`))
       .catch((err) => {
         audit.error('open', `${ref.url}: ${errorText(err)}`);
         say('Could not open browser');
@@ -365,7 +361,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
       closeAll();
       return;
     }
-    if (input === 'b') { closeAll(); return; }
+    if (input === '5') { closeAll(); return; }
     const last = Math.max(0, rows.length - 1);
     const step = key.shift && (key.upArrow || key.downArrow) ? jump : 1;
     if (key.upArrow || input === 'k') { setSelectedIndex((i) => Math.max(0, i - step)); return; }
@@ -419,6 +415,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
     /** Keys are text (form, rename or search prompt), so global keys like q must not fire. */
     typing: form !== undefined || rename !== undefined || searchDraft !== undefined,
     openView,
+    close: closeAll,
     fileUpdate,
     handleInput,
     view: {

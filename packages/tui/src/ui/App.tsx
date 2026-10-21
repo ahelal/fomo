@@ -407,7 +407,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     const what = only ? only.map(sourceName).join(', ') : 'latest updates';
     const action = auto ? 'auto-fetch' : 'fetch';
     if (!claimBusy(`${auto ? 'Auto-fetching' : 'Fetching'} ${what}…`)) {
-      audit.log(action, `skipped (${what}): another run is in progress`);
       return;
     }
     try {
@@ -460,7 +459,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const autoFetchEnabled = config.autoFetch !== false;
   const nextAutoFetchAt = useAutoFetch(() => {
     if (busyRef.current) {
-      audit.log('auto-fetch', 'skipped: another run is in progress');
       return;
     }
     void doFetch(undefined, true).catch((err) => {
@@ -581,7 +579,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const openInBrowser = useCallback((url: string, what: string) => {
     void import('open')
       .then(({ default: open }) => open(url))
-      .then(() => audit.log(what, 'opened in the browser'))
       .catch((err) => {
         audit.error(what, `open in browser: ${errorText(err)}`);
         showMessage('Could not open browser');
@@ -599,7 +596,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         url: config.webUrl,
         qr: await qrCode(config.webUrl),
       });
-      audit.log('web-app', 'showed the web app QR code');
     } catch (err) {
       audit.error('web-app', err);
       showMessage(`Can’t show the QR code: ${errorText(err)}`, 6000);
@@ -630,7 +626,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   }, [config.webUrl, config.connectionString, config.linkDays, needWebUrl, qrCode, showMessage, audit]);
 
   const applySourceFilter = useCallback((ids: string[] | undefined, f: FilterStatus = filterRef.current) => {
-    audit.log('filter', ids ? `sources: ${ids.map(sourceName).join(', ')}` : 'sources: all');
     sourceFilterRef.current = ids;
     setSourceFilter(ids);
     setFilter(f);
@@ -700,7 +695,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   /** Search the current view (and any view switched to) for `query`; empty clears it. */
   const applySearch = useCallback((query: string) => {
     const q = query.trim();
-    audit.log('search', q ? `“${q}”` : 'cleared');
     searchRef.current = q;
     setSearch(q);
     setSelectedIndex(0);
@@ -719,7 +713,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         prev.map((u) => (u.id === updated.id ? updated : u)),
       );
       setContentCache((prev) => ({ ...prev, [updated.id]: updated.content }));
-      audit.log('fetch-content', `“${selected.title}”`);
       showMessage('✓ Content fetched');
     } catch (err) {
       audit.error('fetch-content', `“${selected.title}”: ${errorText(err)}`);
@@ -780,7 +773,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   // ── Digest actions ──────────────────────────────────────────────────────────
   /** Record a read / save change and write it; on failure record the error and reload. */
   const persistChange = useCallback(async (action: string, detail: string, write: () => Promise<unknown>) => {
-    audit.log(action, detail);
     try {
       await write();
       void loadStats();
@@ -884,7 +876,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     try {
       const { default: open } = await import('open');
       await open(selected.url);
-      audit.log('open', `“${selected.title}” ${selected.url}`);
     } catch (err) {
       audit.error('open', `${selected.url}: ${errorText(err)}`);
       showMessage('Could not open browser');
@@ -1175,7 +1166,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         openInBrowser(linkView.url, linkView.action);
       } else if (input === 'y') {
         copyToClipboard(linkView.url);
-        audit.log(linkView.action, 'copied the link');
         showMessage('✓ Link copied');
       }
       return;
@@ -1318,6 +1308,12 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         setShowHelp(true);
         return;
       }
+      if (input === '6' && !refs.typing) {
+        refs.close();
+        setShowTodos(true);
+        void loadTodos();
+        return;
+      }
       refs.handleInput(raw, key);
       return;
     }
@@ -1359,7 +1355,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
               setTodosFormDesc('');
               setTodosFormField('subject');
               await loadTodos();
-              audit.log('todo', `added “${subject}”`);
               showTodosMessage('✓ Todo added');
             } catch (err) {
               audit.error('todo', `add “${subject}”: ${errorText(err)}`);
@@ -1383,8 +1378,13 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
 
       // List mode inside todos view
-      if (key.escape || key.backspace || input === 't') {
+      if (key.escape || key.backspace || input === '6') {
         setShowTodos(false);
+        return;
+      }
+      if (input === '5') {
+        setShowTodos(false);
+        refs.openView();
         return;
       }
       if (key.upArrow || input === 'k') {
@@ -1407,7 +1407,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         };
         const next = nextStatus[todo.status] as TodoStatus;
         setTodosList((prev) => prev.map((t) => (t.id === todo.id ? { ...t, status: next } : t)));
-        audit.log('todo', `“${todo.subject}” → ${next}`);
         void service.updateTodo(todo.id, { status: next })
           .then(() => loadTodos())
           .catch((err) => {
@@ -1420,7 +1419,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         const { id, subject } = todosList[todosSelectedIndex];
         setTodosList((prev) => prev.filter((t) => t.id !== id));
         setTodosSelectedIndex((i) => Math.max(0, i - 1));
-        audit.log('todo', `deleted “${subject}”`);
         void service.deleteTodo(id)
           .then(() => loadTodos())
           .catch((err) => {
@@ -1698,14 +1696,14 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     }
 
     // Open todos view
-    if (input === 't') {
+    if (input === '6') {
       setShowTodos(true);
       void loadTodos();
       return;
     }
 
-    // References: b opens them, m files the selected update
-    if (input === 'b') {
+    // References: 5 opens them, m files the selected update
+    if (input === '5') {
       refs.openView();
       return;
     }
@@ -1730,9 +1728,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         groupedViewsRef.current = next;
         setGroupedViews(next);
         showMessage(`${f === 'unread' ? 'Unread' : 'Saved'}: ${next[f] ? 'grouped by topic' : 'list'}`);
-        audit.log('view', `${f}: ${next[f] ? 'grouped by topic' : 'list'}`);
-      } else if (f !== filter) {
-        audit.log('view', f);
       }
       setFilter(f);
       setSelectedIndex(0);
@@ -1745,7 +1740,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       const next = previewPosition === 'bottom' ? 'right' : 'bottom';
       setPreviewPosition(next);
       setShowDetail(true);
-      audit.log('preview', `shown on the ${next}`);
       showMessage(`Preview on the ${next}`);
       return;
     }
@@ -1824,7 +1818,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         if (target) {
           void import('open')
             .then(({ default: open }) => open(target.url))
-            .then(() => audit.log('open', `“${target.title}” ${target.url}`))
             .catch((err) => {
               audit.error('open', `${target.url}: ${errorText(err)}`);
               showMessage('Could not open browser');

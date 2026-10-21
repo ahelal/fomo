@@ -139,12 +139,12 @@ describe('folderMatches', () => {
   });
 });
 
-describe('b References view', () => {
+describe('5 References view', () => {
   const library = [ref('1', 'Agents guide', 'ai/agents'), ref('2', 'Prompting', 'ai'), ref('3', 'Bicep docs', 'azure')];
 
-  it('shows the folder tree and closes with b', async () => {
+  it('shows the folder tree and closes with 5', async () => {
     const { press, frame } = await renderApp(library);
-    await press('b');
+    await press('5');
     expect(frame()).toContain('References');
     expect(frame()).toContain('3 links');
     expect(frame()).toMatch(/▾ ai\/ 2/);
@@ -152,13 +152,13 @@ describe('b References view', () => {
     await press(ENTER); // close the ai folder
     expect(frame()).toMatch(/▸ ai\/ 2/);
     expect(frame()).not.toContain('Agents guide');
-    await press('b');
+    await press('5');
     expect(frame()).not.toContain('3 links');
   });
 
   it('searches links and renames a folder with its subfolders', async () => {
     const { svc, press, frame } = await renderApp(library);
-    await press('b', '/', 'b', 'i', 'c', 'e', 'p', ENTER);
+    await press('5', '/', 'b', 'i', 'c', 'e', 'p', ENTER);
     expect(frame()).toContain('Bicep docs');
     expect(frame()).not.toContain('Prompting');
     await press(ESC);
@@ -171,7 +171,7 @@ describe('b References view', () => {
 
   it('deletes a link only on the second d', async () => {
     const { svc, press, frame } = await renderApp([ref('1', 'Old link', '')]);
-    await press('b', 'd');
+    await press('5', 'd');
     expect(svc.deleteReference).not.toHaveBeenCalled();
     expect(frame()).toContain('d again to delete');
     await press('d');
@@ -181,7 +181,7 @@ describe('b References view', () => {
 
   it('adds a link in the selected folder; q is typed, not quit', async () => {
     const { svc, press, frame } = await renderApp(library);
-    await press('b', DOWN, DOWN, DOWN); // ai/ → agents/ → Agents guide → Prompting (in ai)
+    await press('5', DOWN, DOWN, DOWN); // ai/ → agents/ → Agents guide → Prompting (in ai)
     await press('a', ...'https://q.dev', TAB, TAB, ...'quick', ENTER);
     expect(svc.createReference).toHaveBeenCalledWith(
       expect.objectContaining({ url: 'https://q.dev', folder: 'ai', description: 'quick' }),
@@ -239,13 +239,13 @@ describe('m files the selected update', () => {
 });
 
 describe('shortcuts ignore case', () => {
-  it('B opens References like b; M files the update like m; typed text keeps its case', async () => {
+  it('5 opens References; A adds and M files the update like m; typed text keeps its case', async () => {
     const { svc, press, frame } = await renderApp([ref('1', 'Agents guide', 'ai')]);
-    await press('B');
+    await press('5');
     expect(frame()).toContain('1 link');
     await press('A', ...'https://x.dev', TAB, TAB, ...'Big NOTE', ENTER);
     expect(svc.createReference).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://x.dev', description: 'Big NOTE' }));
-    await press('B', '1', 'M');
+    await press('5', '1', 'M');
     expect(frame()).toContain('File in References');
   });
 });
@@ -256,7 +256,7 @@ describe('Shift+↑/↓ jumps', () => {
   it('5 rows on a small terminal; Shift+j still moves one row', async () => {
     setTerminalRows(24);
     const { press, frame } = await renderApp(many);
-    await press('b', SHIFT_DOWN, 'd');
+    await press('5', SHIFT_DOWN, 'd');
     expect(frame()).toContain('d again to delete “Link 06”');
     await press(SHIFT_DOWN, SHIFT_DOWN, SHIFT_DOWN, SHIFT_UP, 'd');
     expect(frame()).toContain('d again to delete “Link 10”');
@@ -267,7 +267,7 @@ describe('Shift+↑/↓ jumps', () => {
   it('10 rows on a tall terminal', async () => {
     setTerminalRows(45);
     const { press, frame } = await renderApp(many);
-    await press('b', SHIFT_DOWN, 'd');
+    await press('5', SHIFT_DOWN, 'd');
     expect(frame()).toContain('d again to delete “Link 11”');
   });
 

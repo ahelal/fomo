@@ -10,8 +10,8 @@ const FILTERS = [
 
 /** Views opened over the feed, shown after the tabs. */
 const PANES = [
-  { key: 't', label: 'Todos', value: 'todos' },
-  { key: 'b', label: 'Refs',  value: 'refs' },
+  { key: '5', label: 'Refs',  value: 'refs' },
+  { key: '6', label: 'Todos', value: 'todos' },
 ] as const;
 
 /** Views that switch between topics and a plain list when their key is pressed again. */

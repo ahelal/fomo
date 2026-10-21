@@ -65,7 +65,7 @@ const REFERENCE_KEYS: [string, string][] = [
   ['y',     'Copy link'],
   ['/',     'Search titles, links, folders & descriptions'],
   ['Esc',   'Clear the search'],
-  ['b',     'Back to the previous view'],
+  ['5',     'Back to the previous view'],
 ];
 
 const GLOBAL_KEYS: [string, string][] = [
@@ -74,8 +74,8 @@ const GLOBAL_KEYS: [string, string][] = [
   ['⇧↑/⇧↓','Jump 5 rows (10 on a tall window)'],
   ['1–4',  'All / unread / read / saved'],
   ['2 / 4','Again: switch Unread / Saved between topics and a list'],
-  ['5/t',  'Todos'],
-  ['6/b',  'References: links filed into folders'],
+  ['5',    'References: links filed into folders'],
+  ['6',    'Todos'],
   ['m',    'File the selected update in References'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],

@@ -146,7 +146,7 @@ Press `g` on an update in the TUI to have Copilot summarise it: one sentence wit
 - **File a feed update:** press `m` on an update in the TUI or the web app, or use the 🔖 button in the detail pane. The title, URL and any summary are filled in.
   - In the TUI, Copilot also suggests a folder (reusing your existing folders where they fit) and a one-line description. Edit either before saving.
   - If the link is already filed, `m` opens it for editing instead of adding a duplicate.
-- **Add any link:** open References (`b` in the TUI, `6` or `b` on the web) and press `a`. The new link goes in the selected folder.
+- **Add any link:** open References (`5`) and press `a`. The new link goes in the selected folder.
   - In the TUI form, `^G` asks Copilot to suggest a folder and description, and a title if one is missing. FOMO fetches the page to do this.
 - **Folders** exist only as long as they hold links; they're not stored separately. Type a new path to create one.
   - `e` on a folder renames or moves it together with its subfolders. `e` on a link edits it.
@@ -246,8 +246,8 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 |-----------------|-------------------------------------------|
 | `1` `2` `3` `4` | All / Unread / Read / Saved               |
 | `2` / `4` again | Switch Unread / Saved between topics and a list (or click the active tab) |
-| `5` / `t`       | Todos                                     |
-| `6` / `b`       | [References](#references) (`b` again returns to the previous view) |
+| `5`             | [References](#references) (`5` again returns to the previous view) |
+| `6`             | Todos                                     |
 | `m`             | File the selected update in References    |
 | `/`             | Search titles & content in the current view (`Enter` searches, `Esc` clears) |
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply); `Esc` clears it after the search |
@@ -298,8 +298,8 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `f`             | Fetch latest updates + Copilot digest     |
 | `z` twice       | Regroup all topics with Copilot (`Esc` after the first `z` cancels) |
 | `c`             | Config: sources, link a device, backup / restore, local settings |
-| `t`             | Todos (`a` add, `Enter` cycle status, `d` delete) |
-| `b`             | [References](#references): links filed into folders |
+| `5`             | [References](#references): links filed into folders (`5` again closes) |
+| `6`             | Todos (`a` add, `Enter` cycle status, `d` delete, `6` again closes) |
 | `m`             | File the selected update in References (Copilot suggests a folder and note) |
 | `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply) |

@@ -49,12 +49,12 @@ const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: '2 Unread', value: 'unread' },
   { label: '3 Read', value: 'read' },
   { label: '4 Saved', value: 'saved' },
-  { label: '5 Todos', value: 'todos' },
-  { label: '6 Refs', value: 'refs' },
+  { label: '5 Refs', value: 'refs' },
+  { label: '6 Todos', value: 'todos' },
 ];
 
 const FILTER_KEYS: Record<string, FilterStatus> = {
-  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'todos', t: 'todos', '6': 'refs', b: 'refs',
+  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'refs', '6': 'todos',
 };
 
 /** Rows of text that fit in the window (≈20px each), for `jumpStep`. */
@@ -452,7 +452,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         return;
       }
       if (key === 'c') { setShowSettings(true); return; }
-      if (key === 'b' && fomo.filter === 'refs') { setFilter(backFilter.current); return; }
+      if (key === '5' && fomo.filter === 'refs') { setFilter(backFilter.current); return; }
       if (key in FILTER_KEYS) { setFilter(FILTER_KEYS[key]!); return; }
       if (key === '.') {
         const next: PreviewPosition = previewPosition === 'right' ? 'bottom' : 'right';
