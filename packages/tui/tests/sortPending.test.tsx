@@ -190,3 +190,20 @@ describe('sort (s)', () => {
     expect(order('Alpha task', 'Zulu task')).toBe(true);
   });
 });
+
+describe('Tab cycles the views', () => {
+  it('steps 1–6 with Tab, wrapping, and back with Shift+Tab', async () => {
+    const { press, frame, listCalls } = await renderApp();
+    await press('\t'); // Unread → Read
+    expect(listCalls.at(-1)?.status).toBe('read');
+    await press('\t'); // → Pending
+    await press('\t'); // → Refs
+    await press('\t'); // → Todos
+    expect(frame()).toContain('Zulu task');
+    await press('\t'); // → All (wraps)
+    expect(frame()).not.toContain('Zulu task');
+    expect(listCalls.at(-1)?.status).toBe('all');
+    await press('\u001b[Z'); // Shift+Tab → Todos
+    expect(frame()).toContain('Zulu task');
+  });
+});

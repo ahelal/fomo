@@ -37,6 +37,7 @@ type GroupableView = 'unread' | 'saved';
 type GroupedViews = Record<GroupableView, boolean>;
 const canGroup = (f: FilterStatus): f is GroupableView => f === 'unread' || f === 'saved';
 const isGrouped = (f: FilterStatus, g: GroupedViews) => canGroup(f) && g[f];
+const VIEW_ORDER = ['all', 'unread', 'read', 'saved', 'refs', 'todos'] as const;
 
 /** Sort of each view (cycled with s); kept for the session only. */
 interface ViewSorts {
@@ -1089,6 +1090,19 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     else showMessage(`Removed ${name}${items > 0 ? ` · its ${items} items stay until you delete them` : builtin ? ' · restore it at the end of the list' : ''}`, 5000);
   }, [sourceName, stats, appSettings, updateRemoteSettings, deleteSourceItems, showMessage]);
 
+  /** Tab / Shift+Tab: step through the views in tab order (1–6), wrapping around. */
+  const cycleView = (dir: 1 | -1) => {
+    const current = refs.active ? 'refs' : showTodos ? 'todos' : filter;
+    const next = VIEW_ORDER[(VIEW_ORDER.indexOf(current) + dir + VIEW_ORDER.length) % VIEW_ORDER.length]!;
+    if (refs.active) refs.close();
+    if (next === 'refs') { setShowTodos(false); refs.openView(); return; }
+    if (next === 'todos') { setShowTodos(true); void loadTodos(); return; }
+    setShowTodos(false);
+    setFilter(next);
+    setSelectedIndex(0);
+    void refresh(next);
+  };
+
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((raw, key) => {
     // Shortcuts ignore case (Shift+b does what b does); typed text keeps `raw`.
@@ -1325,6 +1339,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         setShowHelp(true);
         return;
       }
+      if (key.tab && !refs.typing) { cycleView(key.shift ? -1 : 1); return; }
       if (input === '6' && !refs.typing) {
         refs.close();
         setShowTodos(true);
@@ -1395,6 +1410,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
 
       // List mode inside todos view
+      if (key.tab) { cycleView(key.shift ? -1 : 1); return; }
       if (key.escape || key.backspace || input === '6') {
         setShowTodos(false);
         return;
@@ -1745,6 +1761,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     // Navigation
     if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - step));                return; }
     if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.max(0, Math.min(listLength - 1, i + step))); return; }
+
+    if (key.tab) { cycleView(key.shift ? -1 : 1); return; }
 
     // Filters
     const filterMap: Record<string, FilterStatus> = { '1': 'all', '2': 'unread', '3': 'read', '4': 'saved' };

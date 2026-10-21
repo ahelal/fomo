@@ -454,6 +454,14 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       if (key === 'c') { setShowSettings(true); return; }
       if (key === '5' && fomo.filter === 'refs') { setFilter(backFilter.current); return; }
       if (key in FILTER_KEYS) { setFilter(FILTER_KEYS[key]!); return; }
+      // Tab / Shift+Tab step through the views in tab order (1–6), wrapping around.
+      if (key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        const views = Object.values(FILTER_KEYS);
+        const i = views.indexOf(fomo.filter);
+        setFilter(views[(i + (e.shiftKey ? -1 : 1) + views.length) % views.length]!);
+        return;
+      }
       if (key === '.') {
         const next: PreviewPosition = previewPosition === 'right' ? 'bottom' : 'right';
         void fomo.updateSettings({ previewPosition: next });

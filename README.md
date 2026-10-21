@@ -248,6 +248,7 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `2` / `4` again | Switch Unread / Pending between topics and a list (or click the active tab) |
 | `5`             | [References](#references) (`5` again returns to the previous view) |
 | `6`             | Todos                                     |
+| `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
 | `m`             | File the selected update in References    |
 | `/`             | Search titles & content in the current view (`Enter` searches, `Esc` clears) |
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply); `Esc` clears it after the search |
@@ -303,6 +304,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `c`             | Config: sources, link a device, backup / restore, local settings |
 | `5`             | [References](#references): links filed into folders (`5` again closes) |
 | `6`             | Todos (`a` add, `Enter` cycle status, `d` delete, `6` again closes) |
+| `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
 | `m`             | File the selected update in References (Copilot suggests a folder and note) |
 | `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply) |
