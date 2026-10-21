@@ -24,7 +24,8 @@ export function parseFeed(xml: string, filter: FeedFilter = {}): ScrapedItem[] {
     if (!title || !url) continue;
 
     const content = htmlToText(
-      tag(block, 'content:encoded') || tag(block, 'description') || tag(block, 'content') || tag(block, 'summary'),
+      tag(block, 'content:encoded') || tag(block, 'description') || tag(block, 'content') || tag(block, 'summary')
+        || tag(block, 'media:description'),
     ).slice(0, MAX_CONTENT);
     if (include && !include.test(`${title} ${content}`)) continue;
 

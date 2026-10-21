@@ -1,5 +1,5 @@
-const USER_AGENT = 'Mozilla/5.0 fomo-release-tracker/1.0';
-const TIMEOUT_MS = 15_000;
+export const USER_AGENT = 'Mozilla/5.0 fomo-release-tracker/1.0';
+export const TIMEOUT_MS = 15_000;
 
 /** GET `url` and return the body; throws `HTTP <status>` on a non-2xx response. */
 export async function fetchText(url: string, headers: Record<string, string> = {}): Promise<string> {

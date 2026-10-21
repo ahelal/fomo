@@ -246,7 +246,7 @@ export function settingsRowText(row: SettingsRow, config: LocalConfig, sourceLab
     case 'header': return row.label;
     case 'action': return `${row.label} ${row.hint}`;
     case 'source': return `${row.source.displayName} ${row.source.id} ${sourceLabel(row.source.id)} ${row.source.kind} ${row.source.location ?? ''}`;
-    case 'add-source': return 'Add source feed rss atom github releases';
+    case 'add-source': return 'Add source feed rss atom github releases youtube';
     case 'restore-sources': return 'Restore removed sources';
     case 'preview': return 'Preview position right bottom off';
     case 'config': return `${row.label} ${row.field} ${configDisplay(config, row.field).value}`;
@@ -261,7 +261,7 @@ export function rowHint(row: SettingsRow | undefined): string {
     case 'source': return row.source.removed
       ? '↵ details   v show its updates   x delete its items (removes it for good)'
       : '↵ details & edit   space on/off   e label   d color   f fetch now   v show its updates   x remove';
-    case 'add-source': return '↵ add an RSS/Atom feed or a GitHub repository';
+    case 'add-source': return '↵ add an RSS/Atom feed, a GitHub repository or a YouTube channel';
     case 'restore-sources': return '↵ bring back the removed built-in sources';
     case 'preview': return '↵ cycle';
     case 'config':

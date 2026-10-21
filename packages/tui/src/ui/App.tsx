@@ -946,8 +946,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       if (draft.step === 'name') {
         const named = newUserSource({ url: draft.url, name: value }, appSettings);
         if ('error' in named) { fail(named.error); return; }
-        // A keyword filter only applies to feeds
-        if (named.spec.kind === 'feed') {
+        // A keyword filter only applies to feeds and YouTube
+        if (named.spec.kind === 'feed' || named.spec.kind === 'youtube') {
           setAddDraft({ ...draft, step: 'include', name: value });
           setEditBuffer('');
           return;
@@ -1282,8 +1282,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
       if (input === 'f') { setSourceDetails(ready); void doFetch([d.id]); return; }
       if (input === 'v') { setSourceDetails(undefined); setShowSettings(false); applySourceFilter([d.id]); return; }
-      if (field === 'enabled' && (key.return || input === ' ')) {
-        setSourceDetails({ ...ready, draft: { ...d.draft, enabled: !d.draft.enabled } });
+      if ((field === 'enabled' || field === 'shorts') && (key.return || input === ' ')) {
+        setSourceDetails({ ...ready, draft: { ...d.draft, [field]: !d.draft[field] } });
         return;
       }
       if (field === 'color' && (key.return || key.rightArrow || key.leftArrow)) {
@@ -1292,8 +1292,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         setSourceDetails({ ...ready, draft: { ...d.draft, color: next } });
         return;
       }
-      if (key.return || input === 'e') {
-        setSourceDetails({ ...ready, error: undefined, editing: String(d.draft[field]) });
+      if ((key.return || input === 'e') && typeof d.draft[field] === 'string') {
+        setSourceDetails({ ...ready, error: undefined, editing: d.draft[field] });
         return;
       }
       if (d.confirm) setSourceDetails(ready);

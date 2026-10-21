@@ -341,7 +341,7 @@ Press `c`. The bottom line shows the keys for the selected row. Each section hea
 | | Show web app QR | `Enter`: QR code of the plain web app URL (no access token) to open it on your phone · `o` opens it in the browser |
 | | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread and saved update |
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
-| **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed or GitHub repo; **Restore removed** brings back removed built-ins |
+| **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed, GitHub repo or YouTube channel; **Restore removed** brings back removed built-ins |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
 | **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (minutes), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (Auto-fetch takes 5–1440 minutes or `off`; Group after fetch toggles; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. |
 
@@ -387,11 +387,11 @@ APIs. Each fetch adds previously unseen URLs; stored updates are retained.
 Most sources need no code:
 
 - **From the app:** in the TUI press `c` → **+ Add source** and type an RSS/Atom feed URL (several: separate with
-  spaces) or `https://github.com/owner/repo`, a name, and an optional keyword filter (regex). In the web app use
+  spaces), `https://github.com/owner/repo` or a YouTube channel/playlist URL, a name, and an optional keyword filter (regex). In the web app use
   the form under ⚙️ Config → **Sources**. Sources you add are stored in the shared settings; `x` (TUI) or ✕ (web)
   removes a source, and removed built-ins can be restored. Open a source (`↵` in the TUI, click its name in the
   web app) to see its status and edit it.
-- **Built-in:** add a `feed` or `github-releases` spec to `BUILTIN_SOURCES` in
+- **Built-in:** add a `feed`, `github-releases` or `youtube` spec to `BUILTIN_SOURCES` in
   `packages/core/src/scraper/specs.ts`.
 - **Custom code** (sites without a feed): add a module in `packages/core/src/scraper/sources/custom/`, register it in
   its `index.ts`, and point a `custom` spec at it.

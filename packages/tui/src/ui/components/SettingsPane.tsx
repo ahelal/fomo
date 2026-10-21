@@ -213,7 +213,7 @@ export const SettingsPane = React.memo(function SettingsPane({
           </Text>
         );
       }
-      const hint = clip(add ? 'RSS/Atom feed or GitHub repository releases' : `${row.count} built-in source${row.count === 1 ? '' : 's'} removed`, restW);
+      const hint = clip(add ? 'RSS/Atom feed, GitHub repository releases or YouTube channel' : `${row.count} built-in source${row.count === 1 ? '' : 's'} removed`, restW);
       return (
         <Text key={row.key} wrap="truncate">
           {cursor}

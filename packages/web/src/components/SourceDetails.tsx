@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   isGithubRepoUrl,
+  isYoutubeChannelUrl,
   sourceDraft,
   sourceDraftPatch,
   timeAgo,
@@ -30,6 +31,7 @@ interface Props {
 const KIND_LABEL: Record<SourceInfo['kind'], string> = {
   feed: 'RSS/Atom feed',
   'github-releases': 'GitHub releases',
+  youtube: 'YouTube',
   custom: 'Custom code',
 };
 
@@ -139,13 +141,18 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
                 <input className="settings-panel__add-input" value={draft.name} onChange={(e) => set({ name: e.target.value })} />
               </label>
               <label className="source-details__field">
-                <span>{own.kind === 'feed' ? 'Feed URLs (one per line) or GitHub repo URL' : 'GitHub repo URL'}</span>
+                <span>{own.kind === 'feed' ? 'Feed URLs (one per line) or GitHub repo URL' : own.kind === 'youtube' ? 'YouTube channel or playlist URL' : 'GitHub repo URL'}</span>
                 <textarea className="settings-panel__add-input" rows={3} value={draft.url} onChange={(e) => set({ url: e.target.value })} />
               </label>
               {!isRepo && (
                 <label className="source-details__field">
                   <span>Keywords to keep (regex, optional)</span>
                   <input className="settings-panel__add-input" value={draft.include} onChange={(e) => set({ include: e.target.value })} />
+                </label>
+              )}
+              {isYoutubeChannelUrl(draft.url) && (
+                <label className="source-details__check">
+                  <input type="checkbox" checked={draft.shorts} onChange={(e) => set({ shorts: e.target.checked })} /> Include Shorts
                 </label>
               )}
               {error && <p className="settings-panel__error">⚠ {error}</p>}

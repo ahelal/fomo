@@ -1,9 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { isGithubRepoUrl, timeAgo, type SourceDraft, type SourceFetchResult, type SourceInfo, type StatsResponse } from '@fomo/core';
+import { isGithubRepoUrl, isYoutubeChannelUrl, timeAgo, type SourceDraft, type SourceFetchResult, type SourceInfo, type StatsResponse } from '@fomo/core';
 import { COLOR_PALETTE } from './SettingsPane.js';
 
-export type DetailsField = 'enabled' | 'label' | 'color' | 'name' | 'url' | 'include';
+export type DetailsField = 'enabled' | 'label' | 'color' | 'name' | 'url' | 'include' | 'shorts';
 
 /** State of the source details popup (Config → ↵ on a source). */
 export interface SourceDetailsState {
@@ -17,10 +17,10 @@ export interface SourceDetailsState {
   error?: string;
 }
 
-/** The rows of the popup: name, URLs and filter only for the user's own sources (no filter for a repository). */
+/** The rows of the popup: name, URLs and filter only for the user's own sources (no filter for a repository; Shorts for a YouTube channel). */
 export function detailsFields(own: boolean, draft: SourceDraft): DetailsField[] {
   const fields: DetailsField[] = ['enabled', 'label', 'color'];
-  if (own) fields.push('name', 'url', ...(isGithubRepoUrl(draft.url) ? [] : ['include' as const]));
+  if (own) fields.push('name', 'url', ...(isGithubRepoUrl(draft.url) ? [] : ['include' as const]), ...(isYoutubeChannelUrl(draft.url) ? ['shorts' as const] : []));
   return fields;
 }
 
@@ -31,11 +31,13 @@ const FIELD_LABEL: Record<DetailsField, string> = {
   name: 'Name',
   url: 'URL(s)',
   include: 'Keywords',
+  shorts: 'Shorts',
 };
 
 const KIND_LABEL: Record<SourceInfo['kind'], string> = {
   feed: 'RSS/Atom feed',
   'github-releases': 'GitHub releases',
+  youtube: 'YouTube',
   custom: 'custom code',
 };
 
@@ -74,6 +76,7 @@ export function SourceDetailsPane({ source, state, own, changed, stats, items, l
       case 'name': return { text: draft.name };
       case 'url': return { text: draft.url };
       case 'include': return draft.include ? { text: draft.include } : { text: '(none — keeps everything)', muted: true };
+      case 'shorts': return draft.shorts ? { text: '[x] included' } : { text: '[ ] skipped (videos and live streams only)', muted: true };
     }
   };
 
@@ -91,7 +94,7 @@ export function SourceDetailsPane({ source, state, own, changed, stats, items, l
     ? 'unsaved changes — s save   Esc again to drop them'
     : removed
     ? `${deleteItems.trim()}   v show its updates${source.builtin ? '   r restore' : ''}   Esc close`
-    : `↑↓ move   ↵ ${fields[focus] === 'enabled' ? 'toggle' : fields[focus] === 'color' ? 'next color' : 'edit'}   s save   f fetch now   v show its updates${deleteItems}   x remove   Esc close`;
+    : `↑↓ move   ↵ ${fields[focus] === 'enabled' || fields[focus] === 'shorts' ? 'toggle' : fields[focus] === 'color' ? 'next color' : 'edit'}   s save   f fetch now   v show its updates${deleteItems}   x remove   Esc close`;
 
   return (
     <Box flexDirection="column" height={height} width={columns} paddingX={2} paddingTop={1}>
@@ -146,7 +149,7 @@ export function SourceDetailsPane({ source, state, own, changed, stats, items, l
 
 function field(f: DetailsField | undefined): string {
   switch (f) {
-    case 'url': return 'feed URLs (separate with spaces) or github.com/owner/repo';
+    case 'url': return 'feed URLs (separate with spaces), github.com/owner/repo or a YouTube channel/playlist URL';
     case 'include': return 'keywords to keep, as a regex (empty keeps everything)';
     case 'label': return 'a short label (empty shows the name)';
     default: return 'a value';

@@ -34,6 +34,7 @@ export {
   sourceDraft,
   sourceDraftPatch,
   isGithubRepoUrl,
+  isYoutubeChannelUrl,
   type SourceDraft,
   removeSourcePatch,
   retiredSources,

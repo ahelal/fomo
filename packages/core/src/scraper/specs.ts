@@ -1,4 +1,5 @@
 import type { AppSettings, SourceId, SourceInfo, SourceSpec, UserSourceSpec } from '../types.js';
+import { parseYoutubeUrl, youtubeName, youtubeUrl } from './youtube.js';
 
 const AZURE_UPDATES_FEED = 'https://www.microsoft.com/releasecommunications/api/v2/azure/rss';
 
@@ -40,9 +41,16 @@ export function sourceInfo(spec: SourceSpec): SourceInfo {
     capabilities: { preview: spec.kind === 'custom' ? spec.preview !== false : true },
     kind: spec.kind,
     builtin: BUILTIN_IDS.has(spec.id),
-    location: spec.kind === 'feed' ? spec.urls.join(' ') : spec.kind === 'github-releases' ? `github.com/${spec.repo}` : undefined,
-    filter: spec.kind === 'feed' ? [spec.include && `keywords /${spec.include}/`, spec.category && `category “${spec.category}”`].filter(Boolean).join(', ') || undefined : undefined,
+    location: spec.kind === 'feed' ? spec.urls.join(' ') : spec.kind === 'github-releases' ? `github.com/${spec.repo}` : spec.kind === 'youtube' ? youtubeUrl(spec) : undefined,
+    filter: sourceFilter(spec),
   };
+}
+
+function sourceFilter(spec: SourceSpec): string | undefined {
+  const keywords = (spec.kind === 'feed' || spec.kind === 'youtube') && spec.include ? `keywords /${spec.include}/` : undefined;
+  if (spec.kind === 'feed') return [keywords, spec.category && `category “${spec.category}”`].filter(Boolean).join(', ') || undefined;
+  if (spec.kind === 'youtube' && !spec.playlist) return [keywords, spec.shorts ? undefined : 'no Shorts'].filter(Boolean).join(', ') || undefined;
+  return spec.kind === 'youtube' ? keywords : undefined;
 }
 
 export function sourceInfos(settings: Partial<SourceSettings> = {}): SourceInfo[] {
@@ -51,12 +59,14 @@ export function sourceInfos(settings: Partial<SourceSettings> = {}): SourceInfo[
 
 /** What the user types to add a source. */
 export interface NewSourceInput {
-  /** Feed URL(s), separated by spaces or commas, or a GitHub repository URL for its releases. */
+  /** Feed URL(s), separated by spaces or commas, a GitHub repository URL for its releases, or a YouTube channel or playlist URL. */
   url: string;
   /** Defaults to the feed's host or the repository. */
   name?: string;
-  /** Optional keyword filter (case-insensitive regex) for feeds. */
+  /** Optional keyword filter (case-insensitive regex) for feeds and YouTube. */
   include?: string;
+  /** Include Shorts of a YouTube channel. */
+  shorts?: boolean;
 }
 
 const GITHUB_REPO_URL = /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?(?:releases\/?)?$/i;
@@ -64,7 +74,7 @@ const GITHUB_REPO_URL = /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+?)(
 /** Build a validated spec for a new user source, with an id not used by any other source. */
 export function newUserSource(input: NewSourceInput, settings: Partial<SourceSettings> = {}): { spec: UserSourceSpec } | { error: string } {
   const urls = input.url.split(/[\s,]+/).filter(Boolean);
-  if (urls.length === 0) return { error: 'Enter a feed URL or a GitHub repository URL' };
+  if (urls.length === 0) return { error: 'Enter a feed URL, a GitHub repository URL or a YouTube channel URL' };
   for (const url of urls) {
     if (!isHttpUrl(url)) return { error: `Not an http(s) URL: ${url}` };
   }
@@ -73,14 +83,24 @@ export function newUserSource(input: NewSourceInput, settings: Partial<SourceSet
     try { new RegExp(include, 'i'); } catch { return { error: `Invalid keyword filter: ${include}` }; }
   }
 
+  const youtube = urls.map(parseYoutubeUrl);
+  const target = youtube[0];
+  if (target && 'error' in target) return target;
+  if (youtube.some(Boolean) && urls.length > 1) return { error: 'Add one YouTube channel or playlist per source' };
+
   const repo = urls.length === 1 ? urls[0].match(GITHUB_REPO_URL)?.[1] : undefined;
-  const displayName = input.name?.trim() || (repo ? `${repo} releases` : new URL(urls[0]).hostname.replace(/^www\./, ''));
+  const defaultName = target ? youtubeName(target) : repo ? `${repo} releases` : new URL(urls[0]).hostname.replace(/^www\./, '');
+  const displayName = input.name?.trim() || defaultName;
   const taken = new Set([...BUILTIN_IDS, ...(settings.userSources ?? []).map((s) => s.id)]);
   const id = uniqueId(slugify(displayName) || 'source', taken);
 
   if (repo) {
     if (include) return { error: 'The keyword filter only works for feeds' };
     return { spec: { kind: 'github-releases', id, displayName, repo } };
+  }
+  if (target) {
+    const shorts = 'channel' in target && input.shorts ? { shorts: true } : {};
+    return { spec: { kind: 'youtube', id, displayName, ...target, ...shorts, ...(include ? { include } : {}) } };
   }
   return { spec: { kind: 'feed', id, displayName, urls, ...(include ? { include } : {}) } };
 }
@@ -92,9 +112,11 @@ export function userSource(settings: Partial<SourceSettings>, id: SourceId): Use
 
 /** The editable fields of a user source, as `newUserSource` takes them. */
 export function sourceEditInput(spec: UserSourceSpec): Required<NewSourceInput> {
-  return spec.kind === 'feed'
-    ? { url: spec.urls.join(' '), name: spec.displayName, include: spec.include ?? '' }
-    : { url: `https://github.com/${spec.repo}`, name: spec.displayName, include: '' };
+  switch (spec.kind) {
+    case 'feed': return { url: spec.urls.join(' '), name: spec.displayName, include: spec.include ?? '', shorts: false };
+    case 'github-releases': return { url: `https://github.com/${spec.repo}`, name: spec.displayName, include: '', shorts: false };
+    case 'youtube': return { url: youtubeUrl(spec), name: spec.displayName, include: spec.include ?? '', shorts: !!spec.shorts };
+  }
 }
 
 /** Rebuild a user source from edited fields. The id never changes, so its stored updates stay with it. */
@@ -116,9 +138,11 @@ export interface SourceDraft {
   /** Empty keeps the default color. */
   color: string;
   name: string;
-  /** Feed URLs separated by spaces or new lines, or a GitHub repository URL. */
+  /** Feed URLs separated by spaces or new lines, a GitHub repository URL, or a YouTube channel or playlist URL. */
   url: string;
   include: string;
+  /** Include Shorts; only applies to a YouTube channel. */
+  shorts: boolean;
 }
 
 /** The current values of a source, to start editing it. */
@@ -128,7 +152,7 @@ export function sourceDraft(settings: Pick<AppSettings, 'disabledSources' | 'sou
     enabled: !settings.disabledSources.includes(id),
     label: settings.sourceLabels[id] ?? '',
     color: settings.sourceColors?.[id] ?? '',
-    ...(own ? sourceEditInput(own) : { name: '', url: '', include: '' }),
+    ...(own ? sourceEditInput(own) : { name: '', url: '', include: '', shorts: false }),
   };
 }
 
@@ -138,12 +162,19 @@ export function isGithubRepoUrl(url: string): boolean {
   return urls.length === 1 && GITHUB_REPO_URL.test(urls[0]);
 }
 
+/** Whether `url` is one YouTube channel (so Shorts can be turned on or off). */
+export function isYoutubeChannelUrl(url: string): boolean {
+  const urls = url.split(/[\s,]+/).filter(Boolean);
+  const target = urls.length === 1 ? parseYoutubeUrl(urls[0]) : undefined;
+  return !!target && 'channel' in target;
+}
+
 /** Settings patch that saves an edited draft of source `id`. */
 export function sourceDraftPatch(settings: AppSettings, id: SourceId, draft: SourceDraft): { patch: Partial<AppSettings> } | { error: string } {
   const patch: Partial<AppSettings> = {};
   const own = userSource(settings, id);
   if (own) {
-    const edited = editUserSource(own, { url: draft.url, name: draft.name, include: isGithubRepoUrl(draft.url) ? undefined : draft.include });
+    const edited = editUserSource(own, { url: draft.url, name: draft.name, include: isGithubRepoUrl(draft.url) ? undefined : draft.include, shorts: draft.shorts });
     if ('error' in edited) return edited;
     Object.assign(patch, updateSourcePatch(settings, edited.spec));
   }

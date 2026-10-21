@@ -60,7 +60,7 @@ export interface ScrapedItem {
 /**
  * A source is described by data (`SourceSpec`) and turned into a `SourcePlugin` by
  * `createSource()` in `scraper/factory.ts`. Built-ins live in `scraper/specs.ts`;
- * users add `feed` and `github-releases` sources from the app (`AppSettings.userSources`).
+ * users add `feed`, `github-releases` and `youtube` sources from the app (`AppSettings.userSources`).
  */
 export interface SourcePlugin {
   /** Unique slug, e.g. 'github', 'azure'. Used as PartitionKey in Table Storage. */
@@ -96,6 +96,22 @@ export interface GithubReleasesSourceSpec extends SourceSpecBase {
   repo: string;
 }
 
+/**
+ * Uploads of a YouTube channel, or one playlist, from YouTube's public Atom feeds (no API key).
+ * Only the TUI fetches it: `@handle` and legacy channel paths are resolved to a `UC…` id at fetch time.
+ */
+export interface YoutubeSourceSpec extends SourceSpecBase {
+  kind: 'youtube';
+  /** `UC…` channel id, `@handle`, `c/Name` or `user/Name`. Unused with `playlist`. */
+  channel?: string;
+  /** `PL…` playlist id. */
+  playlist?: string;
+  /** Include Shorts. Off (the default) keeps regular videos and past live streams. */
+  shorts?: boolean;
+  /** Keep only videos whose title or description matches this case-insensitive regex. */
+  include?: string;
+}
+
 /** A source written in code: `module` names a file in `scraper/sources/custom/`. Built-in only. */
 export interface CustomSourceSpec extends SourceSpecBase {
   kind: 'custom';
@@ -105,10 +121,10 @@ export interface CustomSourceSpec extends SourceSpecBase {
   preview?: boolean;
 }
 
-export type SourceSpec = FeedSourceSpec | GithubReleasesSourceSpec | CustomSourceSpec;
+export type SourceSpec = FeedSourceSpec | GithubReleasesSourceSpec | YoutubeSourceSpec | CustomSourceSpec;
 export type SourceKind = SourceSpec['kind'];
 /** Kinds users can add from the app; `custom` needs code. */
-export type UserSourceSpec = FeedSourceSpec | GithubReleasesSourceSpec;
+export type UserSourceSpec = FeedSourceSpec | GithubReleasesSourceSpec | YoutubeSourceSpec;
 
 /** Source metadata exposed to the UI and API consumers. */
 export interface SourceInfo {
@@ -118,7 +134,7 @@ export interface SourceInfo {
   kind: SourceKind;
   /** Shipped with the app (removing it hides it) rather than added by the user. */
   builtin: boolean;
-  /** Feed URLs or the GitHub repo, for display. */
+  /** Feed URLs, the GitHub repo or the YouTube channel, for display. */
   location?: string;
   /** What a feed keeps, for display: its keyword regex and/or category. */
   filter?: string;

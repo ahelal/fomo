@@ -44,7 +44,7 @@ export function DigestTable({
   expanded,
   pending,
   grouping = false,
-  selectedIndex,
+  selectedIndex: selectedProp,
   height,
   columns,
   sourceLabels = {},
@@ -52,6 +52,8 @@ export function DigestTable({
   search,
   mode = 'digest',
 }: Props) {
+  // The list can shrink (e.g. after grouping) one render before App clamps its selection
+  const selectedIndex = Math.max(0, Math.min(selectedProp, rows.length - 1));
   const saved = mode === 'saved';
   // header(1) + bottom indicator(1)
   const budget = Math.max(1, height - 2);

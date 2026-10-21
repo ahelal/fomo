@@ -655,7 +655,7 @@ describe('source specs', () => {
     const current = settings({ userSources: [a, b] });
     expect(userSource(current, 'a')).toBe(a);
     expect(userSource(current, 'github')).toBeUndefined();
-    expect(sourceEditInput(a)).toEqual({ url: 'https://a.example/rss', name: 'A', include: 'x' });
+    expect(sourceEditInput(a)).toEqual({ url: 'https://a.example/rss', name: 'A', include: 'x', shorts: false });
 
     const edited = editUserSource(a, { url: 'https://github.com/octo/app', name: 'Octo' });
     expect(edited).toEqual({ spec: { kind: 'github-releases', id: 'a', displayName: 'Octo', repo: 'octo/app' } });
@@ -667,7 +667,7 @@ describe('source specs', () => {
   it('saves a draft of the details popup', () => {
     const mine = { kind: 'feed' as const, id: 'mine', displayName: 'Mine', urls: ['https://a.example/rss'] };
     const current = settings({ userSources: [mine], sourceColors: { github: '#3fb950' } });
-    expect(sourceDraft(current, 'github')).toEqual({ enabled: true, label: '', color: '#3fb950', name: '', url: '', include: '' });
+    expect(sourceDraft(current, 'github')).toEqual({ enabled: true, label: '', color: '#3fb950', name: '', url: '', include: '', shorts: false });
     expect(sourceDraft(current, 'mine')).toMatchObject({ name: 'Mine', url: 'https://a.example/rss' });
 
     const builtin = sourceDraftPatch(current, 'github', { ...sourceDraft(current, 'github'), enabled: false, label: '🐙', color: '' });

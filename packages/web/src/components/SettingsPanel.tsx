@@ -49,7 +49,7 @@ export const COLOR_PALETTE = [
   '#94a3b8', // slate
 ];
 
-/** Form that adds an RSS/Atom feed or a GitHub repository's releases. */
+/** Form that adds an RSS/Atom feed, a GitHub repository's releases or a YouTube channel. */
 function AddSourceForm({ settings, onAdd }: { settings: AppSettings; onAdd(spec: UserSourceSpec): void }) {
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
@@ -72,8 +72,8 @@ function AddSourceForm({ settings, onAdd }: { settings: AppSettings; onAdd(spec:
         className="settings-panel__add-input"
         value={url}
         onChange={(e) => { setUrl(e.target.value); setError(undefined); }}
-        placeholder="Feed URL(s) or github.com/owner/repo"
-        aria-label="Feed URL or GitHub repository"
+        placeholder="Feed URL(s), github.com/owner/repo or a YouTube channel"
+        aria-label="Feed URL, GitHub repository or YouTube channel"
       />
       <input
         className="settings-panel__add-input"

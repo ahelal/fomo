@@ -128,7 +128,7 @@ const SETTINGS_KEYS: [string, string][] = [
   ['x',    'Remove this source: x again keeps its items, d deletes them too'],
   ['s',    'In source details: save the changes'],
   ['d',    'In source details: delete its stored items (d again to confirm)'],
-  ['↵',    'On “Add source”: add an RSS/Atom feed or GitHub repo'],
+  ['↵',    'On “Add source”: add an RSS/Atom feed, GitHub repo or YouTube channel'],
   ['o',    'Open the web app in the browser (web app rows)'],
   ['/',    'Search rows (a matching section header keeps its rows)'],
   ['Esc/⌫','Cancel / close config'],
