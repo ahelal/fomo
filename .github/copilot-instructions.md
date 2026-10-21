@@ -19,7 +19,7 @@
 - Shared logic, data models, store access, digest and scraper implementations: `packages/core/src/**`.
 - UI components and frontend state: `packages/web/src/**`.
 - TUI screens, local config, Copilot adapter: `packages/tui/src/**` (config screen rows in `src/ui/settings.ts`).
-- New data source/plugin: add `packages/core/src/scraper/sources/<name>.ts` and register it in `packages/core/src/scraper/registry.ts`.
+- New data source: add a `feed`/`github-releases` spec to `BUILTIN_SOURCES` in `packages/core/src/scraper/specs.ts` (users can also add these from the app; they are stored in `userSources`). Only for sites without a feed, add a code module in `packages/core/src/scraper/sources/custom/`, built on the helpers in `scraper/{http,text,feed,github}.ts`, register it in `sources/custom/index.ts`, and point a `custom` spec at it. See `EXTENDING.md`.
 - Azure changes: `infra/**`, `deploy.sh`.
 
 ## Working conventions

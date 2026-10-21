@@ -61,6 +61,8 @@ export interface FomoActions {
   setSaved(id: string, saved: boolean): Promise<void>;
   loadContent(id: string): Promise<void>;
   updateSettings(patch: Partial<AppSettings>): Promise<void>;
+  /** Delete every stored update of a source; resolves to how many, or undefined on failure. */
+  deleteSourceUpdates(source: string): Promise<number | undefined>;
   refresh(): Promise<void>;
   /** Show a short message in the status bar. */
   notify(msg: string, ms?: number): void;
@@ -271,6 +273,22 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     [service, showMessage],
   );
 
+  const deleteSourceUpdates = useCallback(
+    async (source: string) => {
+      try {
+        const n = await service.deleteSourceUpdates(source);
+        showMessage(`✓ Deleted ${n} item${n === 1 ? '' : 's'}`);
+        return n;
+      } catch (err) {
+        showMessage(`Delete error: ${errorText(err)}`);
+        return undefined;
+      } finally {
+        await refresh();
+      }
+    },
+    [service, showMessage, refresh],
+  );
+
   return {
     updates,
     total,
@@ -297,6 +315,7 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     setSaved,
     loadContent,
     updateSettings,
+    deleteSourceUpdates,
     refresh,
     notify: showMessage,
   };

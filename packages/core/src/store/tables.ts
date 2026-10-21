@@ -287,6 +287,21 @@ export class UpdateStore {
     });
   }
 
+  /** Delete every update of `source`, in batches of 100 (one partition per transaction). Returns how many. */
+  async deleteSourceUpdates(source: string): Promise<number> {
+    const keys: string[] = [];
+    const iter = this.client.listEntities<UpdateEntity>({
+      queryOptions: { filter: odata`PartitionKey eq ${source}`, select: ['RowKey'] },
+    });
+    for await (const e of iter) keys.push(e.rowKey!);
+    const batches: string[][] = [];
+    for (let i = 0; i < keys.length; i += 100) batches.push(keys.slice(i, i + 100));
+    await mapLimit(batches, 4, async (batch) => {
+      await this.client.submitTransaction(batch.map((rowKey) => ['delete', { partitionKey: source, rowKey }]));
+    });
+    return keys.length;
+  }
+
   /** Assign (or clear, with `''`) the digest topic of an update, optionally with its one-line summary. */
   async setTopicId(id: string, topicId: string, summary?: string): Promise<void> {
     const { source, rowKey } = parseId(id);
@@ -363,6 +378,7 @@ export class UpdateStore {
 
     const byStatus: Record<string, number> = { unread: 0, read: 0 };
     const bySource: Record<string, number> = {};
+    const savedBySource: Record<string, number> = {};
     const fetchStatus = this.getFetchStatus();
     const lastAdded: Record<string, string> = {};
     let saved = 0;
@@ -372,7 +388,10 @@ export class UpdateStore {
       const status = e.status === 'saved' ? 'read' : e.status;
       byStatus[status] = (byStatus[status] ?? 0) + 1;
       bySource[e.partitionKey] = (bySource[e.partitionKey] ?? 0) + 1;
-      if (e.saved ?? e.status === 'saved') saved++;
+      if (e.saved ?? e.status === 'saved') {
+        saved++;
+        savedBySource[e.partitionKey] = (savedBySource[e.partitionKey] ?? 0) + 1;
+      }
       total++;
       const prev = lastAdded[e.partitionKey];
       if (e.dateAdded && (!prev || e.dateAdded > prev)) lastAdded[e.partitionKey] = e.dateAdded;
@@ -385,6 +404,7 @@ export class UpdateStore {
       total,
       byStatus: byStatus as Record<Status, number>,
       bySource,
+      savedBySource,
       saved,
       sourceStatus,
     };

@@ -122,16 +122,16 @@ export class FomoDirectService extends FomoStorageService {
     await this.ensureInit();
 
     const settings = await this.store.getSettings();
-    let sources = getAllSources();
+    let sources = getAllSources(settings);
 
     if (req.sources && req.sources.length > 0) {
       // Explicit source list — ignore disabledSources
       sources = req.sources
-        .map((id) => getSource(id))
+        .map((id) => getSource(id, settings))
         .filter((s): s is NonNullable<typeof s> => s !== undefined);
 
       if (sources.length === 0) {
-        throw new Error(`None of the requested sources are registered. Available: ${getSourceIds().join(', ')}`);
+        throw new Error(`None of the requested sources are registered. Available: ${getSourceIds(settings).join(', ')}`);
       }
     } else {
       // No explicit list — respect disabledSources setting

@@ -20,6 +20,27 @@ export {
   type DigestRow,
 } from './digest/view.js';
 export { matchesSearch, searchDigest, searchTerms } from './search.js';
+export {
+  BUILTIN_SOURCES,
+  activeSourceSpecs,
+  sourceInfo,
+  sourceInfos,
+  newUserSource,
+  addSourcePatch,
+  editUserSource,
+  sourceEditInput,
+  updateSourcePatch,
+  userSource,
+  sourceDraft,
+  sourceDraftPatch,
+  isGithubRepoUrl,
+  type SourceDraft,
+  removeSourcePatch,
+  retiredSources,
+  forgetSourcePatch,
+  restoreSourcesPatch,
+  type NewSourceInput,
+} from './scraper/specs.js';
 export { shortcutKey, jumpStep, TALL_SCREEN_LINES } from './keys.js';
 export {
   MAX_FOLDER_DEPTH,
@@ -34,3 +55,4 @@ export {
   parentRowIndex,
   type ReferenceRow,
 } from './references.js';
+export { timeAgo } from './time.js';

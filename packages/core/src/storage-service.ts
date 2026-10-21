@@ -1,7 +1,7 @@
 import { UpdateStore, TodoStore } from './store/tables.js';
 import { TopicStore } from './store/topics.js';
 import { ReferenceStore } from './store/references.js';
-import { getAllSources } from './scraper/registry.js';
+import { sourceInfos } from './scraper/specs.js';
 import { buildDigest } from './digest/view.js';
 import { searchDigest, searchTerms } from './search.js';
 import type {
@@ -86,7 +86,12 @@ export class FomoStorageService implements FomoService {
     return this.store.setSaved(id, saved);
   }
 
-  async getStats(): Promise<StatsResponse> {
+  async deleteSourceUpdates(source: SourceId): Promise<number> {
+    await this.ensureInit();
+    return this.store.deleteSourceUpdates(source);
+  }
+
+    async getStats(): Promise<StatsResponse> {
     await this.ensureInit();
     return this.store.getStats();
   }
@@ -131,11 +136,8 @@ export class FomoStorageService implements FomoService {
   }
 
   async getSources(): Promise<SourceInfo[]> {
-    return getAllSources().map((s) => ({
-      id: s.id,
-      displayName: s.displayName,
-      capabilities: s.capabilities,
-    }));
+    await this.ensureInit();
+    return sourceInfos(await this.store.getSettings());
   }
 
   // ─── Settings ──────────────────────────────────────────────────────────────

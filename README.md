@@ -265,7 +265,7 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `c`             | Config                                    |
 | `h`             | Help (also shows the version)             |
 
-Letter keys work in either case: `B` does the same as `b`.
+Letter keys work in either case: `M` does the same as `m`.
 
 Fetching isn't done in the browser. Run `fomo` on your computer and press `f`, then pull to refresh.
 Post summaries made in the TUI (`g`) show at the top of the detail pane.
@@ -309,7 +309,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `h`             | Help (also shows the version)             |
 | `q`             | Quit                                      |
 
-Letter keys work in either case: `B` does the same as `b`, so `Shift`+`j`/`k` still moves one row. macOS Terminal.app has no default mapping for `Shift`+`↑`/`↓`: add one under Settings → Profiles → Keyboard that sends `\033[1;2A` / `\033[1;2B` (press `Esc` to type `\033`).
+Letter keys work in either case: `M` does the same as `m`, so `Shift`+`j`/`k` still moves one row. macOS Terminal.app has no default mapping for `Shift`+`↑`/`↓`: add one under Settings → Profiles → Keyboard that sends `\033[1;2A` / `\033[1;2B` (press `Esc` to type `\033`).
 
 The status bar shows counts by status; the config screen shows counts per source.
 Search (`/`) works like the web app: it's scoped to the current view, matches every word against the title, summary and content, and shows the query and match count in the filter bar until `Esc` clears it.
@@ -341,7 +341,7 @@ Press `c`. The bottom line shows the keys for the selected row. Each section hea
 | | Show web app QR | `Enter`: QR code of the plain web app URL (no access token) to open it on your phone · `o` opens it in the browser |
 | | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread and saved update |
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
-| **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates |
+| **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed or GitHub repo; **Restore removed** brings back removed built-ins |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
 | **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (15 min), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (toggles for Auto-fetch and Group after fetch; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. |
 
@@ -384,61 +384,19 @@ APIs. Each fetch adds previously unseen URLs; stored updates are retained.
 
 ### Adding a New Source
 
-Create a source plugin in two files:
+Most sources need no code:
 
-**1. Create the plugin** (`packages/core/src/scraper/sources/<name>.ts`):
+- **From the app:** in the TUI press `c` → **+ Add source** and type an RSS/Atom feed URL (several: separate with
+  spaces) or `https://github.com/owner/repo`, a name, and an optional keyword filter (regex). In the web app use
+  the form under ⚙️ Config → **Sources**. Sources you add are stored in the shared settings; `x` (TUI) or ✕ (web)
+  removes a source, and removed built-ins can be restored. Open a source (`↵` in the TUI, click its name in the
+  web app) to see its status and edit it.
+- **Built-in:** add a `feed` or `github-releases` spec to `BUILTIN_SOURCES` in
+  `packages/core/src/scraper/specs.ts`.
+- **Custom code** (sites without a feed): add a module in `packages/core/src/scraper/sources/custom/`, register it in
+  its `index.ts`, and point a `custom` spec at it.
 
-```typescript
-import type { SourcePlugin, ScrapedItem } from '../../types.js';
-
-export const mySource: SourcePlugin = {
-  id: 'mysource',
-  displayName: 'My Source',
-  capabilities: { preview: true },
-
-  async fetch(): Promise<ScrapedItem[]> {
-    try {
-      const res = await fetch('https://example.com/feed', {
-        headers: { 'User-Agent': 'fomo-release-tracker/1.0' },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return data.items.map((item: any) => ({
-        title: item.title,
-        url: item.url,
-        datePublished: new Date(item.publishedAt),
-        content: item.summary ?? '',
-      }));
-    } catch (err) {
-      console.error('[mysource] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
-    }
-  },
-};
-```
-
-**2. Register it** in `packages/core/src/scraper/registry.ts`:
-
-```typescript
-import { mySource } from './sources/mysource.js';
-
-const builtins: SourcePlugin[] = [
-  githubSource, azureSource, vscodeSource, copilotCliSource,
-  mySource,       // ← add here
-];
-```
-
-**3. Build and test:**
-
-```bash
-pnpm build
-fomo      # press c, select your source and press f to fetch just it
-```
-
-The source is automatically available in the TUI, the digest, and the web app.
-
-See [EXTENDING.md](EXTENDING.md) for more patterns (RSS/Atom feeds, GitHub Releases API).
+See [EXTENDING.md](EXTENDING.md) for the spec fields and the shared helpers for custom sources.
 
 ---
 

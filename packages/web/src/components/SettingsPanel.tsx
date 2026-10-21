@@ -1,19 +1,32 @@
 import React, { useState } from 'react';
-import type { AppSettings, SourceInfo, PreviewPosition } from '@fomo/core';
+import { newUserSource, retiredSources, type AppSettings, type SourceInfo, type PreviewPosition, type StatsResponse, type UserSourceSpec } from '@fomo/core';
+import { SourceDetails } from './SourceDetails.js';
 
 interface Props {
   settings: AppSettings;
   sources: SourceInfo[];
+  stats?: StatsResponse;
   onToggleSource(sourceId: string): void;
   onSetPreviewPosition(pos: PreviewPosition): void;
   onSetSourceLabel(sourceId: string, label: string): void;
   onSetSourceColor(sourceId: string, color: string): void;
+  onAddSource(spec: UserSourceSpec): void;
+  /** Remove a source, keeping its stored updates unless `deleteItems`. */
+  onRemoveSource(sourceId: string, deleteItems?: boolean): void;
+  onRestoreSources(): void;
+  /** Bring back one removed built-in. */
+  onRestoreSource(sourceId: string): void;
+  /** Delete every stored update of a source. */
+  onDeleteSourceItems(sourceId: string): void;
+  /** Save the changes made in a source's details. */
+  onSaveSource(patch: Partial<AppSettings>): void;
+  onShowSourceUpdates(sourceId: string): void;
   onClose(): void;
 }
 
 const PREVIEW_OPTIONS: PreviewPosition[] = ['right', 'bottom', 'off'];
 
-const COLOR_PALETTE = [
+export const COLOR_PALETTE = [
   '#58a6ff', // cyan (default)
   '#3fb950', // green
   '#e3b341', // yellow
@@ -36,11 +49,67 @@ const COLOR_PALETTE = [
   '#94a3b8', // slate
 ];
 
-export function SettingsPanel({ settings, sources, onToggleSource, onSetPreviewPosition, onSetSourceLabel, onSetSourceColor, onClose }: Props) {
+/** Form that adds an RSS/Atom feed or a GitHub repository's releases. */
+function AddSourceForm({ settings, onAdd }: { settings: AppSettings; onAdd(spec: UserSourceSpec): void }) {
+  const [url, setUrl] = useState('');
+  const [name, setName] = useState('');
+  const [include, setInclude] = useState('');
+  const [error, setError] = useState<string | undefined>();
+  const guess = url.trim() ? newUserSource({ url }, settings) : undefined;
+  const isRepo = guess && 'spec' in guess && guess.spec.kind === 'github-releases';
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const result = newUserSource({ url, name, include: isRepo ? undefined : include }, settings);
+    if ('error' in result) { setError(result.error); return; }
+    onAdd(result.spec);
+    setUrl(''); setName(''); setInclude(''); setError(undefined);
+  };
+
+  return (
+    <form className="settings-panel__add" onSubmit={submit} onKeyDown={(e) => e.stopPropagation()}>
+      <input
+        className="settings-panel__add-input"
+        value={url}
+        onChange={(e) => { setUrl(e.target.value); setError(undefined); }}
+        placeholder="Feed URL(s) or github.com/owner/repo"
+        aria-label="Feed URL or GitHub repository"
+      />
+      <input
+        className="settings-panel__add-input"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={guess && 'spec' in guess ? guess.spec.displayName : 'Name'}
+        aria-label="Name"
+      />
+      {!isRepo && (
+        <input
+          className="settings-panel__add-input"
+          value={include}
+          onChange={(e) => { setInclude(e.target.value); setError(undefined); }}
+          placeholder="Keywords to keep (regex, optional)"
+          aria-label="Keyword filter"
+        />
+      )}
+      <button className="btn" type="submit" disabled={!url.trim()}>+ Add source</button>
+      {error && <p className="settings-panel__error">⚠ {error}</p>}
+    </form>
+  );
+}
+
+export function SettingsPanel({ settings, sources, stats, onToggleSource, onSetPreviewPosition, onSetSourceLabel, onSetSourceColor, onAddSource, onRemoveSource, onRestoreSources, onRestoreSource, onDeleteSourceItems, onSaveSource, onShowSourceUpdates, onClose }: Props) {
   const disabledSet = new Set(settings.disabledSources);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBuffer, setEditBuffer] = useState('');
   const [colorPickerId, setColorPickerId] = useState<string | null>(null);
+  /** Source waiting for a second click on its remove button. */
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const removed = settings.removedSources?.length ?? 0;
+  /** Source whose details popup is open. */
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+  /** Removed sources whose updates are still stored, shown greyed out. */
+  const retired = retiredSources(settings, stats?.bySource);
+  const details = sources.find((s) => s.id === detailsId) ?? retired.find((s) => s.id === detailsId);
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -52,7 +121,7 @@ export function SettingsPanel({ settings, sources, onToggleSource, onSetPreviewP
 
         <div className="settings-panel__section">
           <h3>Sources</h3>
-          <p className="settings-panel__hint">Toggle sources and set custom labels (emoji/shortcut).</p>
+          <p className="settings-panel__hint">Click a source for its details and to edit it; the dot turns it on or off. New sources are fetched by the terminal app.</p>
           <div className="settings-panel__items">
             {sources.map((s) => {
               const enabled = !disabledSet.has(s.id);
@@ -71,9 +140,9 @@ export function SettingsPanel({ settings, sources, onToggleSource, onSetPreviewP
                       {enabled ? '●' : '○'}
                     </span>
                   </span>
-                  <span className="settings-panel__toggle-label" onClick={() => onToggleSource(s.id)}>
+                  <span className="settings-panel__toggle-label" onClick={() => setDetailsId(s.id)} title="Details">
                     {s.displayName}
-                    <span className="settings-panel__toggle-id">{s.id}</span>
+                    <span className="settings-panel__toggle-id" title={s.location}>{s.builtin ? s.id : `${s.id} · yours`}</span>
                   </span>
                   <span className="settings-panel__color-area">
                     <button
@@ -133,11 +202,53 @@ export function SettingsPanel({ settings, sources, onToggleSource, onSetPreviewP
                       </button>
                     )}
                   </span>
+                  <button
+                    className={`settings-panel__remove${removingId === s.id ? ' settings-panel__remove--confirm' : ''}`}
+                    onClick={() => {
+                      if (removingId !== s.id) { setRemovingId(s.id); return; }
+                      setRemovingId(null);
+                      onRemoveSource(s.id);
+                    }}
+                    onBlur={() => setRemovingId((id) => (id === s.id ? null : id))}
+                    title={(stats?.bySource[s.id] ?? 0) > 0 ? 'Remove (keeps its items; open it to delete them too)' : s.builtin ? 'Remove (can be restored)' : 'Remove'}
+                  >
+                    {removingId === s.id ? 'Remove?' : '✕'}
+                  </button>
                 </div>
               );
             })}
+            {retired.map((s) => (
+              <div key={s.id} className="settings-panel__toggle settings-panel__toggle--removed">
+                <span className="settings-panel__toggle-check"><span className="settings-panel__dot">○</span></span>
+                <span className="settings-panel__toggle-label" onClick={() => setDetailsId(s.id)} title="Details">
+                  {s.displayName}
+                  <span className="settings-panel__toggle-id">removed · {stats?.bySource[s.id] ?? 0} items still stored</span>
+                </span>
+              </div>
+            ))}
           </div>
+          {removed > 0 && (
+            <button className="btn settings-panel__restore" onClick={onRestoreSources}>
+              ↺ Restore {removed} removed source{removed === 1 ? '' : 's'}
+            </button>
+          )}
+          <AddSourceForm settings={settings} onAdd={onAddSource} />
         </div>
+
+        {details && (
+          <SourceDetails
+            key={details.id}
+            source={details}
+            settings={settings}
+            stats={stats}
+            onSave={onSaveSource}
+            onRemove={(deleteItems) => onRemoveSource(details.id, deleteItems)}
+            onDeleteItems={() => onDeleteSourceItems(details.id)}
+            onRestore={() => onRestoreSource(details.id)}
+            onShowUpdates={() => onShowSourceUpdates(details.id)}
+            onClose={() => setDetailsId(null)}
+          />
+        )}
 
         <div className="settings-panel__section">
           <h3>Preview Position</h3>

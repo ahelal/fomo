@@ -58,10 +58,9 @@ export interface ScrapedItem {
 }
 
 /**
- * Interface every source plugin must implement.
- *
- * Create a file in `sources/`, implement this interface, and register it
- * in the registry — no other changes required.
+ * A source is described by data (`SourceSpec`) and turned into a `SourcePlugin` by
+ * `createSource()` in `scraper/factory.ts`. Built-ins live in `scraper/specs.ts`;
+ * users add `feed` and `github-releases` sources from the app (`AppSettings.userSources`).
  */
 export interface SourcePlugin {
   /** Unique slug, e.g. 'github', 'azure'. Used as PartitionKey in Table Storage. */
@@ -74,11 +73,57 @@ export interface SourcePlugin {
   fetch(): Promise<ScrapedItem[]>;
 }
 
+interface SourceSpecBase {
+  /** Unique slug; the PartitionKey of the source's updates, so it never changes. */
+  id: SourceId;
+  displayName: string;
+}
+
+/** One or more RSS/Atom feeds, merged and deduplicated by URL. */
+export interface FeedSourceSpec extends SourceSpecBase {
+  kind: 'feed';
+  urls: string[];
+  /** Keep only items whose title or content matches this case-insensitive regex. */
+  include?: string;
+  /** Keep only items tagged with this category (RSS `<category>` or Atom `term`). */
+  category?: string;
+}
+
+/** Releases of a GitHub repository. */
+export interface GithubReleasesSourceSpec extends SourceSpecBase {
+  kind: 'github-releases';
+  /** `owner/name` */
+  repo: string;
+}
+
+/** A source written in code: `module` names a file in `scraper/sources/custom/`. Built-in only. */
+export interface CustomSourceSpec extends SourceSpecBase {
+  kind: 'custom';
+  module: string;
+  options?: Record<string, string>;
+  /** Defaults to true. */
+  preview?: boolean;
+}
+
+export type SourceSpec = FeedSourceSpec | GithubReleasesSourceSpec | CustomSourceSpec;
+export type SourceKind = SourceSpec['kind'];
+/** Kinds users can add from the app; `custom` needs code. */
+export type UserSourceSpec = FeedSourceSpec | GithubReleasesSourceSpec;
+
 /** Source metadata exposed to the UI and API consumers. */
 export interface SourceInfo {
   id: SourceId;
   displayName: string;
   capabilities: SourceCapabilities;
+  kind: SourceKind;
+  /** Shipped with the app (removing it hides it) rather than added by the user. */
+  builtin: boolean;
+  /** Feed URLs or the GitHub repo, for display. */
+  location?: string;
+  /** What a feed keeps, for display: its keyword regex and/or category. */
+  filter?: string;
+  /** Removed, but some of its updates are still stored (see `retiredSources`). */
+  removed?: boolean;
 }
 
 // ─── Request / Response shapes ───────────────────────────────────────────────
@@ -132,6 +177,8 @@ export interface StatsResponse {
   total: number;
   byStatus: Record<Status, number>;
   bySource: Record<SourceId, number>;
+  /** Saved updates per source (only sources that have some). */
+  savedBySource?: Record<SourceId, number>;
   saved: number;
   /** Fetch history per source. */
   sourceStatus?: Record<SourceId, SourceFetchStatus>;
@@ -225,6 +272,8 @@ export interface FomoService {
   /** Set status on many updates (e.g. every item in a digest topic). */
   setStatusMany(ids: string[], status: Status): Promise<void>;
   setSaved(id: string, saved: boolean): Promise<Update>;
+  /** Delete every stored update of a source (saved ones too); the next fetch adds them back as new. Returns how many. */
+  deleteSourceUpdates(source: SourceId): Promise<number>;
   getStats(): Promise<StatsResponse>;
   getDigest(query?: DigestQuery): Promise<DigestResponse>;
   /** Updates per source in a view, to pick which sources to show. */
@@ -346,6 +395,10 @@ export interface AppSettings {
   sourceLabels: Record<SourceId, string>;
   /** Custom display colors per source (e.g. { github: "#58a6ff" }). Falls back to default cyan. */
   sourceColors: Record<SourceId, string>;
+  /** Sources added by the user from the app. */
+  userSources: UserSourceSpec[];
+  /** Built-in sources the user removed. */
+  removedSources: SourceId[];
 }
 
 export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
@@ -354,4 +407,6 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
   pageSize: 50,
   sourceLabels: {},
   sourceColors: {},
+  userSources: [],
+  removedSources: [],
 };

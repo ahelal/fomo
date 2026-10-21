@@ -185,11 +185,18 @@ describe('FomoDirectService', () => {
     expect(result).toEqual(mockUpdate);
   });
 
-  it('getSources returns source metadata', async () => {
+  it('getSources lists built-ins and user sources from the settings', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    __mockStore.getSettings.mockResolvedValueOnce({
+      disabledSources: [],
+      removedSources: ['github'],
+      userSources: [{ kind: 'feed', id: 'mine', displayName: 'Mine', urls: ['https://example.com/rss'] }],
+    });
     const sources = await svc.getSources();
-    expect(sources).toHaveLength(1);
-    expect(sources[0].id).toBe('mock-source');
-    expect(sources[0].displayName).toBe('Mock Source');
+    const ids = sources.map((s) => s.id);
+    expect(ids).toContain('azure');
+    expect(ids).not.toContain('github');
+    expect(sources.find((s) => s.id === 'mine')).toMatchObject({ displayName: 'Mine', kind: 'feed', builtin: false });
   });
 
   it('backup delegates to store', async () => {

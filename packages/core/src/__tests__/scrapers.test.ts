@@ -1,13 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { githubSource } from '../scraper/sources/github.js';
-import { azureSource } from '../scraper/sources/azure.js';
-import { azureSreAgentSource } from '../scraper/sources/azure-sre-agent.js';
-import { vscodeSource } from '../scraper/sources/vscode.js';
-import { copilotCliSource, parseChangelog } from '../scraper/sources/copilot-cli.js';
-import { theRegisterSource } from '../scraper/sources/theregister.js';
-import { githubNextSource } from '../scraper/sources/github-next.js';
-import { getAllSources, getSource, getSourceIds, registerSource } from '../scraper/registry.js';
-import type { SourcePlugin } from '../types.js';
+import { parseChangelog } from '../scraper/sources/custom/copilot-cli.js';
+import { parsePosts } from '../scraper/sources/custom/anthropic.js';
+import { getAllSources, getSource, getSourceIds, createSource } from '../scraper/registry.js';
+import {
+  activeSourceSpecs,
+  addSourcePatch,
+  editUserSource,
+  newUserSource,
+  removeSourcePatch,
+  retiredSources,
+  forgetSourcePatch,
+  restoreSourcesPatch,
+  sourceDraft,
+  sourceDraftPatch,
+  sourceEditInput,
+  sourceInfos,
+  updateSourcePatch,
+  userSource,
+} from '../scraper/specs.js';
+import { parseFeed } from '../scraper/feed.js';
+import { DEFAULT_SETTINGS, type AppSettings, type SourcePlugin } from '../types.js';
+
+const builtin = (id: string): SourcePlugin => getSource(id)!;
+const githubSource = builtin('github');
+const azureSource = builtin('azure');
+const azureSreAgentSource = builtin('azure-sre-agent');
+const vscodeSource = builtin('vscode');
+const copilotCliSource = builtin('copilot-cli');
+const theRegisterSource = builtin('theregister');
+const githubNextSource = builtin('github-next');
 
 describe('source plugins metadata', () => {
   it('github source has correct metadata', () => {
@@ -212,7 +233,7 @@ describe('azure-sre-agent source fetch', () => {
     ));
 
     await expect(azureSreAgentSource.fetch()).rejects.toThrow(
-      '[azure-sre-agent] fetch failed: Tech Community fetch failed: HTTP 503',
+      '[azure-sre-agent] fetch failed: techcommunity.microsoft.com: HTTP 503',
     );
   });
 
@@ -222,7 +243,7 @@ describe('azure-sre-agent source fetch', () => {
       { status: 200 },
     ));
 
-    await expect(azureSreAgentSource.fetch()).rejects.toThrow('Expected an RSS feed');
+    await expect(azureSreAgentSource.fetch()).rejects.toThrow('Expected an RSS or Atom feed');
   });
 
   it('returns no items when the feed has no SRE Agent updates', async () => {
@@ -572,15 +593,185 @@ describe('scraper registry', () => {
     expect(ids).toContain('github-next');
   });
 
-  it('registerSource adds a custom source', () => {
-    const custom: SourcePlugin = {
-      id: 'test-custom',
-      displayName: 'Test Custom',
-      capabilities: { preview: false },
-      async fetch() { return []; },
-    };
+  it('leaves out removed built-ins and adds user sources', () => {
+    const userSources: AppSettings['userSources'] = [{ kind: 'feed', id: 'my-feed', displayName: 'My feed', urls: ['https://example.com/rss'] }];
+    const ids = getSourceIds({ removedSources: ['github'], userSources });
+    expect(ids).not.toContain('github');
+    expect(ids).toContain('my-feed');
+    expect(getSource('my-feed', { userSources })?.displayName).toBe('My feed');
+  });
 
-    registerSource(custom);
-    expect(getSource('test-custom')?.id).toBe('test-custom');
+  it('ignores user sources that reuse a built-in id', () => {
+    const userSources: AppSettings['userSources'] = [{ kind: 'feed', id: 'github', displayName: 'Fake', urls: ['https://example.com/rss'] }];
+    expect(activeSourceSpecs({ userSources }).filter((s) => s.id === 'github')).toHaveLength(1);
+  });
+});
+
+describe('source specs', () => {
+  const settings = (patch: Partial<AppSettings> = {}): AppSettings => ({ ...DEFAULT_SETTINGS, ...patch });
+
+  it('describes sources for the UI', () => {
+    const infos = sourceInfos();
+    expect(infos.find((s) => s.id === 'github')).toMatchObject({ kind: 'feed', builtin: true, capabilities: { preview: true } });
+    expect(infos.find((s) => s.id === 'anthropic-news')).toMatchObject({ kind: 'custom', capabilities: { preview: false } });
+  });
+
+  it('builds a feed source from a URL', () => {
+    const result = newUserSource({ url: 'https://www.example.com/feed.xml', include: 'copilot' });
+    expect(result).toEqual({
+      spec: { kind: 'feed', id: 'example-com', displayName: 'example.com', urls: ['https://www.example.com/feed.xml'], include: 'copilot' },
+    });
+  });
+
+  it('merges several feed URLs into one source', () => {
+    const result = newUserSource({ url: 'https://a.example/rss, https://b.example/rss', name: 'Both' });
+    expect(result).toMatchObject({ spec: { kind: 'feed', id: 'both', urls: ['https://a.example/rss', 'https://b.example/rss'] } });
+  });
+
+  it('builds a GitHub releases source from a repository URL', () => {
+    expect(newUserSource({ url: 'https://github.com/microsoft/vscode/releases' })).toEqual({
+      spec: { kind: 'github-releases', id: 'microsoft-vscode-releases', displayName: 'microsoft/vscode releases', repo: 'microsoft/vscode' },
+    });
+  });
+
+  it('picks an id no other source uses', () => {
+    const taken = newUserSource({ url: 'https://example.com/rss', name: 'GitHub' });
+    expect(taken).toMatchObject({ spec: { id: 'github-2' } });
+    const first = newUserSource({ url: 'https://example.com/rss', name: 'Mine' });
+    const userSources = 'spec' in first ? [first.spec] : [];
+    expect(newUserSource({ url: 'https://example.com/rss', name: 'Mine' }, { userSources })).toMatchObject({ spec: { id: 'mine-2' } });
+  });
+
+  it('rejects bad input', () => {
+    expect(newUserSource({ url: '' })).toHaveProperty('error');
+    expect(newUserSource({ url: 'ftp://example.com/rss' })).toHaveProperty('error');
+    expect(newUserSource({ url: 'https://example.com/rss', include: '(' })).toHaveProperty('error');
+    expect(newUserSource({ url: 'https://github.com/a/b', include: 'x' })).toHaveProperty('error');
+  });
+
+  it('edits a user source in place, keeping its id', () => {
+    const a = { kind: 'feed' as const, id: 'a', displayName: 'A', urls: ['https://a.example/rss'], include: 'x' };
+    const b = { kind: 'feed' as const, id: 'b', displayName: 'B', urls: ['https://b.example/rss'] };
+    const current = settings({ userSources: [a, b] });
+    expect(userSource(current, 'a')).toBe(a);
+    expect(userSource(current, 'github')).toBeUndefined();
+    expect(sourceEditInput(a)).toEqual({ url: 'https://a.example/rss', name: 'A', include: 'x' });
+
+    const edited = editUserSource(a, { url: 'https://github.com/octo/app', name: 'Octo' });
+    expect(edited).toEqual({ spec: { kind: 'github-releases', id: 'a', displayName: 'Octo', repo: 'octo/app' } });
+    expect(sourceEditInput('spec' in edited ? edited.spec : a).url).toBe('https://github.com/octo/app');
+    expect(updateSourcePatch(current, 'spec' in edited ? edited.spec : a).userSources?.map((s) => s.id)).toEqual(['a', 'b']);
+    expect(editUserSource(a, { url: 'nope' })).toHaveProperty('error');
+  });
+
+  it('saves a draft of the details popup', () => {
+    const mine = { kind: 'feed' as const, id: 'mine', displayName: 'Mine', urls: ['https://a.example/rss'] };
+    const current = settings({ userSources: [mine], sourceColors: { github: '#3fb950' } });
+    expect(sourceDraft(current, 'github')).toEqual({ enabled: true, label: '', color: '#3fb950', name: '', url: '', include: '' });
+    expect(sourceDraft(current, 'mine')).toMatchObject({ name: 'Mine', url: 'https://a.example/rss' });
+
+    const builtin = sourceDraftPatch(current, 'github', { ...sourceDraft(current, 'github'), enabled: false, label: '🐙', color: '' });
+    expect(builtin).toEqual({ patch: { sourceLabels: { github: '🐙' }, sourceColors: {}, disabledSources: ['github'] } });
+
+    const own = sourceDraftPatch(current, 'mine', { ...sourceDraft(current, 'mine'), url: 'https://a.example/rss\nhttps://b.example/rss', include: 'ai' });
+    expect(own).toMatchObject({ patch: { userSources: [{ id: 'mine', urls: ['https://a.example/rss', 'https://b.example/rss'], include: 'ai' }] } });
+
+    const repo = sourceDraftPatch(current, 'mine', { ...sourceDraft(current, 'mine'), url: 'https://github.com/o/r', include: 'ignored' });
+    expect(repo).toMatchObject({ patch: { userSources: [{ kind: 'github-releases', id: 'mine', repo: 'o/r' }] } });
+    expect(sourceDraftPatch(current, 'mine', { ...sourceDraft(current, 'mine'), url: '' })).toHaveProperty('error');
+  });
+
+  it('describes feed filters', () => {
+    const infos = sourceInfos();
+    expect(infos.find((s) => s.id === 'vscode')?.filter).toBe('category “release”');
+    expect(infos.find((s) => s.id === 'azure-sre-agent')?.filter).toContain('keywords');
+    expect(infos.find((s) => s.id === 'github')?.filter).toBeUndefined();
+  });
+
+  it('adds, removes and restores sources', () => {
+    const spec = { kind: 'feed' as const, id: 'mine', displayName: 'Mine', urls: ['https://example.com/rss'] };
+    const added = settings(addSourcePatch(settings(), spec));
+    expect(added.userSources).toEqual([spec]);
+
+    const removedUser = settings({ ...added, ...removeSourcePatch({ ...added, disabledSources: ['mine'] }, 'mine') });
+    expect(removedUser.userSources).toEqual([]);
+    expect(removedUser.disabledSources).toEqual([]);
+
+    const removedBuiltin = settings(removeSourcePatch(settings(), 'github'));
+    expect(removedBuiltin.removedSources).toEqual(['github']);
+    expect(sourceInfos(removedBuiltin).map((s) => s.id)).not.toContain('github');
+    expect(sourceInfos({ ...removedBuiltin, ...restoreSourcesPatch() }).map((s) => s.id)).toContain('github');
+  });
+
+  it('keeps removed sources with stored updates as retired, until their updates are gone', () => {
+    const spec = { kind: 'feed' as const, id: 'mine', displayName: 'Mine', urls: ['https://example.com/feed'] };
+    const base = settings({ userSources: [spec] });
+    const kept = settings({ ...base, ...removeSourcePatch(base, 'mine', { keepName: true }) });
+    expect(kept.sourceLabels).toEqual({ mine: 'Mine' });
+    const removed = settings({ ...kept, ...removeSourcePatch(kept, 'github') });
+    const active = sourceInfos(removed)[0]!.id;
+    const retired = retiredSources(removed, { mine: 3, github: 2, orphan: 1, [active]: 4, gone: 0 });
+    expect(retired.map((s) => [s.id, s.displayName, s.builtin, s.removed])).toEqual([
+      ['github', sourceInfos().find((s) => s.id === 'github')!.displayName, true, true],
+      ['mine', 'Mine', false, true],
+      ['orphan', 'orphan', false, true],
+    ]);
+    expect(forgetSourcePatch({ ...kept, sourceColors: { mine: '#fff' } }, 'mine')).toEqual({ sourceLabels: {}, sourceColors: {} });
+    expect(removeSourcePatch(base, 'mine').sourceLabels).toBeUndefined();
+  });
+});
+
+describe('user sources fetch', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('fetches a feed source with a keyword filter', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(`<rss><channel>
+      <item><title>Copilot news</title><link>https://example.com/1</link></item>
+      <item><title>Other</title><link>https://example.com/2</link></item>
+    </channel></rss>`, { status: 200 }));
+    const source = createSource({ kind: 'feed', id: 'mine', displayName: 'Mine', urls: ['https://example.com/rss'], include: 'copilot' });
+    const items = await source.fetch();
+    expect(items.map((i) => i.url)).toEqual(['https://example.com/1']);
+  });
+
+  it('fetches GitHub releases', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify([release('v2.0.0', '**Big** release')]), { status: 200 }));
+    const items = await createSource({ kind: 'github-releases', id: 'rel', displayName: 'Rel', repo: 'octo/app' }).fetch();
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('https://api.github.com/repos/octo/app/releases?per_page=30');
+    expect(items[0]).toMatchObject({ title: '2.0.0', content: 'Big release' });
+  });
+
+  it('reports an unknown custom module', async () => {
+    const source = createSource({ kind: 'custom', id: 'x', displayName: 'X', module: 'nope' });
+    await expect(source.fetch()).rejects.toThrow('[x] fetch failed: unknown custom module “nope”');
+  });
+});
+
+describe('feed parser', () => {
+  it('keeps only items of a category', () => {
+    const xml = `<rss><channel>
+      <item><title>A</title><link>https://e.x/a</link><category><![CDATA[Release]]></category></item>
+      <item><title>B</title><link>https://e.x/b</link><category>Blog</category></item>
+    </channel></rss>`;
+    expect(parseFeed(xml, { category: 'release' }).map((i) => i.title)).toEqual(['A']);
+  });
+
+  it('reads RSS 1.0 (RDF) feeds', () => {
+    const xml = `<rdf:RDF><item rdf:about="x"><title>T</title><link>https://e.x/t</link><dc:date>2026-01-02T00:00:00Z</dc:date></item></rdf:RDF>`;
+    expect(parseFeed(xml)).toMatchObject([{ title: 'T', url: 'https://e.x/t', datePublished: new Date('2026-01-02T00:00:00Z') }]);
+  });
+});
+
+describe('anthropic custom module', () => {
+  it('reads post links of a section with their titles and dates', () => {
+    const html = `
+      <a href="/news/post-one"><span class="Card__title">Post one &amp; more</span><time>Oct 18, 2026</time></a>
+      <a href="/news/post-one">duplicate</a>
+      <a href="/research/other"><span class="x__title">Other</span></a>`;
+    expect(parsePosts(html, 'news')).toEqual([
+      { title: 'Post one & more', url: 'https://www.anthropic.com/news/post-one', datePublished: new Date('Oct 18, 2026') },
+    ]);
   });
 });

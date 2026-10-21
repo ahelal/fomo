@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   FomoStorageService,
+  addSourcePatch,
   flattenDigest,
+  removeSourcePatch,
+  forgetSourcePatch,
+  userSource,
+  restoreSourcesPatch,
+  sourceInfos,
   nextRowKey,
   removeAndAdvance,
   soloUpdate,
@@ -11,6 +17,7 @@ import {
   type Status,
   type PreviewPosition,
   type SourceInfo,
+  type UserSourceSpec,
   type SasConnection,
   type DigestRow,
   type Reference,
@@ -132,7 +139,6 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [helpContext, setHelpContext] = useState<HelpContext>('list');
-  const [sources, setSources] = useState<SourceInfo[]>([]);
   /** Open source picker; options are undefined while the counts load. */
   const [sourcePicker, setSourcePicker] = useState<{ options?: SourceOption[] } | undefined>();
   const sourcePickerSeq = useRef(0);
@@ -158,9 +164,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const swipeBackRef = useRef({ startX: 0, startY: 0 });
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    service.getSources().then(setSources).catch(() => { /* ignore */ });
-  }, [service]);
+  const sources = useMemo<SourceInfo[]>(() => sourceInfos(fomo.settings), [fomo.settings]);
 
   // Lists are loaded without content; fetch the body of the update being viewed.
   useEffect(() => {
@@ -590,6 +594,43 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     [fomo],
   );
 
+  const handleAddSource = useCallback(
+    (spec: UserSourceSpec) => {
+      void fomo.updateSettings(addSourcePatch(fomo.settings, spec));
+    },
+    [fomo],
+  );
+
+  /** Remove a source, keeping its stored updates (it then shows greyed out) or deleting them too. */
+  const handleRemoveSource = useCallback(
+    (sourceId: string, deleteItems = false) => {
+      const items = fomo.stats?.bySource[sourceId] ?? 0;
+      const own = !!userSource(fomo.settings, sourceId);
+      const patch = removeSourcePatch(fomo.settings, sourceId, { keepName: items > 0 && !deleteItems });
+      void fomo.updateSettings(deleteItems && own ? { ...patch, ...forgetSourcePatch(fomo.settings, sourceId) } : patch);
+      if (deleteItems && items > 0) void fomo.deleteSourceUpdates(sourceId);
+    },
+    [fomo],
+  );
+
+  /** Delete the stored updates of a source; one that is gone for good also loses its label and color. */
+  const handleDeleteSourceItems = useCallback(
+    async (sourceId: string) => {
+      const gone = !sources.some((s) => s.id === sourceId) && !fomo.settings.removedSources.includes(sourceId);
+      const n = await fomo.deleteSourceUpdates(sourceId);
+      if (n !== undefined && gone) void fomo.updateSettings(forgetSourcePatch(fomo.settings, sourceId));
+    },
+    [fomo, sources],
+  );
+
+  const handleRestoreSource = useCallback((sourceId: string) => {
+    void fomo.updateSettings({ removedSources: fomo.settings.removedSources.filter((s) => s !== sourceId) });
+  }, [fomo]);
+
+  const handleRestoreSources = useCallback(() => {
+    void fomo.updateSettings(restoreSourcesPatch());
+  }, [fomo]);
+
   // ── Render ──
 
   const showPreview = hasSelection && !pane && previewPosition !== 'off';
@@ -831,6 +872,14 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           onSetPreviewPosition={handleSetPreviewPosition}
           onSetSourceLabel={handleSetSourceLabel}
           onSetSourceColor={handleSetSourceColor}
+          onAddSource={handleAddSource}
+          onRemoveSource={handleRemoveSource}
+          onRestoreSources={handleRestoreSources}
+          onRestoreSource={handleRestoreSource}
+          onDeleteSourceItems={(id) => void handleDeleteSourceItems(id)}
+          stats={fomo.stats}
+          onSaveSource={(patch) => void fomo.updateSettings(patch)}
+          onShowSourceUpdates={(id) => { setShowSettings(false); fomo.setSourceFilter([id]); }}
           onClose={() => setShowSettings(false)}
         />
       )}

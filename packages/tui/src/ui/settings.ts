@@ -21,6 +21,8 @@ export type SettingsRow =
   | { kind: 'header'; key: string; label: string; collapsed: boolean; count: number }
   | { kind: 'action'; key: string; action: ActionId; label: string; hint: string }
   | { kind: 'source'; key: string; source: SourceInfo }
+  | { kind: 'add-source'; key: string }
+  | { kind: 'restore-sources'; key: string; count: number }
   | { kind: 'preview'; key: string }
   | { kind: 'config'; key: string; field: ConfigField; label: string };
 
@@ -46,6 +48,8 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
   { field: 'backupDir', label: 'Backup folder' },
 ];
 
+export const ADD_SOURCE_KEY = 'add-source';
+
 /** Section header keys, used to collapse a section. */
 export const SECTION_KEYS = ['h-actions', 'h-sources', 'h-display', 'h-local'] as const;
 
@@ -58,7 +62,16 @@ export function buildSettingsRows(
   sources: SourceInfo[],
   collapsed: ReadonlySet<string> = new Set(),
   matches?: (row: SettingsRow) => boolean,
+  removedSources = 0,
+  /** Removed sources whose updates are still stored, shown greyed out after “Add source”. */
+  retired: SourceInfo[] = [],
 ): SettingsRow[] {
+  const sourceRows: SettingsRow[] = [
+    ...sources.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source })),
+    { kind: 'add-source', key: ADD_SOURCE_KEY },
+    ...retired.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source })),
+    ...(removedSources > 0 ? [{ kind: 'restore-sources' as const, key: 'restore-sources', count: removedSources }] : []),
+  ];
   const section = (key: string, label: string, all: SettingsRow[]): SettingsRow[] => {
     let rows = all;
     if (matches) {
@@ -71,7 +84,7 @@ export function buildSettingsRows(
   };
   return [
     ...section('h-actions', 'Actions', ACTIONS.map((a) => ({ kind: 'action' as const, key: `a-${a.action}`, ...a }))),
-    ...section('h-sources', 'Sources · shared with the web app', sources.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source }))),
+    ...section('h-sources', 'Sources · shared with the web app', sourceRows),
     ...section('h-display', 'Display · shared with the web app', [{ kind: 'preview', key: 'preview' }]),
     ...section('h-local', `This computer · ${tildify(CONFIG_FILE)}`, CONFIG_FIELDS.map((f) => ({ kind: 'config' as const, key: `c-${f.field}`, ...f }))),
   ];
@@ -157,6 +170,16 @@ export const isPickerField = (field: ConfigField): field is PickerField =>
   (PICKER_FIELDS as readonly ConfigField[]).includes(field);
 
 /** Starting text when editing a field. The connection string starts empty so the key is never shown. */
+/** Steps of adding a source: what is typed, and the footer prompt. */
+export type AddSourceStep = 'url' | 'name' | 'include';
+export interface AddSourceDraft { step: AddSourceStep; url: string; name: string }
+
+export const ADD_SOURCE_PROMPTS: Record<AddSourceStep, string> = {
+  url: 'feed URL(s) or github.com/owner/repo — several feeds: separate with spaces',
+  name: 'a name   (empty keeps the suggestion)',
+  include: 'keywords to keep, as a regex, e.g. copilot|agents   (empty keeps everything)',
+};
+
 export function editStartValue(field: ConfigField): string {
   if (field === 'connectionString' || isToggleField(field)) return '';
   const value = readConfigFile()[field];
@@ -200,7 +223,9 @@ export function settingsRowText(row: SettingsRow, config: LocalConfig, sourceLab
   switch (row.kind) {
     case 'header': return row.label;
     case 'action': return `${row.label} ${row.hint}`;
-    case 'source': return `${row.source.displayName} ${row.source.id} ${sourceLabel(row.source.id)}`;
+    case 'source': return `${row.source.displayName} ${row.source.id} ${sourceLabel(row.source.id)} ${row.source.kind} ${row.source.location ?? ''}`;
+    case 'add-source': return 'Add source feed rss atom github releases';
+    case 'restore-sources': return 'Restore removed sources';
     case 'preview': return 'Preview position right bottom off';
     case 'config': return `${row.label} ${row.field} ${configDisplay(config, row.field).value}`;
   }
@@ -211,7 +236,11 @@ export function rowHint(row: SettingsRow | undefined): string {
   switch (row?.kind) {
     case 'header': return row.collapsed ? '↵/→ expand' : '↵/← collapse';
     case 'action': return row.action === 'webapp' ? '↵ show QR   o open in browser' : '↵ run';
-    case 'source': return '↵ enable/disable   e label   d color   f fetch now   v show its updates';
+    case 'source': return row.source.removed
+      ? '↵ details   v show its updates   x delete its items (removes it for good)'
+      : '↵ details & edit   space on/off   e label   d color   f fetch now   v show its updates   x remove';
+    case 'add-source': return '↵ add an RSS/Atom feed or a GitHub repository';
+    case 'restore-sources': return '↵ bring back the removed built-in sources';
     case 'preview': return '↵ cycle';
     case 'config':
       if (isToggleField(row.field)) return '↵ toggle';

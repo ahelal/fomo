@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const openMock = vi.hoisted(() => vi.fn(async (_url: string) => {}));
 vi.mock('open', () => ({ default: openMock }));
-import { DEFAULT_SETTINGS } from '@fomo/core';
+import { DEFAULT_SETTINGS, retiredSources, sourceInfos } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { App, REGROUP_CONFIRM_MS } from '../src/ui/App.js';
@@ -13,6 +13,9 @@ import { createMemoryAuditLog } from '../src/audit.js';
 import type { LocalConfig } from '../src/config.js';
 import type { GhAccount } from '../src/ghAccounts.js';
 import { buildSettingsRows, findRow, firstFocusable, moveFocus } from '../src/ui/settings.js';
+
+/** The built-in sources the config screen lists with the default settings. */
+const SOURCES = sourceInfos(DEFAULT_SETTINGS);
 
 type FakeStdin = PassThrough & { isTTY: boolean; setRawMode(on: boolean): void; ref(): void; unref(): void };
 
@@ -193,7 +196,7 @@ describe('Config → Copilot account', () => {
   /** Open the config screen (c) and move to the Copilot account row. */
   async function focusAccountRow(press: (key: string) => Promise<void>) {
     await press('c');
-    const rows = buildSettingsRows([]);
+    const rows = buildSettingsRows(SOURCES);
     const target = findRow(rows, 'c-copilotAccount');
     for (let i = firstFocusable(rows); i < target; i = moveFocus(rows, i, 1)) await press('j');
   }
@@ -256,12 +259,205 @@ describe('Config → Copilot account', () => {
   });
 });
 
+describe('Config → sources', () => {
+  const updateSettings = vi.fn(async (patch: object) => ({ ...DEFAULT_SETTINGS, ...patch }));
+  const fetch = vi.fn(async () => ({ added: 0, results: {} }));
+
+  beforeEach(() => {
+    updateSettings.mockClear();
+    fetch.mockClear();
+    Object.assign(service, { updateSettings, fetch });
+  });
+  afterEach(() => {
+    delete (service as { updateSettings?: unknown }).updateSettings;
+    delete (service as { fetch?: unknown }).fetch;
+  });
+
+  async function focusRow(press: (key: string) => Promise<void>, key: string) {
+    await press('c');
+    const rows = buildSettingsRows(SOURCES);
+    const target = findRow(rows, key);
+    for (let i = firstFocusable(rows); i < target; i = moveFocus(rows, i, 1)) await press('j');
+  }
+
+  it('adds a feed in steps, then fetches it', async () => {
+    const { press, frame } = await renderApp();
+    await focusRow(press, 'add-source');
+    await press('\r');
+    expect(frame()).toContain('feed URL(s) or github.com/owner/repo');
+    await press('https://www.example.com/feed.xml');
+    await press('\r');
+    expect(frame()).toContain('Add source · name');
+    expect(frame()).toContain('example.com');
+    await press('\r');
+    expect(frame()).toContain('keywords to keep');
+    await press('copilot');
+    await press('\r');
+    const spec = { kind: 'feed', id: 'example-com', displayName: 'example.com', urls: ['https://www.example.com/feed.xml'], include: 'copilot' };
+    expect(updateSettings).toHaveBeenCalledWith({ userSources: [spec] });
+    expect(fetch).toHaveBeenCalledWith({ sources: ['example-com'] });
+    expect(frame()).toMatch(/● example\.com/);
+  });
+
+  it('skips the keyword step for a GitHub repository and rejects a bad URL', async () => {
+    const { press, frame } = await renderApp();
+    await focusRow(press, 'add-source');
+    await press('\r');
+    await press('not a url');
+    await press('\r');
+    expect(frame()).toContain('⚠');
+    expect(frame()).toContain('Add source · url');
+    for (let i = 0; i < 'not a url'.length; i++) await press('\x7f');
+    await press('https://github.com/octo/app');
+    await press('\r');
+    await press('\r');
+    expect(updateSettings).toHaveBeenCalledWith({
+      userSources: [{ kind: 'github-releases', id: 'octo-app-releases', displayName: 'octo/app releases', repo: 'octo/app' }],
+    });
+  });
+
+  it('removes a built-in source on a second x and restores it', async () => {
+    const { press, frame } = await renderApp();
+    await focusRow(press, 's-github');
+    await press('x');
+    expect(frame()).toContain('press x again to remove');
+    expect(updateSettings).not.toHaveBeenCalled();
+    await press('x');
+    expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['github'], disabledSources: [] });
+    const rows = buildSettingsRows(SOURCES.filter((s) => s.id !== 'github'), undefined, undefined, 1);
+    for (let i = findRow(buildSettingsRows(SOURCES), 's-github') - 1; i < findRow(rows, 'restore-sources'); i++) await press('j');
+    expect(frame()).toContain('Restore removed');
+    expect(frame()).toContain('1 built-in source removed');
+    await press('\r');
+    expect(updateSettings).toHaveBeenLastCalledWith({ removedSources: [] });
+    expect(frame()).not.toContain('Restore removed');
+  });
+
+  it('space toggles a source and ↵ opens its details', async () => {
+    const { press, frame } = await renderApp();
+    await focusRow(press, 's-github');
+    await press(' ');
+    expect(updateSettings).toHaveBeenCalledWith({ disabledSources: ['github'] });
+    await press('\r');
+    expect(frame()).toContain('built-in');
+    expect(frame()).toContain('Fetches');
+    expect(frame()).toContain('s save');
+  });
+
+  it('edits the label of a built-in and saves with s', async () => {
+    const { press, frame } = await renderApp();
+    await focusRow(press, 's-github');
+    await press('\r');
+    await press('j');
+    await press('\r');
+    await press('GH');
+    await press('\r');
+    expect(frame()).toContain('unsaved');
+    await press('s');
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ sourceLabels: { github: 'GH' } }));
+    expect(frame()).not.toContain('s save');
+  });
+
+  it('asks before dropping unsaved changes, and removes on a second x', async () => {
+    const { press, frame } = await renderApp();
+    await focusRow(press, 's-github');
+    await press('\r');
+    await press('\r');
+    await press('\x1b');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(frame()).toContain('Esc again to drop them');
+    await press('x');
+    expect(frame()).toContain('press x again to remove');
+    await press('x');
+    expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['github'], disabledSources: [] });
+    expect(frame()).not.toContain('s save');
+  });
+
+  describe('with stored items', () => {
+    const deleteSourceUpdates = vi.fn(async () => 5);
+    const stats = { total: 5, byStatus: { unread: 5, read: 0 }, bySource: { github: 5 }, savedBySource: { github: 2 }, saved: 2 };
+    beforeEach(() => {
+      deleteSourceUpdates.mockClear();
+      Object.assign(service, { deleteSourceUpdates, getStats: async () => stats });
+    });
+    afterEach(() => {
+      delete (service as { deleteSourceUpdates?: unknown }).deleteSourceUpdates;
+      Object.assign(service, { getStats: async () => ({ total: 0, byStatus: { unread: 0, read: 0 }, bySource: {}, saved: 0 }) });
+    });
+
+    it('removes a source and deletes its items with x then d', async () => {
+      const { press, frame } = await renderApp();
+      await focusRow(press, 's-github');
+      await press('x');
+      expect(frame()).toContain('x again: remove, keep its 5 items · d: delete them too');
+      await press('d');
+      expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['github'], disabledSources: [] });
+      expect(deleteSourceUpdates).toHaveBeenCalledWith('github');
+    });
+
+    it('keeps the items of a removed source, shows it greyed out, and deletes them later', async () => {
+      const { press, frame } = await renderApp();
+      await focusRow(press, 's-github');
+      await press('x');
+      await press('x');
+      expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['github'], disabledSources: [] });
+      expect(deleteSourceUpdates).not.toHaveBeenCalled();
+      const retired = retiredSources({ ...DEFAULT_SETTINGS, removedSources: ['github'] }, stats.bySource);
+      const rows = buildSettingsRows(SOURCES.filter((s) => s.id !== 'github'), undefined, undefined, 1, retired);
+      for (let i = findRow(buildSettingsRows(SOURCES), 's-github') - 1; i < findRow(rows, 's-github'); i++) await press('j');
+      expect(frame()).toContain('removed · 5 items still stored');
+      await press('\r');
+      expect(frame()).toContain('r restore');
+      await press('d');
+      expect(frame()).toContain('press d again to delete its 5 items (2 saved) and remove it for good');
+      await press('d');
+      expect(deleteSourceUpdates).toHaveBeenCalledWith('github');
+    });
+
+    it('deletes the items of an active source from its details with d d', async () => {
+      const { press, frame } = await renderApp();
+      await focusRow(press, 's-github');
+      await press('\r');
+      expect(frame()).toContain('d delete its 5 items');
+      await press('d');
+      expect(frame()).toContain('the next fetch adds them back as new');
+      await press('d');
+      expect(deleteSourceUpdates).toHaveBeenCalledWith('github');
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(frame()).toContain('s save');
+    });
+  });
+
+  it('edits the URL of an own feed, keeping its id', async () => {
+    const own = { kind: 'feed' as const, id: 'example-com', displayName: 'example.com', urls: ['https://example.com/feed.xml'] };
+    const settings = { ...DEFAULT_SETTINGS, userSources: [own] };
+    Object.assign(service, { getSettings: async () => settings });
+    try {
+      const { press, frame } = await renderApp();
+      await press('c');
+      const rows = buildSettingsRows(sourceInfos(settings));
+      for (let i = firstFocusable(rows); i < findRow(rows, 's-example-com'); i = moveFocus(rows, i, 1)) await press('j');
+      await press('\r');
+      expect(frame()).toContain('yours');
+      for (let i = 0; i < 4; i++) await press('j');
+      await press('\r');
+      await press('\x15');
+      await press('https://example.com/other.xml');
+      await press('\r');
+      await press('s');
+      expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ userSources: [{ ...own, urls: ['https://example.com/other.xml'] }] }));
+    } finally {
+      Object.assign(service, { getSettings: async () => ({ ...DEFAULT_SETTINGS }) });
+    }
+  });
+});
+
 describe('Config → web app', () => {
   const webUrl = 'https://fomo.example.com/';
 
   async function focusRow(press: (key: string) => Promise<void>, key: string) {
     await press('c');
-    const rows = buildSettingsRows([]);
+    const rows = buildSettingsRows(SOURCES);
     const target = findRow(rows, key);
     for (let i = firstFocusable(rows); i < target; i = moveFocus(rows, i, 1)) await press('j');
   }
@@ -330,11 +526,11 @@ describe('Config sections', () => {
   it('expands a folded section to focus a row in it', async () => {
     const { press, frame } = await renderApp();
     await press('c');
-    const rows = buildSettingsRows([]);
+    const rows = buildSettingsRows(SOURCES);
     for (let i = firstFocusable(rows); i < findRow(rows, 'h-local'); i = moveFocus(rows, i, 1)) await press('j');
     await press('\r');
     expect(frame()).toContain('▸ This computer');
-    const folded = buildSettingsRows([], new Set(['h-local']));
+    const folded = buildSettingsRows(SOURCES, new Set(['h-local']));
     for (let i = findRow(folded, 'h-local'); i > findRow(folded, 'a-webapp'); i--) await press('k');
     await press('\r');
     expect(frame()).toContain('Set “Web app URL” first');
@@ -397,9 +593,9 @@ describe('settings rows', () => {
 
   it('leaves out the rows of collapsed sections', () => {
     const rows = buildSettingsRows([], new Set(['h-local', 'h-actions']));
-    expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'h-display', 'preview', 'h-local']);
+    expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'add-source', 'h-display', 'preview', 'h-local']);
     expect(rows[0]).toMatchObject({ collapsed: true, count: 5 });
-    expect(moveFocus(rows, 4, 10)).toBe(4);
+    expect(moveFocus(rows, 5, 10)).toBe(5);
     expect(moveFocus(rows, 1, -10)).toBe(0);
   });
 });

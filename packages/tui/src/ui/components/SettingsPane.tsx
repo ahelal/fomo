@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import { Box, Text } from 'ink';
-import type { AppSettings, PreviewPosition, SourceFetchResult, StatsResponse } from '@fomo/core';
+import { timeAgo, type AppSettings, type PreviewPosition, type SourceFetchResult, type StatsResponse } from '@fomo/core';
 import { maskConnectionString, readConfigFile, type LocalConfig } from '../../config.js';
-import { configDisplay, rowHint, type SettingsRow } from '../settings.js';
+import { ADD_SOURCE_PROMPTS, configDisplay, rowHint, type AddSourceStep, type SettingsRow } from '../settings.js';
 
 interface Props {
   rows: SettingsRow[];
@@ -20,6 +20,8 @@ interface Props {
   editBuffer?: string;
   /** Key of the action row waiting for a second ↵. */
   confirmKey?: string;
+  /** Step of adding a source being typed. */
+  addStep?: AddSourceStep;
   height: number;
   columns: number;
 }
@@ -57,17 +59,6 @@ const clip = (s: string, w: number) => (w <= 0 ? '' : s.length > w ? `${s.slice(
 /** Keep the end of the text visible while typing. */
 const tail = (s: string, w: number) => (w <= 0 ? '' : s.length > w ? `…${s.slice(s.length - w + 1)}` : s);
 
-/** `iso` as a short age, e.g. `just now`, `5m ago`, `3h ago`, `2d ago`. */
-export function timeAgo(iso: string, now = Date.now()): string {
-  const mins = Math.floor((now - Date.parse(iso)) / 60_000);
-  if (!Number.isFinite(mins)) return '';
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
 export const SettingsPane = React.memo(function SettingsPane({
   rows,
   settings,
@@ -79,6 +70,7 @@ export const SettingsPane = React.memo(function SettingsPane({
   searchTyping = false,
   editBuffer,
   confirmKey,
+  addStep,
   height,
   columns,
 }: Props) {
@@ -149,6 +141,36 @@ export const SettingsPane = React.memo(function SettingsPane({
           </Text>
         );
       }
+      const items = stats?.bySource[id] ?? 0;
+      if (confirmKey === row.key) {
+        const ask = clip(
+          row.source.removed ? `press x again to delete its ${items} items · Esc cancel`
+          : items > 0 ? `x again: remove, keep its ${items} items · d: delete them too · Esc cancel`
+          : `press x again to remove${row.source.builtin ? ' (restore it later from the end of the list)' : ''} · Esc cancel`,
+          restW,
+        );
+        return (
+          <Text key={row.key} wrap="truncate">
+            {cursor}
+            <Text color={enabled ? '#3fb950' : '#f85149'} backgroundColor={bg}>{enabled ? '● ' : '○ '}</Text>
+            {name(row.source.displayName)}
+            <Text color="#e3b341" backgroundColor={bg}>{ask}</Text>
+            {fill(ask.length)}
+          </Text>
+        );
+      }
+      if (row.source.removed) {
+        const note = clip(`removed · ${items} items still stored`, restW);
+        return (
+          <Text key={row.key} wrap="truncate">
+            {cursor}
+            <Text color="#6e7681" backgroundColor={bg}>{'○ '}</Text>
+            {name(row.source.displayName, '#6e7681')}
+            <Text color="#6e7681" backgroundColor={bg}>{note}</Text>
+            {fill(note.length)}
+          </Text>
+        );
+      }
       const status = (enabled ? 'enabled' : 'disabled').padEnd(10);
       const label = clip(settings.sourceLabels[id] ?? '', 12).padEnd(14);
       const count = `${stats?.bySource[id] ?? 0} items`.padEnd(11);
@@ -174,6 +196,31 @@ export const SettingsPane = React.memo(function SettingsPane({
           <Text color="#c9d1d9" backgroundColor={bg}>{newest}</Text>
           <Text color={error ? '#f85149' : '#8b949e'} backgroundColor={bg}>{last}</Text>
           {fill(used + last.length)}
+        </Text>
+      );
+    }
+
+    if (row.kind === 'add-source' || row.kind === 'restore-sources') {
+      const add = row.kind === 'add-source';
+      const label = add ? (isFocused && editing && addStep ? `Add source · ${addStep}` : 'Add source') : 'Restore removed';
+      if (add && isFocused && editing) {
+        return (
+          <Text key={row.key} wrap="truncate">
+            {cursor}
+            <Text color="#3fb950" backgroundColor={bg}>{'+ '}</Text>
+            {name(label)}
+            {editBox(editBuffer)}
+          </Text>
+        );
+      }
+      const hint = clip(add ? 'RSS/Atom feed or GitHub repository releases' : `${row.count} built-in source${row.count === 1 ? '' : 's'} removed`, restW);
+      return (
+        <Text key={row.key} wrap="truncate">
+          {cursor}
+          <Text color={add ? '#3fb950' : '#e3b341'} backgroundColor={bg}>{add ? '+ ' : '↺ '}</Text>
+          {name(label)}
+          <Text color="#8b949e" backgroundColor={bg}>{hint}</Text>
+          {fill(hint.length)}
         </Text>
       );
     }
@@ -218,6 +265,8 @@ export const SettingsPane = React.memo(function SettingsPane({
 
   const footer = searchTyping
     ? `/${search}▏   ↵ keep   ↑↓ move   Esc clear`
+    : editing && addStep
+    ? `type ${ADD_SOURCE_PROMPTS[addStep]}   ↵ next   Esc cancel`
     : editing
     ? `type ${focused?.kind === 'source' ? 'a label' : 'a value'}   ↵ save   Esc cancel   (empty resets to the default)`
     : `${rowHint(focused)}${rowHint(focused) ? '   ' : ''}/ search   ${search ? 'Esc clear search' : 'Esc close'}   h help`;

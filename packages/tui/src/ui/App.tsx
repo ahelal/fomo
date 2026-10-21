@@ -3,16 +3,17 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion } from '@fomo/core';
-import { DEFAULT_SETTINGS, buildConnectLink, flattenDigest, jumpStep, nextRowKey, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
+import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, jumpStep, nextRowKey, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { AUDIT_FILE, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
 import { AuditView } from './components/AuditView.js';
-import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type SettingsRow } from './settings.js';
+import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
+import { SourceDetailsPane, detailsFields, type SourceDetailsState } from './components/SourceDetailsPane.js';
 import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
 import { RestorePicker, type BackupFile } from './components/RestorePicker.js';
 import { SourcePicker, type SourceOption } from './components/SourcePicker.js';
@@ -108,7 +109,10 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const [showSettings, setShowSettings] = useState(false);
   const [settingsFocusIndex, setSettingsFocusIndex] = useState(0);
   const [appSettings, setAppSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
-  const [sources, setSources] = useState<SourceInfo[]>([]);
+  const sources = useMemo<SourceInfo[]>(() => sourceInfos(appSettings), [appSettings]);
+  const removedCount = appSettings.removedSources?.length ?? 0;
+  /** Removed sources whose updates are still stored. */
+  const retired = useMemo<SourceInfo[]>(() => retiredSources(appSettings, stats?.bySource), [appSettings, stats?.bySource]);
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(() => new Set());
   /** `/` filter of the config screen (and whether it is being typed). */
   const [settingsSearch, setSettingsSearch] = useState('');
@@ -122,8 +126,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       const text = settingsRowText(row, config, (id) => appSettings.sourceLabels[id] ?? '').toLowerCase();
       return terms.every((t) => text.includes(t));
     };
-    return buildSettingsRows(sources, collapsedSections, matches);
-  }, [sources, collapsedSections, settingsSearch, config, appSettings.sourceLabels]);
+    return buildSettingsRows(sources, collapsedSections, matches, removedCount, retired);
+  }, [sources, collapsedSections, settingsSearch, config, appSettings.sourceLabels, removedCount, retired]);
 
   /** Collapse or expand a config section; the focus stays on its header. */
   const setSectionCollapsed = useCallback((header: string, collapsed: boolean) => {
@@ -144,13 +148,19 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     setSettingsSearch('');
     setSettingsSearchTyping(false);
     setCollapsedSections(collapsed);
-    setSettingsFocusIndex(Math.max(0, findRow(buildSettingsRows(sources, collapsed), key)));
-  }, [sources, collapsedSections]);
+    setSettingsFocusIndex(Math.max(0, findRow(buildSettingsRows(sources, collapsed, undefined, removedCount, retired), key)));
+  }, [sources, collapsedSections, removedCount, retired]);
   /** Key of the config row being edited (source label or local setting). */
   const [editingKey, setEditingKey] = useState<string | undefined>();
   const [editBuffer, setEditBuffer] = useState('');
   /** Key of the action row waiting for a second ↵. */
   const [confirmKey, setConfirmKey] = useState<string | undefined>();
+  /** Answers so far while adding a source (the current step is typed into `editBuffer`). */
+  const [addDraft, setAddDraft] = useState<AddSourceDraft | undefined>();
+  /** Details popup of a source (↵ on a source in the config). */
+  const [sourceDetails, setSourceDetails] = useState<SourceDetailsState | undefined>();
+  const detailsSource = sourceDetails && (sources.find((s) => s.id === sourceDetails.id) ?? retired.find((s) => s.id === sourceDetails.id));
+  const detailsChanged = !!sourceDetails && JSON.stringify(sourceDetails.draft) !== JSON.stringify(sourceDraft(appSettings, sourceDetails.id));
   const [lastFetch, setLastFetch] = useState<Record<string, SourceFetchResult>>({});
   /** When the last fetch (manual or automatic) finished. */
   const [lastFetchAt, setLastFetchAt] = useState<number | undefined>();
@@ -259,7 +269,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       const pos = s.previewPosition === 'off' ? 'bottom' : s.previewPosition;
       setPreviewPosition(pos as 'right' | 'bottom');
     }).catch((err) => audit.error('settings', `load: ${errorText(err)}`));
-    service.getSources().then(setSources).catch((err) => audit.error('sources', `load: ${errorText(err)}`));
   }, [service, audit]);
 
   const messageTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -931,7 +940,48 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
 
   // ── Settings: save the row being edited ─────────────────────────────────────
   const commitEdit = useCallback((row: SettingsRow, text: string) => {
-    const stopEditing = () => { setEditingKey(undefined); setEditBuffer(''); };
+    const stopEditing = () => { setEditingKey(undefined); setEditBuffer(''); setAddDraft(undefined); };
+
+    if (row.kind === 'add-source') {
+      const draft = addDraft ?? { step: 'url' as const, url: '', name: '' };
+      const value = text.trim();
+      const fail = (error: string) => { audit.error('source', `add: ${error}`); showMessage(`⚠ ${error}`, 5000); };
+      if (draft.step === 'url') {
+        const guess = newUserSource({ url: value }, appSettings);
+        if ('error' in guess) { fail(guess.error); return; }
+        setAddDraft({ step: 'name', url: value, name: '' });
+        setEditBuffer(guess.spec.displayName);
+        return;
+      }
+      if (draft.step === 'name') {
+        const named = newUserSource({ url: draft.url, name: value }, appSettings);
+        if ('error' in named) { fail(named.error); return; }
+        // A keyword filter only applies to feeds
+        if (named.spec.kind === 'feed') {
+          setAddDraft({ ...draft, step: 'include', name: value });
+          setEditBuffer('');
+          return;
+        }
+      }
+      const result = newUserSource({ url: draft.url, name: draft.step === 'name' ? value : draft.name, include: draft.step === 'include' ? value : undefined }, appSettings);
+      if ('error' in result) { fail(result.error); return; }
+      stopEditing();
+      const { spec } = result;
+      const patch = addSourcePatch(appSettings, spec);
+      audit.log('source', `added ${spec.id} (${spec.kind})`);
+      setAppSettings((prev) => ({ ...prev, ...patch }));
+      void service.updateSettings(patch)
+        .then((s) => {
+          setAppSettings(s);
+          showMessage(`✓ Added ${spec.displayName}, fetching it…`);
+          return doFetch([spec.id]);
+        })
+        .catch((err) => {
+          audit.error('source', `add ${spec.id}: ${errorText(err)}`);
+          showMessage(`Error: ${errorText(err)}`);
+        });
+      return;
+    }
 
     if (row.kind === 'source') {
       const sourceId = row.source.id;
@@ -989,7 +1039,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       return;
     }
     save();
-  }, [service, appSettings.sourceLabels, onConfigChange, showMessage, audit]);
+  }, [service, appSettings, addDraft, doFetch, onConfigChange, showMessage, audit]);
 
   /** Save settings shared with the web app; `what` describes the change for the audit trail. */
   const updateRemoteSettings = useCallback((patch: Partial<AppSettings>, action: string, what: string) => {
@@ -1003,12 +1053,40 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       });
   }, [service, showMessage, audit]);
 
+  /** Delete every stored update of a source; one that is gone for good also loses its label and color. */
+  const deleteSourceItems = useCallback(async (id: string) => {
+    const name = sourceName(id);
+    const active = sources.some((s) => s.id === id);
+    showMessage(`Deleting the items of ${name}…`, 60_000);
+    try {
+      const n = await service.deleteSourceUpdates(id);
+      audit.log('source', `${id}: deleted ${n} items`);
+      showMessage(`✓ Deleted ${n} item${n === 1 ? '' : 's'} of ${name}${active ? ' · f fetches them again' : ''}`, 5000);
+      if (!active && !appSettings.removedSources.includes(id)) updateRemoteSettings(forgetSourcePatch(appSettings, id), 'source', `forgot ${id}`);
+    } catch (err) {
+      audit.error('source', `${id}: delete items: ${errorText(err)}`);
+      showMessage(`⚠ Could not delete the items of ${name}: ${errorText(err)}`, 6000);
+    }
+    await refresh();
+  }, [sourceName, sources, showMessage, service, audit, appSettings, updateRemoteSettings, refresh]);
+
+  /** Remove a source, keeping its stored updates (it then shows greyed out) or deleting them too. */
+  const removeSource = useCallback((id: string, deleteItems: boolean) => {
+    const name = sourceName(id);
+    const items = stats?.bySource[id] ?? 0;
+    const builtin = !userSource(appSettings, id);
+    const patch = removeSourcePatch(appSettings, id, { keepName: items > 0 && !deleteItems });
+    updateRemoteSettings(deleteItems && !builtin ? { ...patch, ...forgetSourcePatch(appSettings, id) } : patch, 'source', `removed ${id}`);
+    if (deleteItems && items > 0) void deleteSourceItems(id);
+    else showMessage(`Removed ${name}${items > 0 ? ` · its ${items} items stay until you delete them` : builtin ? ' · restore it at the end of the list' : ''}`, 5000);
+  }, [sourceName, stats, appSettings, updateRemoteSettings, deleteSourceItems, showMessage]);
+
   // ── Input handler ───────────────────────────────────────────────────────────
   useInput((raw, key) => {
     // Shortcuts ignore case (Shift+b does what b does); typed text keeps `raw`.
     const input = shortcutKey(raw);
     // ── Quit from any screen (but not while typing) ──
-    if (input === 'q' && !editingKey && !todosAddMode && !refs.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
+    if (input === 'q' && !editingKey && sourceDetails?.editing === undefined && !todosAddMode && !refs.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
 
     // ── Search prompt (opened with /) ──
     if (searchDraft !== undefined) {
@@ -1144,7 +1222,96 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       return;
     }
 
-    // ── References view (b) and the file-a-link form (B) ──
+    // ── Source details popup (Config → ↵ on a source) ──
+    if (sourceDetails) {
+      const d = sourceDetails;
+      if (!detailsSource) { setSourceDetails(undefined); return; }
+      const own = !!userSource(appSettings, d.id);
+      const removed = !!detailsSource.removed;
+      const fields = removed ? [] : detailsFields(own, d.draft);
+      const field = fields[Math.min(d.focus, fields.length - 1)];
+      if (d.editing !== undefined) {
+        if (key.escape) { setSourceDetails({ ...d, editing: undefined }); return; }
+        if (key.return) {
+          if (!field) return;
+          const draft = { ...d.draft, [field]: d.editing.trim() };
+          setSourceDetails({ ...d, draft, editing: undefined, error: undefined, focus: Math.min(d.focus, detailsFields(own, draft).length - 1) });
+          return;
+        }
+        const next = editText(d.editing, raw, key);
+        if (next !== undefined) setSourceDetails({ ...d, editing: next });
+        return;
+      }
+      if (key.escape || key.backspace || key.delete) {
+        if (detailsChanged && d.confirm !== 'discard') setSourceDetails({ ...d, confirm: 'discard' });
+        else setSourceDetails(undefined);
+        return;
+      }
+      const items = stats?.bySource[d.id] ?? 0;
+      if (d.confirm === 'remove' && items > 0 && (input === 'x' || input === 'd')) {
+        setSourceDetails(undefined);
+        removeSource(d.id, input === 'd');
+        return;
+      }
+      if (input === 'x' && !removed) {
+        if (d.confirm !== 'remove') { setSourceDetails({ ...d, confirm: 'remove' }); return; }
+        setSourceDetails(undefined);
+        removeSource(d.id, false);
+        setSettingsFocusIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      if ((input === 'd' || (removed && input === 'x')) && items > 0) {
+        if (d.confirm !== 'items') { setSourceDetails({ ...d, confirm: 'items' }); return; }
+        if (removed) setSourceDetails(undefined);
+        else setSourceDetails({ ...d, confirm: undefined });
+        void deleteSourceItems(d.id);
+        return;
+      }
+      const ready = { ...d, confirm: undefined };
+      if (removed) {
+        if (input === 'r' && detailsSource.builtin) {
+          setSourceDetails(undefined);
+          updateRemoteSettings({ removedSources: appSettings.removedSources.filter((s) => s !== d.id) }, 'source', `restored ${d.id}`);
+          showMessage(`Restored ${sourceName(d.id)}`);
+        } else if (input === 'v') {
+          setSourceDetails(undefined); setShowSettings(false); applySourceFilter([d.id]);
+        } else if (d.confirm) setSourceDetails(ready);
+        return;
+      }
+      if (!field) return;
+      if (key.upArrow || input === 'k') { setSourceDetails({ ...ready, focus: Math.max(0, d.focus - 1) }); return; }
+      if (key.downArrow || input === 'j') { setSourceDetails({ ...ready, focus: Math.min(fields.length - 1, d.focus + 1) }); return; }
+      if (input === 's') {
+        const result = sourceDraftPatch(appSettings, d.id, d.draft);
+        if ('error' in result) { setSourceDetails({ ...ready, error: result.error }); return; }
+        setSourceDetails(undefined);
+        if (detailsChanged) {
+          updateRemoteSettings(result.patch, 'source', `${d.id} details saved`);
+          showMessage(`✓ Saved ${sourceName(d.id)}`);
+        }
+        return;
+      }
+      if (input === 'f') { setSourceDetails(ready); void doFetch([d.id]); return; }
+      if (input === 'v') { setSourceDetails(undefined); setShowSettings(false); applySourceFilter([d.id]); return; }
+      if (field === 'enabled' && (key.return || input === ' ')) {
+        setSourceDetails({ ...ready, draft: { ...d.draft, enabled: !d.draft.enabled } });
+        return;
+      }
+      if (field === 'color' && (key.return || key.rightArrow || key.leftArrow)) {
+        const current = COLOR_PALETTE.indexOf(d.draft.color || COLOR_PALETTE[0]!);
+        const next = COLOR_PALETTE[(current + (key.leftArrow ? -1 : 1) + COLOR_PALETTE.length) % COLOR_PALETTE.length]!;
+        setSourceDetails({ ...ready, draft: { ...d.draft, color: next } });
+        return;
+      }
+      if (key.return || input === 'e') {
+        setSourceDetails({ ...ready, error: undefined, editing: String(d.draft[field]) });
+        return;
+      }
+      if (d.confirm) setSourceDetails(ready);
+      return;
+    }
+
+    // ── References view (5) and the file-a-link form (m) ──
     if (refs.active) {
       if (input === 'h' && !refs.typing) {
         setHelpContext('references');
@@ -1272,7 +1439,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       // Typing into a source label or local setting
       if (editingKey) {
         const editRow = settingsRows.find((r) => r.key === editingKey);
-        if (key.escape) { setEditingKey(undefined); setEditBuffer(''); return; }
+        if (key.escape) { setEditingKey(undefined); setEditBuffer(''); setAddDraft(undefined); return; }
         if (key.return) { if (editRow) commitEdit(editRow, editBuffer); return; }
         if (key.backspace || key.delete) { setEditBuffer((b) => b.slice(0, -1)); return; }
         // Pasted text arrives in one chunk; drop line breaks
@@ -1330,7 +1497,30 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
 
       if (row.kind === 'source') {
         const sourceId = row.source.id;
+        const items = stats?.bySource[sourceId] ?? 0;
+        if (confirmKey === row.key && !row.source.removed && items > 0 && (input === 'x' || input === 'd')) {
+          setConfirmKey(undefined);
+          removeSource(sourceId, input === 'd');
+          setSettingsFocusIndex((i) => Math.max(0, i - 1));
+          return;
+        }
+        if (row.source.removed && !key.return && input !== 'v') {
+          if (input === 'x') {
+            if (confirmKey !== row.key) { setConfirmKey(row.key); return; }
+            setConfirmKey(undefined);
+            void deleteSourceItems(sourceId);
+            setSettingsFocusIndex((i) => Math.max(0, i - 1));
+            return;
+          }
+          setConfirmKey(undefined);
+          return;
+        }
         if (key.return) {
+          setConfirmKey(undefined);
+          setSourceDetails({ id: sourceId, draft: sourceDraft(appSettings, sourceId), focus: 0 });
+          return;
+        }
+        if (input === ' ') {
           const disabled = new Set(appSettings.disabledSources);
           const enable = disabled.has(sourceId);
           if (enable) disabled.delete(sourceId);
@@ -1348,6 +1538,31 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         } else if (input === 'v') {
           setShowSettings(false);
           applySourceFilter([sourceId]);
+        } else if (input === 'x') {
+          // x again confirms; a removed built-in can be restored, a user source is gone
+          if (confirmKey !== row.key) { setConfirmKey(row.key); return; }
+          setConfirmKey(undefined);
+          removeSource(sourceId, false);
+          setSettingsFocusIndex((i) => Math.max(0, i - 1));
+          return;
+        }
+        setConfirmKey(undefined);
+        return;
+      }
+
+      if (row.kind === 'add-source') {
+        if (key.return || input === 'e') {
+          setAddDraft({ step: 'url', url: '', name: '' });
+          setEditBuffer('');
+          setEditingKey(row.key);
+        }
+        return;
+      }
+
+      if (row.kind === 'restore-sources') {
+        if (key.return) {
+          updateRemoteSettings(restoreSourcesPatch(), 'source', `restored ${row.count} removed source${row.count === 1 ? '' : 's'}`);
+          showMessage(`Restored ${row.count} source${row.count === 1 ? '' : 's'}`);
         }
         return;
       }
@@ -1823,6 +2038,26 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     );
   }
 
+  if (showSettings && sourceDetails && detailsSource) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        {statusBar}
+        {filterBar}
+        <SourceDetailsPane
+          source={detailsSource}
+          state={sourceDetails}
+          own={!!userSource(appSettings, sourceDetails.id)}
+          changed={detailsChanged}
+          stats={stats}
+          items={stats?.bySource[sourceDetails.id] ?? 0}
+          lastFetch={lastFetch[sourceDetails.id]}
+          height={availableH}
+          columns={columns}
+        />
+      </Box>
+    );
+  }
+
   if (accountPicker) {
     return (
       <Box flexDirection="column" height={rows}>
@@ -1891,6 +2126,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           searchTyping={settingsSearchTyping}
           editBuffer={editingKey ? editBuffer : undefined}
           confirmKey={confirmKey}
+          addStep={editingKey && addDraft ? addDraft.step : undefined}
           height={availableH}
           columns={columns}
         />

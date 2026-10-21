@@ -1,42 +1,28 @@
-import type { SourcePlugin } from '../types.js';
-import { githubSource } from './sources/github.js';
-import { githubBlogSource } from './sources/github-blog.js';
-import { azureSource } from './sources/azure.js';
-import { vscodeSource } from './sources/vscode.js';
-import { copilotCliSource } from './sources/copilot-cli.js';
-import { theRegisterSource } from './sources/theregister.js';
-import { anthropicNewsSource } from './sources/anthropic-news.js';
-import { anthropicEngineeringSource } from './sources/anthropic-engineering.js';
-import { azureSreAgentSource } from './sources/azure-sre-agent.js';
-import { githubNextSource } from './sources/github-next.js';
+import type { AppSettings, SourcePlugin } from '../types.js';
+import { createSource } from './factory.js';
+import { activeSourceSpecs } from './specs.js';
 
 /**
- * Central plugin registry.
+ * The sources to fetch: built-ins (`specs.ts`) minus the ones the user removed, plus the user's own.
  *
- * To add a new source:
- *   1. Create `packages/core/src/scraper/sources/<name>.ts` implementing `SourcePlugin`.
- *   2. Import it here and add it to the `builtins` array.
+ * To add a built-in, append a spec to `BUILTIN_SOURCES` in `specs.ts`. If no spec kind fits,
+ * write a module in `sources/custom/` on the shared helpers and register it in `sources/custom/index.ts`.
  */
-const registry = new Map<string, SourcePlugin>();
+type SourceSettings = Partial<Pick<AppSettings, 'userSources' | 'removedSources'>>;
 
-const builtins: SourcePlugin[] = [githubSource, githubBlogSource, azureSource, vscodeSource, copilotCliSource, theRegisterSource, anthropicNewsSource, anthropicEngineeringSource, azureSreAgentSource, githubNextSource];
-for (const plugin of builtins) {
-  registry.set(plugin.id, plugin);
+export function getAllSources(settings: SourceSettings = {}): SourcePlugin[] {
+  return activeSourceSpecs(settings).map(createSource);
 }
 
-export function getSource(id: string): SourcePlugin | undefined {
-  return registry.get(id);
+export function getSource(id: string, settings: SourceSettings = {}): SourcePlugin | undefined {
+  const spec = activeSourceSpecs(settings).find((s) => s.id === id);
+  return spec && createSource(spec);
 }
 
-export function getAllSources(): SourcePlugin[] {
-  return [...registry.values()];
+export function getSourceIds(settings: SourceSettings = {}): string[] {
+  return activeSourceSpecs(settings).map((s) => s.id);
 }
 
-export function getSourceIds(): string[] {
-  return [...registry.keys()];
-}
-
-/** Allow runtime registration of additional plugins (e.g. from config). */
-export function registerSource(plugin: SourcePlugin): void {
-  registry.set(plugin.id, plugin);
-}
+export { createSource } from './factory.js';
+export { parseFeed } from './feed.js';
+export * from './specs.js';

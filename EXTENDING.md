@@ -1,84 +1,102 @@
 # Adding a New Source
 
-Sources are TypeScript plugins in `@fomo/core`. Adding one requires two files.
+A source is a **spec**: plain data that says what to fetch. Specs of a few kinds are turned into fetchers by
+`packages/core/src/scraper/factory.ts`, so most sources need no code at all.
 
-## Plugin Interface
+| Kind              | What it fetches                                          | Who adds it                         |
+|-------------------|----------------------------------------------------------|-------------------------------------|
+| `feed`            | RSS 2.0, RSS 1.0 (RDF) or Atom; several URLs are merged  | Users in the app, or built-in       |
+| `github-releases` | Releases of a GitHub repository                          | Users in the app, or built-in       |
+| `custom`          | Anything else (HTML pages, changelogs, APIs), in code    | Developers only                     |
+
+Built-in specs live in `packages/core/src/scraper/specs.ts` (`BUILTIN_SOURCES`). Sources users add are saved in
+the shared settings (`userSources`), and built-ins they remove in `removedSources`, so a fix to a built-in still
+reaches everyone who kept it.
+
+## 1. Add a source from the app (no build)
+
+- **TUI:** press `c`, go to **+ Add source** under **Sources**, press `↵` and type:
+  1. the feed URL (several feeds: separate them with spaces) or `https://github.com/owner/repo`,
+  2. a name (`↵` keeps the suggestion),
+  3. for feeds, an optional keyword regex such as `copilot|agents` (only matching items are kept).
+
+  The source is fetched straight away. `x` on a source removes it (`x` again confirms); removed built-ins come
+  back with **Restore removed**.
+- **Edit:** `↵` on a source (TUI) or a click on its name (web) opens its details: status, label, color and on/off
+  for every source, plus name, URLs and keyword filter for your own (its id stays the same). `s` / **Save** saves.
+  Built-in URLs ship with the app and are read-only.
+- **Stored items:** removing a source that has items asks whether to keep them (it then stays greyed out, and its
+  items still show) or delete them too. **Delete its items** in the details (`d d` in the TUI) clears a source's
+  stored updates: an active source is re-fetched as new, a removed one disappears for good.
+- **Web app:** open ⚙️ Config and use the form under **Sources**. The terminal app fetches the new source on its
+  next run (the web app has no server to fetch from).
+
+## 2. Add a built-in feed or repository
+
+Add a spec to `BUILTIN_SOURCES` in `packages/core/src/scraper/specs.ts`:
 
 ```typescript
-import type { SourcePlugin, ScrapedItem, SourceCapabilities } from '@fomo/core';
+{ kind: 'feed', id: 'my-blog', displayName: 'My Blog', urls: ['https://example.com/feed.xml'] },
+{ kind: 'feed', id: 'vscode', displayName: 'VS Code Updates', urls: ['https://code.visualstudio.com/feed.xml'], category: 'release' },
+{ kind: 'feed', id: 'sre', displayName: 'SRE Agent', urls: [FEED_A, FEED_B], include: '\\bsre\\s+agents?\\b' },
+{ kind: 'github-releases', id: 'my-tool', displayName: 'My Tool Releases', repo: 'owner/my-tool' },
 ```
 
-### `ScrapedItem`
+| Field         | Kinds  | Notes                                                                  |
+|---------------|--------|------------------------------------------------------------------------|
+| `id`          | all    | Unique slug (`[a-z0-9-]`), the Table PartitionKey. Never change it     |
+| `displayName` | all    | Human-readable name                                                    |
+| `urls`        | feed   | One or more feeds; items are merged and deduplicated by URL            |
+| `include`     | feed   | Case-insensitive regex tested on title + content                       |
+| `category`    | feed   | Keep only items with this `<category>` (RSS) or `term` (Atom)          |
+| `repo`        | github-releases | `owner/repo`                                                  |
 
-| Field           | Type     | Notes                                             |
-|-----------------|----------|----------------------------------------------------|
-| `title`         | `string` | Required                                           |
-| `url`           | `string` | Required — used as dedup key (`sha256(url)`)       |
-| `datePublished` | `Date`   | Required                                           |
-| `content`       | `string` | Optional — set when `capabilities.preview` is true |
+## 3. Add a custom (code) source
 
-### `SourcePlugin`
+For sites without a feed, write a module in `packages/core/src/scraper/sources/custom/<name>.ts` that returns
+`ScrapedItem[]` and **throws** on failure (the factory adds the `[id] fetch failed:` prefix). Build it on the shared
+helpers instead of copying code:
 
-| Field          | Type                          | Notes                                |
-|----------------|-------------------------------|--------------------------------------|
-| `id`           | `string`                      | Unique slug, used as PartitionKey    |
-| `displayName`  | `string`                      | Human-readable name                  |
-| `capabilities` | `{ preview: boolean }`        | Whether source provides body content |
-| `fetch()`      | `() => Promise<ScrapedItem[]>`| Return `[]` on failure, never throw  |
-
-## 1. Create the plugin
-
-Create `packages/core/src/scraper/sources/<name>.ts`:
+| Helper                                                     | File        |
+|------------------------------------------------------------|-------------|
+| `fetchText`, `fetchJson` (user agent, 15 s timeout, HTTP errors) | `scraper/http.ts`   |
+| `htmlToText`, `decodeEntities`, `parseDate`, `dedupByUrl`, `MAX_CONTENT` | `scraper/text.ts` |
+| `parseFeed(xml, { include, category })`                    | `scraper/feed.ts`   |
+| `fetchGithubReleases`, `releaseItems`, `stripMarkdown`     | `scraper/github.ts` |
 
 ```typescript
-import type { SourcePlugin, ScrapedItem } from '../../types.js';
+// packages/core/src/scraper/sources/custom/my-site.ts
+import type { ScrapedItem } from '../../../types.js';
+import { fetchText } from '../../http.js';
+import { htmlToText, parseDate } from '../../text.js';
 
-export const mySource: SourcePlugin = {
-  id: 'mysource',
-  displayName: 'My Source',
-  capabilities: { preview: true },
+export async function fetchMySite(options: Record<string, string>): Promise<ScrapedItem[]> {
+  const html = await fetchText(`https://example.com/${options.section ?? 'news'}`);
+  // …parse html into items…
+  return [{ title: htmlToText(title), url, datePublished: parseDate(date), content: '' }];
+}
+```
 
-  async fetch(): Promise<ScrapedItem[]> {
-    try {
-      const res = await fetch('https://example.com/feed', {
-        headers: { 'User-Agent': 'fomo-release-tracker/1.0' },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return data.items.map((item: any) => ({
-        title: item.title,
-        url: item.url,
-        datePublished: new Date(item.publishedAt),
-        content: item.summary ?? '',
-      }));
-    } catch (err) {
-      console.error('[mysource] fetch failed:', err instanceof Error ? err.message : err);
-      return [];
-    }
-  },
+Register it in `packages/core/src/scraper/sources/custom/index.ts`:
+
+```typescript
+export const CUSTOM_MODULES = {
+  anthropic: fetchAnthropic,
+  'copilot-cli': fetchCopilotCli,
+  'my-site': fetchMySite,   // ← add here
 };
 ```
 
-## 2. Register the plugin
-
-Add two lines to `packages/core/src/scraper/registry.ts`:
+and point a spec at it in `BUILTIN_SOURCES` (`options` are passed to the function; set `preview: false` when the
+source has no body text):
 
 ```typescript
-import { mySource } from './sources/mysource.js';
-
-const builtins: SourcePlugin[] = [
-  githubSource,
-  azureSource,
-  vscodeSource,
-  copilotCliSource,
-  mySource,       // ← add here
-];
+{ kind: 'custom', id: 'my-site-news', displayName: 'My Site News', module: 'my-site', options: { section: 'news' }, preview: false },
 ```
 
-That's it. The source is available everywhere — fetching, the Copilot digest, the TUI and the web app.
+Keep fetching code out of `specs.ts`: it is imported by the browser app.
 
-## 3. Try it
+## 4. Try it
 
 ```bash
 pnpm build
@@ -90,42 +108,11 @@ In the TUI press `c`, move to your source under **Sources**, then:
 - `f` fetches just that source (even if it is disabled) and shows `+N new` or the error next to it.
 - `v` closes the config and lists only that source's updates (`Esc` clears the filter).
 
-## Common Patterns
+### `ScrapedItem`
 
-### RSS / Atom feed
-
-```typescript
-async fetch(): Promise<ScrapedItem[]> {
-  const res = await fetch(FEED_URL, { signal: AbortSignal.timeout(15_000) });
-  const xml = await res.text();
-  const items: ScrapedItem[] = [];
-  const re = /<item>([\s\S]*?)<\/item>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) {
-    const b = m[1];
-    const title = (b.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '').replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-    const link  = (b.match(/<link[^>]*>([\s\S]*?)<\/link>/i)?.[1] ?? '').trim();
-    const date  = b.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i)?.[1] ?? '';
-    if (title && link) items.push({ title, url: link, datePublished: new Date(date), content: '' });
-  }
-  return items;
-}
-```
-
-### GitHub Releases API
-
-```typescript
-async fetch(): Promise<ScrapedItem[]> {
-  const res = await fetch('https://api.github.com/repos/OWNER/REPO/releases?per_page=30', {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'fomo-release-tracker/1.0' },
-    signal: AbortSignal.timeout(15_000),
-  });
-  const releases = await res.json() as { name: string; tag_name: string; html_url: string; published_at: string; body: string }[];
-  return releases.map(r => ({
-    title: r.name || r.tag_name,
-    url: r.html_url,
-    datePublished: new Date(r.published_at),
-    content: (r.body ?? '').slice(0, 2000),
-  }));
-}
-```
+| Field           | Type     | Notes                                             |
+|-----------------|----------|---------------------------------------------------|
+| `title`         | `string` | Required                                          |
+| `url`           | `string` | Required — used as dedup key (`sha256(url)`)      |
+| `datePublished` | `Date`   | Required                                          |
+| `content`       | `string` | Optional — body text shown in the preview         |
