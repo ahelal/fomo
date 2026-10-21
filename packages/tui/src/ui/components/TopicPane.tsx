@@ -10,7 +10,7 @@ interface Props {
   columns: number;
   position?: 'bottom' | 'right';
   sourceLabels?: Record<string, string>;
-  /** `saved` shows the topic's saved updates, marking the unread ones. */
+  /** `saved` shows the topic's pending updates, marking the unread ones. */
   mode?: 'digest' | 'saved';
 }
 
@@ -20,7 +20,7 @@ export function TopicPane({ entry, height, columns, position = 'bottom', sourceL
   const saved = mode === 'saved';
   const unread = items.filter((u) => u.status === 'unread').length;
   const count = saved
-    ? `${items.length} saved update${items.length === 1 ? '' : 's'}${unread ? ` (${unread} unread)` : ''}`
+    ? `${items.length} pending update${items.length === 1 ? '' : 's'}${unread ? ` (${unread} unread)` : ''}`
     : `${items.length} update${items.length === 1 ? '' : 's'}`;
   const sources = entry.sources.map((s) => sourceLabels[s] ?? s).join(', ');
   const width = Math.max(columns - 6, 10);

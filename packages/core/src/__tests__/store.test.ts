@@ -104,6 +104,36 @@ describe('UpdateStore.listUpdates source filter', () => {
   });
 });
 
+describe('UpdateStore.listUpdates sort', () => {
+  const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+  const row = (rowKey: string, partitionKey: string, title: string, datePublished: string) =>
+    ({ partitionKey, rowKey, title, url: `https://x/${rowKey}`, datePublished, dateAdded: datePublished, status: 'unread', saved: false });
+  const store = () => {
+    const s = new UpdateStore(conn as any);
+    (s as any).client = {
+      listEntities: () => (async function* () {
+        yield row('a', 'zeta', 'Banana', '2026-01-03');
+        yield row('b', 'alpha', 'cherry', '2026-01-01');
+        yield row('c', 'mid', 'apple', '2026-01-02');
+      })(),
+    };
+    return s;
+  };
+
+  it('defaults to newest first', async () => {
+    const resp = await store().listUpdates();
+    expect(resp.updates.map((u) => u.title)).toEqual(['Banana', 'apple', 'cherry']);
+  });
+
+  it('sorts every row before applying the limit', async () => {
+    const byTitle = await store().listUpdates({ sort: { key: 'title', dir: 'asc' }, limit: 2 });
+    expect(byTitle.updates.map((u) => u.title)).toEqual(['apple', 'Banana']);
+    expect(byTitle.hasMore).toBe(true);
+    const bySource = await store().listUpdates({ sort: { key: 'source', dir: 'desc' }, limit: 1 });
+    expect(bySource.updates.map((u) => u.source)).toEqual(['zeta']);
+  });
+});
+
 describe('UpdateStore fetch history', () => {
   const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
   const rows = (items: object[]) => () => (async function* () { yield* items; })();

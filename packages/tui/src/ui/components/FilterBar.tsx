@@ -5,7 +5,7 @@ const FILTERS = [
   { key: '1', label: 'All',    value: 'all' },
   { key: '2', label: 'Unread', value: 'unread' },
   { key: '3', label: 'Read',   value: 'read' },
-  { key: '4', label: 'Saved',  value: 'saved' },
+  { key: '4', label: 'Pending', value: 'saved' },
 ] as const;
 
 /** Views opened over the feed, shown after the tabs. */
@@ -21,7 +21,7 @@ const ESC_HINT = ' · Esc clears';
 interface Props {
   /** Active view: a feed filter, or `todos` / `refs` while one of those is open. */
   active: string;
-  /** The active view is listed as topics (Unread and Saved can switch). */
+  /** The active view is listed as topics (Unread and Pending can switch). */
   grouped?: boolean;
   columns: number;
   /** Sources the view is limited to (names, or a count), if any. */
@@ -32,9 +32,11 @@ interface Props {
   matches?: number;
   /** Search prompt being typed (opened with /); replaces the bar while set. */
   searchDraft?: string;
+  /** The view's sort (cycled with s); only shown when it isn't the default order. */
+  sortLabel?: string;
 }
 
-export function FilterBar({ active, grouped, columns, sourceLabel, search, matches, searchDraft }: Props) {
+export function FilterBar({ active, grouped, columns, sourceLabel, search, matches, searchDraft, sortLabel }: Props) {
   if (searchDraft !== undefined) {
     return (
       <Box width={columns} flexShrink={0}>
@@ -60,8 +62,9 @@ export function FilterBar({ active, grouped, columns, sourceLabel, search, match
   // Budget the chip area so the match count survives on narrow terminals:
   // the query is truncated first, and the Esc hint is dropped if it can't fit.
   const srcChip = showSource ? ` src:${sourceLabel} ` : '';
+  const sortChip = sortLabel ? ` ↕ ${sortLabel} ` : '';
   const count = search && matches !== undefined ? ` ${matches} match${matches === 1 ? '' : 'es'}` : '';
-  let room = columns - tabsW - (srcChip ? srcChip.length + 1 : 0) - count.length;
+  let room = columns - tabsW - (srcChip ? srcChip.length + 1 : 0) - (sortChip ? sortChip.length + 1 : 0) - count.length;
   let queryChip = '';
   if (search) {
     room -= 1;
@@ -98,9 +101,15 @@ export function FilterBar({ active, grouped, columns, sourceLabel, search, match
           </React.Fragment>
         ))}
       </Box>
-      {(showSource || search) && (
+      {(showSource || search || sortChip) && (
         <Box flexShrink={1} overflow="hidden">
           <Text wrap="truncate-end">
+            {sortChip && (
+              <>
+                <Text color="gray"> </Text>
+                <Text color="#a5d6ff" inverse>{sortChip}</Text>
+              </>
+            )}
             {showSource && (
               <>
                 <Text color="gray"> </Text>
@@ -114,7 +123,7 @@ export function FilterBar({ active, grouped, columns, sourceLabel, search, match
                 {count && <Text color="#8b949e">{count}</Text>}
               </>
             )}
-            {showHint && <Text color="#8b949e">{ESC_HINT}</Text>}
+            {(showSource || search) && showHint && <Text color="#8b949e">{ESC_HINT}</Text>}
           </Text>
         </Box>
       )}

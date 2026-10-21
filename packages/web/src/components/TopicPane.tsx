@@ -34,7 +34,7 @@ export function TopicPane({ entry, sourceLabels = {}, onOpenItem, onMarkRead, on
         )}
         <div className="detail-pane__meta-row">
           <span>
-            {items.length} {saved ? 'saved ' : ''}update{items.length === 1 ? '' : 's'}
+            {items.length} {saved ? 'pending ' : ''}update{items.length === 1 ? '' : 's'}
             {saved && unread > 0 ? ` (${unread} unread)` : ''}
           </span>
           <span className="detail-pane__meta-val">{entry.sources.map(label).join(', ')}</span>

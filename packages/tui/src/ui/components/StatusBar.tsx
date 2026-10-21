@@ -49,7 +49,7 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
   const sep = ' │ ';
   const helpStr = '[h] help ';
   const statsStr = stats
-    ? `Total: ${total}  Unread: ${unread}  Read: ${read}  Saved: ${saved}`
+    ? `Total: ${total}  Unread: ${unread}  Read: ${read}  Pending: ${saved}`
     : 'loading…';
   const leftW = textWidth(brandStr + sep + statsStr);
   let room = columns - leftW - textWidth(sep + helpStr) - 1;
@@ -86,7 +86,7 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
             <Text color="#f0f6fc" bold backgroundColor={bg}>{unread}</Text>
             <Text color="#8b949e" backgroundColor={bg}>{'  Read: '}</Text>
             <Text color="#8b949e" backgroundColor={bg}>{read}</Text>
-            <Text color="#8b949e" backgroundColor={bg}>{'  Saved: '}</Text>
+            <Text color="#8b949e" backgroundColor={bg}>{'  Pending: '}</Text>
             <Text color="#e3b341" bold backgroundColor={bg}>{saved}</Text>
           </>
         ) : (

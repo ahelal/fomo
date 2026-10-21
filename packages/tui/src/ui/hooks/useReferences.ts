@@ -2,15 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Key } from 'ink';
 import {
   buildReferenceRows,
+  isDefaultSort,
   isInFolder,
+  nextSort,
   normalizeFolder,
+  REFERENCE_SORTS,
   parentRowIndex,
   referenceFolders,
   rowFolder,
   searchTerms,
   shortcutKey,
+  sortLabel,
   type Reference,
   type ReferenceRow,
+  type ReferenceSort,
   type ReferenceSuggestion,
   type Update,
 } from '@fomo/core';
@@ -127,6 +132,8 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
   /** Folders are open unless collapsed. */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [search, setSearch] = useState('');
+  /** Order of links within a folder (cycled with s). */
+  const [sort, setSort] = useState<ReferenceSort | undefined>();
   const [searchDraft, setSearchDraft] = useState<string | undefined>();
   const [form, setForm] = useState<RefForm | undefined>();
   const [rename, setRename] = useState<{ from: string; value: string; error?: string } | undefined>();
@@ -141,7 +148,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
 
   const folders = useMemo(() => referenceFolders(refs), [refs]);
   const expanded = useMemo(() => new Set(folders.filter((f) => !collapsed.has(f))), [folders, collapsed]);
-  const rows = useMemo(() => buildReferenceRows(refs, expanded, search), [refs, expanded, search]);
+  const rows = useMemo(() => buildReferenceRows(refs, expanded, search, sort), [refs, expanded, search, sort]);
   const matches = useMemo(() => (form ? folderMatches(folders, form.folderQuery) : []), [folders, form]);
 
   useEffect(() => {
@@ -369,6 +376,13 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
     if (key.pageUp) { setSelectedIndex((i) => Math.max(0, i - PAGE)); return; }
     if (key.pageDown) { setSelectedIndex((i) => Math.min(last, i + PAGE)); return; }
     if (input === '/') { setSearchDraft(search); return; }
+    if (input === 's') {
+      const next = nextSort(REFERENCE_SORTS, sort);
+      pendingKey.current = row?.key;
+      setSort(next);
+      say(`Sort: ${next.label}`);
+      return;
+    }
     if (input === 'a') {
       formSeq.current++;
       setForm(newForm({ folder: rowFolder(row) }, { field: 'url', note: suggest ? 'Paste a link, then ^G to let Copilot file it' : undefined }));
@@ -418,6 +432,8 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
     close: closeAll,
     fileUpdate,
     handleInput,
+    /** The links' sort, when it isn't the default order. */
+    sortLabel: isDefaultSort(REFERENCE_SORTS, sort) ? undefined : sortLabel(REFERENCE_SORTS, sort),
     view: {
       rows,
       total: refs.length,

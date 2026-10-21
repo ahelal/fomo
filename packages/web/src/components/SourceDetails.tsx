@@ -93,7 +93,7 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
         <div className="settings-panel__section">
           <h3>Status</h3>
           <dl className="source-details__facts">
-            <dt>Items</dt><dd>{items}{saved > 0 ? ` (${saved} saved)` : ''}</dd>
+            <dt>Items</dt><dd>{items}{saved > 0 ? ` (${saved} pending)` : ''}</dd>
             <dt>Last fetched</dt><dd>{history?.lastFetchAt ? timeAgo(history.lastFetchAt) : 'never'}</dd>
             <dt>Last new item</dt><dd>{history?.lastAddedAt ? timeAgo(history.lastAddedAt) : '—'}</dd>
             {history?.lastError && <><dt>Last error</dt><dd className="source-details__error">⚠ {history.lastError}</dd></>}
@@ -200,7 +200,7 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
                 if (removed) onClose();
               }}
             >
-              {confirmDelete ? `Delete ${items} items${saved ? ` (${saved} saved)` : ''}?` : `Delete its ${items} items`}
+              {confirmDelete ? `Delete ${items} items${saved ? ` (${saved} pending)` : ''}?` : `Delete its ${items} items`}
             </button>
           )}
           <span className="source-details__spacer" />

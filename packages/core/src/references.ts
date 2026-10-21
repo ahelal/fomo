@@ -1,5 +1,6 @@
 import type { Reference } from './types.js';
 import { searchTerms } from './search.js';
+import { compareReferences, compareText, type ReferenceSort } from './sort.js';
 
 /** Deepest folder nesting kept; deeper segments are joined into the last one. */
 export const MAX_FOLDER_DEPTH = 6;
@@ -81,24 +82,22 @@ interface FolderNode {
   refs: Reference[];
 }
 
-function compareText(a: string, b: string): number {
-  return a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
-}
-
 function newNode(path: string, name: string): FolderNode {
   return { path, name, count: 0, folders: new Map(), refs: [] };
 }
 
 /**
- * The folder tree as display rows: at each level subfolders first, then links (both by name).
- * Folders in `expanded` are open; with `search` set only matching links (and their folders) are
- * listed, all opened.
+ * The folder tree as display rows: at each level subfolders first (by name), then links (by `sort`,
+ * title A→Z by default). Folders in `expanded` are open; with `search` set only matching links (and
+ * their folders) are listed, all opened.
  */
 export function buildReferenceRows(
   refs: Reference[],
   expanded: ReadonlySet<string>,
   search?: string,
+  sort?: ReferenceSort,
 ): ReferenceRow[] {
+  const byLink = compareReferences(sort);
   const searching = searchTerms(search).length > 0;
   const root = newNode('', '');
   for (const ref of refs) {
@@ -122,7 +121,7 @@ export function buildReferenceRows(
       rows.push({ kind: 'folder', key: `folder:${child.path}`, path: child.path, name: child.name, depth, count: child.count, open });
       if (open) walk(child, depth + 1);
     }
-    for (const ref of [...node.refs].sort((a, b) => compareText(a.title, b.title))) {
+    for (const ref of [...node.refs].sort(byLink)) {
       rows.push({ kind: 'ref', key: `ref:${ref.id}`, ref, depth });
     }
   };

@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   DEFAULT_SETTINGS,
+  TOPIC_SORTS,
+  isDefaultSort,
+  nextSort,
   patchDigest,
+  sortDigestEntries,
+  sortLabel,
+  updateSorts,
   removeFromDigest,
   type FomoService,
   type Update,
@@ -9,6 +15,8 @@ import {
   type StatsResponse,
   type AppSettings,
   type DigestEntry,
+  type TopicSort,
+  type UpdateSort,
 } from '@fomo/core';
 
 export type FilterStatus = Status | 'all' | 'saved' | 'todos' | 'refs';
@@ -20,6 +28,13 @@ export type GroupableView = 'unread' | 'saved';
 export type GroupedViews = Record<GroupableView, boolean>;
 export const canGroup = (f: FilterStatus): f is GroupableView => f === 'unread' || f === 'saved';
 export const isGroupedView = (f: FilterStatus, g: GroupedViews) => canGroup(f) && g[f];
+type ListView = Exclude<FilterStatus, PaneView>;
+
+/** Per-view sort orders, kept in memory only (unset is the default order). */
+interface ViewSorts {
+  list: Partial<Record<ListView, UpdateSort>>;
+  topics: Partial<Record<GroupableView, TopicSort>>;
+}
 
 export interface FomoState {
   updates: Update[];
@@ -42,12 +57,16 @@ export interface FomoState {
   sourceFilter: string[] | undefined;
   /** Lazily loaded update bodies (lists are fetched without content). */
   content: Record<string, string>;
+  /** Label of the current list or topic sort, undefined when it is the default order. */
+  sortLabel: string | undefined;
 }
 
 export interface FomoActions {
   setFilter(f: FilterStatus): void;
   /** Switch the current Unread or Saved view between topics and a plain list. */
   toggleGrouped(): void;
+  /** Cycle the current list or topic view to its next sort order. */
+  cycleSort(): void;
   /** Search titles, summaries and content within the current view. */
   setSearch(q: string): void;
   /** Limit every view to these sources; undefined shows all. */
@@ -93,6 +112,8 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
   const [sourceFilter, setSourceFilterState] = useState<string[] | undefined>();
   const sourceFilterRef = useRef(sourceFilter);
   const loadSeq = useRef(0);
+  const [sorts, setSorts] = useState<ViewSorts>({ list: {}, topics: {} });
+  const sortsRef = useRef(sorts);
   const contentRequested = useRef(new Set<string>());
 
   const messageTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -114,13 +135,14 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
         if (isGroupedView(f, groupedRef.current)) {
           const resp = await service.getDigest({ search, sources, saved: f === 'saved' });
           if (seq !== loadSeq.current) return;
-          setDigest(resp.entries);
+          setDigest(sortDigestEntries(resp.entries, sortsRef.current.topics[f as GroupableView]));
           setPending(resp.pending);
           return;
         }
+        const sort = sortsRef.current.list[f];
         const resp = await service.listUpdates(f === 'saved'
-          ? { saved: true, sources, search, limit: 200, includeContent: false }
-          : { status: f, sources, search, limit: 200, includeContent: false });
+          ? { saved: true, sources, search, sort, limit: 200, includeContent: false }
+          : { status: f, sources, search, sort, limit: 200, includeContent: false });
         if (seq !== loadSeq.current) return;
         setUpdates(resp.updates);
         setTotal(resp.total);
@@ -174,7 +196,26 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     const next = { ...groupedRef.current, [f]: !groupedRef.current[f] };
     groupedRef.current = next;
     setGrouped(next);
-    showMessage(`${f === 'unread' ? 'Unread' : 'Saved'}: ${next[f] ? 'grouped by topic' : 'list'}`);
+    showMessage(`${f === 'unread' ? 'Unread' : 'Pending'}: ${next[f] ? 'grouped by topic' : 'list'}`);
+    void loadView(f);
+  }, [loadView, showMessage]);
+
+  const cycleSort = useCallback(() => {
+    const f = filterRef.current;
+    if (isPaneView(f)) return;
+    if (isGroupedView(f, groupedRef.current)) {
+      const view = f as GroupableView;
+      const next = nextSort(TOPIC_SORTS, sortsRef.current.topics[view]);
+      sortsRef.current = { ...sortsRef.current, topics: { ...sortsRef.current.topics, [view]: next } };
+      setSorts(sortsRef.current);
+      setDigest((d) => sortDigestEntries(d, next));
+      showMessage(`Sort: ${next.label}`);
+      return;
+    }
+    const next = nextSort(updateSorts(f), sortsRef.current.list[f]);
+    sortsRef.current = { ...sortsRef.current, list: { ...sortsRef.current.list, [f]: next } };
+    setSorts(sortsRef.current);
+    showMessage(`Sort: ${next.label}`);
     void loadView(f);
   }, [loadView, showMessage]);
 
@@ -289,7 +330,19 @@ export function useFomo(service: FomoService): FomoState & FomoActions {
     [service, showMessage, refresh],
   );
 
+  const activeSortLabel = (() => {
+    if (isPaneView(filter)) return undefined;
+    if (isGroupedView(filter, grouped)) {
+      const sort = sorts.topics[filter as GroupableView];
+      return isDefaultSort(TOPIC_SORTS, sort) ? undefined : sortLabel(TOPIC_SORTS, sort);
+    }
+    const options = updateSorts(filter);
+    return isDefaultSort(options, sorts.list[filter]) ? undefined : sortLabel(options, sorts.list[filter]);
+  })();
+
   return {
+    sortLabel: activeSortLabel,
+    cycleSort,
     updates,
     total,
     hasMore,

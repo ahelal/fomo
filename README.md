@@ -83,9 +83,9 @@ Open a topic to see a one-sentence summary and up to six highlights (most import
 A topic with only one update doesn't expand: its row shows that update's title and summary directly, and `Enter` opens the update.
 Mark the whole topic read with `x`, which makes skipping a low-value area a single key press.
 
-The **Saved** view (key `4`) is grouped the same way (press `4` again for a plain list), so saved posts sit together by product area. Reading a saved post
-keeps it there: `r` / `u` mark a topic or update read / unread (a blue `●` marks unread ones), `x` marks it read and
-moves on, and `s` unsaves an update, which removes it from the view.
+The **Pending** view (key `4`) is grouped the same way (press `4` again for a plain list), so pending posts sit together by product area. Reading a pending post
+keeps it there: `r` toggles a topic or update read / unread (a blue `●` marks unread ones), `x` marks it read and
+moves on, and `p` clears pending on an update, which removes it from the view.
 
 **Grouping.** Each topic is one **product or feature area**, such as "Copilot code review", "GitHub Actions", "VS Code releases", "Azure SRE Agent" or "Anthropic news":
 
@@ -117,14 +117,14 @@ Hints take priority over the built-in grouping rules, but every update still lan
 How it works:
 
 - `f` in the TUI fetches the sources and then runs the digest in the background; new updates show up ungrouped right away and the status bar shows Copilot's progress. Turn **Group after fetch** off in the config screen to fetch only.
-- Only **unread or saved updates that don't have a topic yet** are sent to Copilot (saved ones even after you've read them, so the Saved view is grouped too), in two passes:
+- Only **unread or saved updates that don't have a topic yet** are sent to Copilot (pending ones even after you've read them, so the Pending view is grouped too), in two passes:
   1. **Plan:** one call sees every pending update (title and a short excerpt, or its [post summary](#post-summaries) when it has one) plus the currently open topics. It assigns each update to an existing or new topic and rates it. Updates the model skips get one more call; oversized new topics get a split call.
   2. **Write:** one small call per touched topic writes the summary, the highlights and a one-sentence summary of each new update. These run 6 at a time with low reasoning effort, and a failed call is retried once.
 - Topics are stored in the `topics` table, and each update points to its topic (`topicId`), so the web app and TUI only read.
-- Updates that haven't been digested yet still appear in the grouped Unread and Saved views as single-item entries.
+- Updates that haven't been digested yet still appear in the grouped Unread and Pending views as single-item entries.
 - About 220 updates take roughly 2 minutes. **Max items per run** (default 300) caps a run; the rest are grouped next time.
 - The default model is `gpt-5-mini`. Change it with **Copilot model** in the config screen or `FOMO_COPILOT_MODEL`.
-- Existing topics keep their grouping and rating. **Regroup all topics** in the config screen (or `z` twice in the TUI's main view) regroups and re-rates all unread and saved updates (read and saved status is untouched). This also fills in per-update summaries for updates digested before they existed.
+- Existing topics keep their grouping and rating. **Regroup all topics** in the config screen (or `z` twice in the TUI's main view) regroups and re-rates all unread and pending updates (read and pending status is untouched). This also fills in per-update summaries for updates digested before they existed.
 - If regrouping fails before processing any updates, FOMO restores the previous topic assignments and shows the first error.
 - Authentication: pick a GitHub account with **Copilot account** in the config screen. It lists the accounts signed in to the GitHub CLI (`gh auth login`), and FOMO asks `gh` for that account's token. On **Automatic** (the default), it uses `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`, else your logged-in Copilot CLI user or gh's active account. If Copilot answers `Authorization error`, the message names the rejected account; choose one with Copilot access.
 
@@ -141,7 +141,7 @@ Press `g` on an update in the TUI to have Copilot summarise it: one sentence wit
 
 ### References
 
-**References** is a bookmark library. It keeps links you want to come back to, filed in a folder tree like `ai/agents` or `azure/iac` (up to 6 levels deep). **Saved** is still for reading later; References is for links worth keeping.
+**References** is a bookmark library. It keeps links you want to come back to, filed in a folder tree like `ai/agents` or `azure/iac` (up to 6 levels deep). **Pending** is still for reading later; References is for links worth keeping.
 
 - **File a feed update:** press `m` on an update in the TUI or the web app, or use the 🔖 button in the detail pane. The title, URL and any summary are filled in.
   - In the TUI, Copilot also suggests a folder (reusing your existing folders where they fit) and a one-line description. Edit either before saving.
@@ -244,8 +244,8 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 
 | Key             | Action                                    |
 |-----------------|-------------------------------------------|
-| `1` `2` `3` `4` | All / Unread / Read / Saved               |
-| `2` / `4` again | Switch Unread / Saved between topics and a list (or click the active tab) |
+| `1` `2` `3` `4` | All / Unread / Read / Pending             |
+| `2` / `4` again | Switch Unread / Pending between topics and a list (or click the active tab) |
 | `5`             | [References](#references) (`5` again returns to the previous view) |
 | `6`             | Todos                                     |
 | `m`             | File the selected update in References    |
@@ -257,9 +257,10 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `Enter`         | Topics: expand topic · Lists: toggle detail |
 | `→` / `l`, `←`  | Topics: expand / collapse topic           |
 | `x`             | Mark read (the whole topic when grouped) & next |
-| `r` / `u`       | Mark read / unread (a whole topic in grouped Saved) |
+| `r`             | Toggle read / unread (a whole topic when grouped) |
 | `n`             | Next topic / next unread                  |
-| `s`             | Save / unsave (unsave in the Saved view)  |
+| `p`             | Mark pending / not pending (leaves the Pending view) |
+| `s`             | Cycle the sort order of the view (or click ↕) |
 | `o`             | Open URL in a new tab                     |
 | `.`             | Toggle preview position (right / bottom)  |
 | `c`             | Config                                    |
@@ -270,7 +271,9 @@ Letter keys work in either case: `M` does the same as `m`.
 Fetching isn't done in the browser. Run `fomo` on your computer and press `f`, then pull to refresh.
 Post summaries made in the TUI (`g`) show at the top of the detail pane.
 
-**Search** only looks inside the view you're in: searching under Unread only finds unread updates (or unread topics when grouped), and under Saved only saved updates. Every word must appear in the title, summary, [post summary](#post-summaries) or content (case-insensitive). The query stays applied when you switch views until you clear it with `Esc` or ✕. On a phone, tap the search box in the filter bar.
+**Search** only looks inside the view you're in: searching under Unread only finds unread updates (or unread topics when grouped), and under Pending only pending updates. Every word must appear in the title, summary, [post summary](#post-summaries) or content (case-insensitive). The query stays applied when you switch views until you clear it with `Esc` or ✕. On a phone, tap the search box in the filter bar.
+
+**Sorting.** `s` cycles through the sort orders of the current view, the same in the web app and the TUI: lists by date, source, title (each ascending / descending) and unread first; topics by importance, date, title and size; References by title and date added; Todos by status, due date, created and subject. Each view keeps its own order until you reload or restart.
 
 ---
 
@@ -282,18 +285,18 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 
 | Key             | Action                                    |
 |-----------------|-------------------------------------------|
-| `1`–`4`         | All / Unread / Read / Saved               |
-| `2` / `4` again | Switch Unread / Saved between topics and a list |
+| `1`–`4`         | All / Unread / Read / Pending             |
+| `2` / `4` again | Switch Unread / Pending between topics and a list |
 | `j`/`↓`, `k`/`↑`| Move                                      |
 | `Shift`+`↑` / `↓` | Jump 5 rows (10 on a terminal 40+ lines tall) |
 | `Enter`         | Expand topic and open it / toggle detail  |
 | `→`/`l`, `←`    | Expand / collapse topic                   |
-| `x` / `r`       | Mark topic (or update) read & next (grouped Saved: `r` marks read in place) |
-| `u`             | Mark unread (lists, and topics or updates in grouped Saved) |
+| `x` / `r`       | Mark topic (or update) read & next (grouped Pending: `r` toggles read in place) |
 | `n`             | Next topic / next unread                  |
-| `s`             | Save / unsave (unsave in Saved)           |
+| `p`             | Mark pending / not pending (leaves the Pending view) |
+| `s`             | Cycle the sort order of the view          |
 | `o`             | Open in browser (newest update of a topic)|
-| `p`             | Fetch full content (detail view)          |
+| `u`             | Fetch full content (detail view)          |
 | `g`             | [Summarise the update with Copilot](#post-summaries) (saved); `g` again while it's shown regenerates it |
 | `f`             | Fetch latest updates + Copilot digest     |
 | `z` twice       | Regroup all topics with Copilot (`Esc` after the first `z` cancels) |
@@ -339,7 +342,7 @@ Press `c`. The bottom line shows the keys for the selected row. Each section hea
 |---------|-----|------|
 | **Actions** | Link a device | `Enter`: magic link + QR code for the web app (`o` open, `y` copy) |
 | | Show web app QR | `Enter`: QR code of the plain web app URL (no access token) to open it on your phone · `o` opens it in the browser |
-| | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread and saved update |
+| | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread and pending update |
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
 | **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed, GitHub repo or YouTube channel; **Restore removed** brings back removed built-ins |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |

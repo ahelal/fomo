@@ -30,7 +30,7 @@ export function StatusBar({ stats, loading, message, expiresInDays, onDisconnect
             Read: <span>{stats.byStatus.read ?? 0}</span>
           </span>
           <span className="statusbar__count statusbar__count--saved">
-            Saved: <span>{stats.saved ?? 0}</span>
+            Pending: <span>{stats.saved ?? 0}</span>
           </span>
         </div>
       ) : (

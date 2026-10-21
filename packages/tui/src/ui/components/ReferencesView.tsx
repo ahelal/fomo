@@ -152,7 +152,7 @@ export function ReferencesView(props: Props) {
     <Box width={columns} borderStyle="single" borderBottom borderTop={false} borderLeft={false} borderRight={false} borderColor="gray">
       <Text color={ACCENT} bold> 🔖 References </Text>
       <Text color={MUTED}>{` · ${total} link${total === 1 ? '' : 's'}${loading ? ' · loading…' : ''} `}</Text>
-      {!form && <Text color={MUTED} wrap="truncate-end">{' [a] add  [e] edit  [d] delete  [o] open  [/] search  [5] close'}</Text>}
+      {!form && <Text color={MUTED} wrap="truncate-end">{' [a] add  [e] edit  [d] delete  [o] open  [/] search  [s] sort  [5] close'}</Text>}
     </Box>
   );
 

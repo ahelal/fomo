@@ -19,7 +19,8 @@ const DIGEST_KEYS: [string, string][] = [
   ['r',     'Toggle topic (or update) read / unread'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next topic'],
-  ['s',     'Save / unsave update'],
+  ['p',     'Mark pending / not pending'],
+  ['s',     'Cycle sort order (topics)'],
   ['o',     'Open in browser (newest in topic)'],
   ['Esc/⌫', 'Close detail'],
 ];
@@ -31,7 +32,8 @@ const SAVED_KEYS: [string, string][] = [
   ['r',     'Toggle topic (or update) read / unread'],
   ['x',     'Mark read & next'],
   ['n',     'Jump to next topic'],
-  ['s',     'Unsave update'],
+  ['p',     'No longer pending'],
+  ['s',     'Cycle sort order (topics)'],
   ['o',     'Open in browser (newest in topic)'],
   ['Esc/⌫', 'Close detail'],
 ];
@@ -39,7 +41,8 @@ const SAVED_KEYS: [string, string][] = [
 const LIST_KEYS: [string, string][] = [
   ['↵',     'Open detail view'],
   ['r',     'Toggle read / unread'],
-  ['s',     'Save / unsave'],
+  ['p',     'Mark pending / not pending'],
+  ['s',     'Cycle sort order (date, source, title…)'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next unread'],
   ['o',     'Open in browser'],
@@ -48,7 +51,7 @@ const LIST_KEYS: [string, string][] = [
 const DETAIL_KEYS: [string, string][] = [
   ['Esc/⌫', 'Close detail view'],
   ['r',     'Toggle read / unread'],
-  ['s',     'Save / unsave'],
+  ['p',     'Mark pending / not pending'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next unread'],
   ['o',     'Open URL in browser'],
@@ -63,6 +66,7 @@ const REFERENCE_KEYS: [string, string][] = [
   ['d d',   'Delete link (press twice)'],
   ['o',     'Open link in browser'],
   ['y',     'Copy link'],
+  ['s',     'Cycle sort order (title, date added)'],
   ['/',     'Search titles, links, folders & descriptions'],
   ['Esc',   'Clear the search'],
   ['5',     'Back to the previous view'],
@@ -72,8 +76,8 @@ const GLOBAL_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
   ['⇧↑/⇧↓','Jump 5 rows (10 on a tall window)'],
-  ['1–4',  'All / unread / read / saved'],
-  ['2 / 4','Again: switch Unread / Saved between topics and a list'],
+  ['1–4',  'All / unread / read / pending'],
+  ['2 / 4','Again: switch Unread / Pending between topics and a list'],
   ['5',    'References: links filed into folders'],
   ['6',    'Todos'],
   ['m',    'File the selected update in References'],
@@ -101,7 +105,7 @@ function buildSections(context: Props['context']): Section[] {
     return [{ title: 'References', keys: REFERENCE_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   if (context === 'saved') {
-    return [{ title: 'Saved topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+    return [{ title: 'Pending topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   return [
     {

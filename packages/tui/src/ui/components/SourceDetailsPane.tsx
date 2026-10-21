@@ -89,7 +89,7 @@ export function SourceDetailsPane({ source, state, own, changed, stats, items, l
     : confirm === 'remove'
     ? `press x again to remove${source.builtin ? ' (restore it later from the end of the source list)' : ' for good'} · any other key cancels`
     : confirm === 'items'
-    ? `press d again to delete its ${items} items${saved ? ` (${saved} saved)` : ''}${removed ? ' and remove it for good' : ' · the next fetch adds them back as new'} · any other key cancels`
+    ? `press d again to delete its ${items} items${saved ? ` (${saved} pending)` : ''}${removed ? ' and remove it for good' : ' · the next fetch adds them back as new'} · any other key cancels`
     : confirm === 'discard'
     ? 'unsaved changes — s save   Esc again to drop them'
     : removed

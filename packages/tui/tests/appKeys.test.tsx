@@ -416,7 +416,7 @@ describe('Config → sources', () => {
       await press('\r');
       expect(frame()).toContain('r restore');
       await press('d');
-      expect(frame()).toContain('press d again to delete its 5 items (2 saved) and remove it for good');
+      expect(frame()).toContain('press d again to delete its 5 items (2 pending) and remove it for good');
       await press('d');
       expect(deleteSourceUpdates).toHaveBeenCalledWith('github');
     });

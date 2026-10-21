@@ -94,7 +94,7 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading,
           className="btn"
           onClick={() => onToggleSaved(update.id, !update.saved)}
         >
-          {update.saved ? '★ Unsave' : '☆ Save'}
+          p · {update.saved ? '★ Not pending' : '☆ Pending'}
         </button>
         {onFileReference && (
           <button className="btn" onClick={onFileReference} title="File in References (m)">

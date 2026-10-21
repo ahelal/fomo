@@ -27,7 +27,8 @@ const DIGEST_KEYS: [string, string][] = [
   ['r',    'Toggle topic (or update) read / unread'],
   ['x',    'Mark read & next unread'],
   ['n',    'Jump to next topic'],
-  ['s',    'Save / unsave update'],
+  ['p',    'Mark update pending / not pending'],
+  ['s',    'Sort: importance, date, title, size (press again for the next)'],
   ['g',    'Summarise update with Copilot (g again: regenerate)'],
   ['o',    'Open in browser (newest in topic)'],
   ['Esc/⌫','Close detail'],
@@ -41,7 +42,8 @@ const SAVED_KEYS: [string, string][] = [
   ['r',    'Toggle topic (or update) read / unread'],
   ['x',    'Mark read & next'],
   ['n',    'Jump to next topic'],
-  ['s',    'Unsave update'],
+  ['p',    'Remove update from Pending'],
+  ['s',    'Sort: importance, date, title, size (press again for the next)'],
   ['g',    'Summarise update with Copilot (g again: regenerate)'],
   ['o',    'Open in browser (newest in topic)'],
   ['Esc/⌫','Close detail'],
@@ -51,7 +53,8 @@ const SAVED_KEYS: [string, string][] = [
 const LIST_KEYS: [string, string][] = [
   ['↵',    'Open detail view'],
   ['r',    'Toggle read / unread'],
-  ['s',    'Save / unsave'],
+  ['p',    'Mark pending / not pending'],
+  ['s',    'Sort: date, source, title, status (press again for the next)'],
   ['g',    'Summarise with Copilot (saved; g again: regenerate)'],
   ['x',    'Mark read & next unread'],
   ['n',    'Jump to next unread'],
@@ -62,20 +65,20 @@ const LIST_KEYS: [string, string][] = [
 const DETAIL_KEYS: [string, string][] = [
   ['Esc/⌫', 'Close detail view'],
   ['r',     'Toggle read / unread'],
-  ['s',     'Save / unsave'],
+  ['p',     'Mark pending / not pending'],
   ['g',     'Summarise with Copilot (saved; g again: regenerate)'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next unread'],
   ['o',     'Open URL in browser'],
-  ['p',     'Fetch full content'],
+  ['u',     'Fetch full content'],
 ];
 
 const GLOBAL_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
   ['⇧↑/⇧↓','Jump 5 rows (10 on a tall terminal)'],
-  ['1–4',  'All / unread / read / saved'],
-  ['2 / 4','Again: switch Unread / Saved between topics and a list'],
+  ['1–4',  'All / unread / read / pending'],
+  ['2 / 4','Again: switch Unread / Pending between topics and a list'],
   ['f',    'Fetch latest updates + group with Copilot'],
   ['z',    'Regroup all topics with Copilot (press twice)'],
   ['c',    'Config: sources, link a device, backup / restore'],
@@ -100,6 +103,7 @@ const REFERENCE_KEYS: [string, string][] = [
   ['e',    'Edit link · rename or move folder (with its subfolders)'],
   ['d',    'Delete link (press twice)'],
   ['/',    'Search titles, links, folders & notes'],
+  ['s',    'Sort links: title, date added (press again for the next)'],
   ['Esc',  'Clear the search, then close'],
   ['5/⌫',  'Close'],
 ];
@@ -146,7 +150,7 @@ function buildSections(context: Props['context']): Section[] {
     return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   if (context === 'saved') {
-    return [{ title: 'Saved topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+    return [{ title: 'Pending topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   return [
     {
@@ -162,7 +166,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   detail: 'Detail View',
   settings: 'Config',
   digest: 'Unread · topics',
-  saved: 'Saved · topics',
+  saved: 'Pending · topics',
   references: 'References',
 };
 

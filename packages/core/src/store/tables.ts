@@ -2,6 +2,7 @@ import { TableClient, odata, type TableEntity } from '@azure/data-tables';
 import { createTableClient, isSasConnection } from './connection.js';
 import { mapLimit } from '../util.js';
 import { matchesSearch, searchTerms } from '../search.js';
+import { compareUpdates, sortTodos } from '../sort.js';
 import type {
   StoreConnection,
   Update,
@@ -388,8 +389,8 @@ export class UpdateStore {
       updates.push(withContent ? update : { ...update, content: '' });
     }
 
-    // Sort newest-first in application (Table Storage has no ORDER BY)
-    updates.sort((a, b) => b.datePublished.localeCompare(a.datePublished));
+    // Sort in application (Table Storage has no ORDER BY), before paging
+    updates.sort(compareUpdates(options.sort));
 
     const total = updates.length;
     const offset = options.offset ?? 0;
@@ -654,18 +655,8 @@ export class TodoStore {
       todos.push(entityToTodo(entity as TodoEntity));
     }
 
-    // Sort: pending first, then in_progress, then done; within group by dueDate asc
-    const statusOrder: Record<TodoStatus, number> = { pending: 0, in_progress: 1, done: 2 };
-    todos.sort((a, b) => {
-      const sd = statusOrder[a.status] - statusOrder[b.status];
-      if (sd !== 0) return sd;
-      if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
-      if (a.dueDate) return -1;
-      if (b.dueDate) return 1;
-      return a.createdAt.localeCompare(b.createdAt);
-    });
-
-    return { todos };
+    // Pending first, then in_progress, then done; within a status by due date
+    return { todos: sortTodos(todos) };
   }
 
   async updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo> {

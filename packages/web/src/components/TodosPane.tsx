@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { FomoService } from '@fomo/core';
+import { TODO_SORTS, isDefaultSort, nextSort, shortcutKey, sortLabel, sortTodos, type FomoService, type TodoSort } from '@fomo/core';
 import type { Todo, TodoStatus, CreateTodoRequest } from '@fomo/core';
 
 interface Props {
@@ -30,7 +30,11 @@ function formatDueDate(dueDate?: string): string {
   return `Due in ${diff}d`;
 }
 
+/** The Todos sort survives closing the pane, but not a reload. */
+let lastSort: TodoSort | undefined;
+
 export function TodosPane({ client }: Props) {
+  const [sort, setSort] = useState<TodoSort | undefined>(lastSort);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -65,6 +69,20 @@ export function TodosPane({ client }: Props) {
   useEffect(() => {
     if (showForm) subjectRef.current?.focus();
   }, [showForm]);
+
+  const cycleSort = useCallback(() => {
+    setSort((current) => (lastSort = nextSort(TODO_SORTS, current)));
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (shortcutKey(e.key) === 's') cycleSort();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cycleSort]);
 
   const handleCycleStatus = useCallback(
     async (todo: Todo) => {
@@ -120,9 +138,10 @@ export function TodosPane({ client }: Props) {
     [client, formSubject, formDue, formDesc, load],
   );
 
-  const filtered = filterStatus === 'all'
+  const filtered = sortTodos(filterStatus === 'all'
     ? todos
-    : todos.filter((t) => t.status === filterStatus);
+    : todos.filter((t) => t.status === filterStatus), sort);
+  const sortActive = !isDefaultSort(TODO_SORTS, sort);
 
   return (
     <div className="todos-pane">
@@ -138,6 +157,13 @@ export function TodosPane({ client }: Props) {
             </button>
           ))}
         </div>
+        <button
+          className={['todos-filter-pill', sortActive ? 'todos-filter-pill--active' : ''].join(' ')}
+          onClick={cycleSort}
+          title="Change the sort order (s)"
+        >
+          ↕ {sortLabel(TODO_SORTS, sort)}
+        </button>
         <button className="todos-add-btn" onClick={() => setShowForm((v) => !v)}>
           {showForm ? '✕ Cancel' : '+ Add Todo'}
         </button>

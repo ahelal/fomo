@@ -73,9 +73,9 @@ export function DigestList({
       <div className="updates-table empty" ref={listRef} {...pull.handlers}>
         {pull.indicator}
         {search ? (
-          <p>No {saved ? 'saved' : 'unread'} updates match “{search}”. Press <kbd>Esc</kbd> or ✕ to clear the search.</p>
+          <p>No {saved ? 'pending' : 'unread'} updates match “{search}”. Press <kbd>Esc</kbd> or ✕ to clear the search.</p>
         ) : saved ? (
-          <p>No saved updates — press <kbd>s</kbd> (or ☆) on an update to save it.</p>
+          <p>No pending updates — press <kbd>p</kbd> (or ☆) on an update to mark it pending.</p>
         ) : (
           <>
             <p>All caught up 🎉</p>
@@ -99,7 +99,7 @@ export function DigestList({
       </div>
       {pending > 0 && (
         <div className="digest-pending">
-          {pending} {saved ? 'saved ' : ''}update{pending === 1 ? '' : 's'} not grouped yet — press <kbd>f</kbd> in <kbd>fomo</kbd> to group them
+          {pending} {saved ? 'pending ' : ''}update{pending === 1 ? '' : 's'} not grouped yet — press <kbd>f</kbd> in <kbd>fomo</kbd> to group them
         </div>
       )}
       {rows.map((row) => {

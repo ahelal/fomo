@@ -188,6 +188,16 @@ describe('5 References view', () => {
     );
     expect(frame()).toContain('Filed in ai');
   });
+
+  it('sorts links within a folder with s', async () => {
+    const top = [ref('1', 'Alpha', ''), { ...ref('2', 'Zulu', ''), createdAt: '2026-10-05T00:00:00Z' }];
+    const { press, frame } = await renderApp(top);
+    await press('5');
+    expect(frame().indexOf('Alpha')).toBeLessThan(frame().indexOf('Zulu'));
+    await press('s');
+    expect(frame()).toContain('Title Z→A');
+    expect(frame().indexOf('Zulu')).toBeLessThan(frame().indexOf('Alpha'));
+  });
 });
 
 describe('m files the selected update', () => {

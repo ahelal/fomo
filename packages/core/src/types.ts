@@ -1,3 +1,5 @@
+import type { UpdateSort } from './sort.js';
+
 // ─── Domain types ────────────────────────────────────────────────────────────
 
 export type Status = 'unread' | 'read';
@@ -157,6 +159,8 @@ export interface ListOptions {
   includeContent?: boolean;
   /** Only updates whose title, summary or content contain every word (case-insensitive). */
   search?: string;
+  /** Order before `offset`/`limit` are applied. Default: newest first. */
+  sort?: UpdateSort;
 }
 
 export interface ListResponse {

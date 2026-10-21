@@ -48,7 +48,7 @@ const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: '1 All', value: 'all' },
   { label: '2 Unread', value: 'unread' },
   { label: '3 Read', value: 'read' },
-  { label: '4 Saved', value: 'saved' },
+  { label: '4 Pending', value: 'saved' },
   { label: '5 Refs', value: 'refs' },
   { label: '6 Todos', value: 'todos' },
 ];
@@ -149,7 +149,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const backFilter = useRef<FilterStatus>('unread');
 
   const previewPosition = fomo.settings.previewPosition;
-  /** Unread and Saved list topics unless switched to a plain list. */
+  /** Unread and Pending list topics unless switched to a plain list. */
   const isGrouped = isGroupedView(fomo.filter, fomo.grouped);
   const isSaved = fomo.filter === 'saved';
   const pane = isPaneView(fomo.filter);
@@ -183,7 +183,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     setDigestKey(undefined);
   }, []);
 
-  /** Selecting the current Unread or Saved view again switches it between topics and a plain list. */
+  /** Selecting the current Unread or Pending view again switches it between topics and a plain list. */
   const setFilter = useCallback((f: FilterStatus) => {
     clearSelection();
     if (f === 'refs' && fomo.filter !== 'refs') backFilter.current = fomo.filter;
@@ -268,7 +268,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     void fomo.markRead(rowIds(row));
   }, [fomo, digestRows]);
 
-  /** Saved view: mark a row read and select the next one. */
+  /** Pending view: mark a row read and select the next one. */
   const savedReadAndNext = useCallback((row: DigestRow) => {
     setDigestKey(nextRowKey(digestRows, row.key));
     void fomo.setStatusMany(rowIds(row), 'read');
@@ -279,13 +279,13 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     void fomo.setStatusMany(rowIds(row), status);
   }, [fomo]);
 
-  /** Saved view: unsave the selected update, which leaves the list; select the next remaining row. */
+  /** Pending view: clear pending on the selected update, which leaves the list; select the next remaining row. */
   const savedUnsave = useCallback((update: Update) => {
     if (digestKey) setDigestKey(removeAndAdvance(fomo.digest, expanded, digestKey, new Set([update.id])).nextKey);
     void fomo.setSaved(update.id, false);
   }, [fomo, expanded, digestKey]);
 
-  /** Save or unsave from a grouped view (unsaving removes the update from the Saved view). */
+  /** Save or unsave from a grouped view (clearing pending removes the update from the Pending view). */
   const groupedToggleSaved = useCallback((update: Update) => {
     if (isSaved && update.saved) savedUnsave(update);
     else void fomo.setSaved(update.id, !update.saved);
@@ -469,6 +469,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         return;
       }
 
+      if (key === 's') { fomo.cycleSort(); return; }
+
       if (isGrouped) {
         const idx = digestKey ? digestRows.findIndex((r) => r.key === digestKey) : -1;
         const row = idx >= 0 ? digestRows[idx] : undefined;
@@ -512,7 +514,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           toggleDigestRead(row);
           return;
         }
-        if (key === 's' && update) { groupedToggleSaved(update); return; }
+        if (key === 'p' && update) { groupedToggleSaved(update); return; }
         if (key === 'o') {
           const target = update ?? row.entry.items[0];
           if (target) openUrl(target.url);
@@ -545,7 +547,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       if (!selected) return;
       if (key === 'x') { handleReadAndNext(); return; }
       if (key === 'r') { handleSetStatus(selected.id, selected.status === 'unread' ? 'read' : 'unread'); return; }
-      if (key === 's') { handleToggleSaved(selected.id, !selected.saved); return; }
+      if (key === 'p') { handleToggleSaved(selected.id, !selected.saved); return; }
       if (key === 'o' && selected.url) { openUrl(selected.url); return; }
     }
 
@@ -693,7 +695,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   function renderMobileActions() {
     if (isGrouped && digestRow) {
       const update = rowUpdate(digestRow);
-      // The Saved view keeps read updates, so its button toggles between read and unread.
+      // The Pending view keeps read updates, so its button toggles between read and unread.
       const markUnread = !rowItems(digestRow).some((u) => u.status === 'unread');
       const what = digestTopic ? 'Topic ' : '';
       return (
@@ -709,7 +711,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           </button>
           {update ? (
             <button className="mobile-actions__btn" onClick={() => groupedToggleSaved(update)}>
-              <span>{update.saved ? '★' : '☆'}</span><span>{update.saved ? 'Unsave' : 'Save'}</span>
+              <span>{update.saved ? '★' : '☆'}</span><span>{update.saved ? 'Not pending' : 'Pending'}</span>
             </button>
           ) : (
             <button className="mobile-actions__btn" onClick={digestNextTopic}>
@@ -734,7 +736,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           </button>
           <button className="mobile-actions__btn" onClick={() => handleToggleSaved(selected.id, !selected.saved)}>
             <span>{selected.saved ? '★' : '☆'}</span>
-            <span>{selected.saved ? 'Unsave' : 'Save'}</span>
+            <span>{selected.saved ? 'Not pending' : 'Pending'}</span>
           </button>
         </div>
       );
@@ -786,6 +788,14 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
             onOpen={openSourcePicker}
             onClear={() => applySourceFilter(undefined)}
           />
+        )}
+        {!pane && (
+          <div className={['source-chip', fomo.sortLabel ? 'source-chip--active' : ''].join(' ')}>
+            <button className="source-chip__open" onClick={fomo.cycleSort} title="Change the sort order (s)">
+              <span>↕</span>
+              <span className="source-chip__label">{fomo.sortLabel ?? 'Sort'}</span>
+            </button>
+          </div>
         )}
         {!pane && (
           <SearchBox ref={searchInputRef} value={fomo.search} matches={searchMatches} onSearch={setSearch} />

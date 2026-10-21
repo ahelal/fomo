@@ -58,3 +58,28 @@ export {
 } from './references.js';
 export { timeAgo } from './time.js';
 export { canonicalUrl, titleKey, DuplicateIndex, TITLE_MATCH_DAYS, type DuplicateRow, type DuplicateCheck } from './duplicates.js';
+export {
+  UPDATE_SORTS,
+  TOPIC_SORTS,
+  REFERENCE_SORTS,
+  TODO_SORTS,
+  updateSorts,
+  nextSort,
+  sortLabel,
+  isDefaultSort,
+  compareUpdates,
+  sortDigestEntries,
+  compareReferences,
+  sortTodos,
+  type SortDir,
+  type Sort,
+  type SortOption,
+  type UpdateSort,
+  type UpdateSortKey,
+  type TopicSort,
+  type TopicSortKey,
+  type ReferenceSort,
+  type ReferenceSortKey,
+  type TodoSort,
+  type TodoSortKey,
+} from './sort.js';

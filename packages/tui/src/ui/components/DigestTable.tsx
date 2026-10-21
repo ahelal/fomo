@@ -16,7 +16,7 @@ interface Props {
   sourceColors?: Record<string, string>;
   /** Applied search, for the empty state. */
   search?: string;
-  /** `saved` lists saved updates (read or unread) and marks the unread ones instead of the saved ones. */
+  /** `saved` lists pending updates (read or unread) and marks the unread ones instead of the pending ones. */
   mode?: 'digest' | 'saved';
 }
 
@@ -97,12 +97,12 @@ export function DigestTable({
       <Box flexDirection="column" height={height}>
         <Box flexGrow={1} alignItems="center" justifyContent="center">
           {search ? (
-            <Text color="#8b949e">{`No ${saved ? 'saved' : 'unread'} updates match “${search}” — Esc clears the search`}</Text>
+            <Text color="#8b949e">{`No ${saved ? 'pending' : 'unread'} updates match “${search}” — Esc clears the search`}</Text>
           ) : saved ? (
             <>
-              <Text color="#8b949e">No saved updates — press </Text>
-              <Text color="#58a6ff" bold>s</Text>
-              <Text color="#8b949e"> on an update to save it</Text>
+              <Text color="#8b949e">No pending updates — press </Text>
+              <Text color="#58a6ff" bold>p</Text>
+              <Text color="#8b949e"> on an update to mark it pending</Text>
             </>
           ) : (
             <>

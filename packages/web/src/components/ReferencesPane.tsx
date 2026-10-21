@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  REFERENCE_SORTS,
   buildReferenceRows,
+  isDefaultSort,
+  nextSort,
   normalizeFolder,
+  sortLabel,
   parentRowIndex,
   referenceFolders,
   rowFolder,
@@ -10,6 +14,7 @@ import {
   type FomoService,
   type Reference,
   type ReferenceRow,
+  type ReferenceSort,
 } from '@fomo/core';
 import { ReferenceDialog, type ReferenceDraft } from './ReferenceDialog.js';
 
@@ -45,6 +50,9 @@ function openUrl(url: string) {
 }
 
 /** Links filed into folders: browse the tree, search, add, edit, move folders and delete. */
+/** The References sort survives closing the pane, but not a reload. */
+let lastSort: ReferenceSort | undefined;
+
 export function ReferencesPane({ service, active }: Props) {
   const [refs, setRefs] = useState<Reference[] | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -56,6 +64,7 @@ export function ReferencesPane({ service, active }: Props) {
   const [rename, setRename] = useState<{ from: string; value: string; error?: string } | undefined>();
   const [confirmDelete, setConfirmDelete] = useState<string | undefined>();
   const [message, setMessage] = useState<string | undefined>();
+  const [sort, setSort] = useState<ReferenceSort | undefined>(lastSort);
   const messageTimer = useRef<ReturnType<typeof setTimeout>>();
   const searchRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
@@ -83,11 +92,17 @@ export function ReferencesPane({ service, active }: Props) {
   const folders = useMemo(() => referenceFolders(refs ?? []), [refs]);
   const rows = useMemo(() => {
     const expanded = new Set(folders.filter((f) => !collapsed.has(f)));
-    return buildReferenceRows(refs ?? [], expanded, search);
-  }, [refs, folders, collapsed, search]);
+    return buildReferenceRows(refs ?? [], expanded, search, sort);
+  }, [refs, folders, collapsed, search, sort]);
+
 
   const found = selectedKey ? rows.findIndex((r) => r.key === selectedKey) : -1;
   const index = found >= 0 ? found : rows.length > 0 ? 0 : -1;
+  const cycleSort = useCallback(() => {
+    // Keep the selected row selected as the links move.
+    if (!selectedKey && rows[index]) setSelectedKey(rows[index]!.key);
+    setSort((current) => (lastSort = nextSort(REFERENCE_SORTS, current)));
+  }, [selectedKey, rows, index]);
   const row: ReferenceRow | undefined = rows[index];
 
   useEffect(() => {
@@ -192,6 +207,7 @@ export function ReferencesPane({ service, active }: Props) {
         return;
       }
       if (k === 'a') { addLink(rowFolder(row)); return; }
+      if (k === 's') { cycleSort(); return; }
       if (k === 'j' || k === 'ArrowDown') { e.preventDefault(); select(index + step); return; }
       if (k === 'k' || k === 'ArrowUp') { e.preventDefault(); select(index - step); return; }
       if (k === 'PageDown') { e.preventDefault(); select(index + 10); return; }
@@ -221,7 +237,7 @@ export function ReferencesPane({ service, active }: Props) {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, dialog, rename, row, rows, index, search, confirmDelete, select, setOpen, activate, addLink, editLink, askDelete, copyLink, say]);
+  }, [active, dialog, rename, row, rows, index, search, confirmDelete, select, setOpen, activate, addLink, editLink, askDelete, copyLink, say, cycleSort]);
 
   const total = refs?.length ?? 0;
   const matches = search ? rows.filter((r) => r.kind === 'ref').length : undefined;
@@ -245,6 +261,13 @@ export function ReferencesPane({ service, active }: Props) {
           }}
         />
         {matches !== undefined && <span className="refs-count">{plural(matches, 'match')}</span>}
+        <button
+          className={['todos-filter-pill', isDefaultSort(REFERENCE_SORTS, sort) ? '' : 'todos-filter-pill--active'].join(' ')}
+          onClick={cycleSort}
+          title="Change the sort order (s)"
+        >
+          ↕ {sortLabel(REFERENCE_SORTS, sort)}
+        </button>
         <button className="todos-add-btn" onClick={() => addLink(rowFolder(row))}>+ Add link</button>
       </div>
 

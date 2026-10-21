@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
-import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion } from '@fomo/core';
-import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, jumpStep, nextRowKey, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
+import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TodoSort, TopicSort, UpdateSort } from '@fomo/core';
+import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, isDefaultSort, jumpStep, nextRowKey, nextSort, sortDigestEntries, sortLabel, sortTodos, TODO_SORTS, TOPIC_SORTS, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
@@ -37,6 +37,13 @@ type GroupableView = 'unread' | 'saved';
 type GroupedViews = Record<GroupableView, boolean>;
 const canGroup = (f: FilterStatus): f is GroupableView => f === 'unread' || f === 'saved';
 const isGrouped = (f: FilterStatus, g: GroupedViews) => canGroup(f) && g[f];
+
+/** Sort of each view (cycled with s); kept for the session only. */
+interface ViewSorts {
+  list: Partial<Record<FilterStatus, UpdateSort>>;
+  topics: Partial<Record<GroupableView, TopicSort>>;
+  todos?: TodoSort;
+}
 
 export interface DigestRunOptions {
   /** Forget all topics and regroup every unread and saved update. */
@@ -192,6 +199,11 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const [showHelp, setShowHelp] = useState(false);
   const [helpContext, setHelpContext] = useState<HelpContext>('list');
 
+  const [sorts, setSorts] = useState<ViewSorts>({ list: {}, topics: {} });
+  const sortsRef = useRef(sorts);
+  /** Update to keep selected when the list reloads in a new order. */
+  const keepSelectedId = useRef<string | undefined>();
+
   // ── Digest state ────────────────────────────────────────────────────────────
   const [digestEntries, setDigestEntries] = useState<DigestEntry[]>([]);
   const [digestPending, setDigestPending] = useState(0);
@@ -300,17 +312,21 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         if (isGrouped(f, groupedViewsRef.current)) {
           const resp = await service.getDigest({ search, sources, saved: f === 'saved' });
           if (seq !== loadSeq.current) return;
-          setDigestEntries(resp.entries);
+          setDigestEntries(sortDigestEntries(resp.entries, sortsRef.current.topics[f as GroupableView]));
           setDigestPending(resp.pending);
           return;
         }
+        const sort = sortsRef.current.list[f];
         const resp = await service.listUpdates(f === 'saved'
-          ? { saved: true, sources, search, limit: 200 }
-          : { status: f, sources, search, limit: 200 });
+          ? { saved: true, sources, search, sort, limit: 200 }
+          : { status: f, sources, search, sort, limit: 200 });
         if (seq !== loadSeq.current) return;
         setUpdates(resp.updates);
         setListTotal(resp.total);
-        setSelectedIndex((i) => Math.min(i, Math.max(0, resp.updates.length - 1)));
+        const keep = keepSelectedId.current;
+        keepSelectedId.current = undefined;
+        const kept = keep ? resp.updates.findIndex((u) => u.id === keep) : -1;
+        setSelectedIndex((i) => (kept >= 0 ? kept : Math.min(i, Math.max(0, resp.updates.length - 1))));
       } catch (err) {
         if (seq !== loadSeq.current) return;
         audit.error('load', `${f} view: ${errorText(err)}`);
@@ -335,7 +351,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const loadTodos = useCallback(async () => {
     try {
       const resp = await service.listTodos();
-      setTodosList(resp.todos);
+      setTodosList(sortTodos(resp.todos, sortsRef.current.todos));
       setTodosSelectedIndex((i) => Math.min(i, Math.max(0, resp.todos.length - 1)));
     } catch (err) {
       // non-critical
@@ -801,8 +817,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const doDigestToggleSaved = useCallback(async (update: Update) => {
     const saved = !update.saved;
     setDigestEntries((prev) => patchDigest(prev, new Set([update.id]), { saved }));
-    showMessage(saved ? '⭐ Saved' : 'Unsaved');
-    await persistChange('save', `${saved ? 'saved' : 'unsaved'} “${update.title}”`, () => service.setSaved(update.id, saved));
+    showMessage(saved ? '⭐ Marked pending' : 'No longer pending');
+    await persistChange('save', `${saved ? 'pending' : 'not pending'} “${update.title}”`, () => service.setSaved(update.id, saved));
   }, [service, persistChange, showMessage]);
 
   /** Change update statuses in place; with `advance`, move to the next row. */
@@ -825,14 +841,14 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     void doDigestStatus(ids, hasUnread ? 'read' : 'unread');
   }, [doDigestStatus]);
 
-  /** Saved view: unsave an update, drop it from the list and keep the cursor on the next remaining row. */
+  /** Pending view: clear an update's pending mark, drop it from the list and keep the cursor on the next remaining row. */
   const doUnsave = useCallback(async (id: string) => {
     const selectedKey = digestRowsRef.current[selectedRef.current]?.key;
     const next = removeAndAdvance(digestEntriesRef.current, expandedRef.current, selectedKey, new Set([id]));
     setDigestEntries(next.entries);
     setSelectedIndex(Math.max(0, next.rows.findIndex((r) => r.key === next.nextKey)));
-    showMessage('Unsaved');
-    await persistChange('save', `unsaved ${describeIds([id])}`, () => service.setSaved(id, false));
+    showMessage('No longer pending');
+    await persistChange('save', `not pending ${describeIds([id])}`, () => service.setSaved(id, false));
   }, [service, persistChange, describeIds, showMessage]);
 
   const setTopicExpanded = useCallback((topicId: string, open: boolean) => {
@@ -866,9 +882,9 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     setUpdates((prev) =>
       prev.map((u) => (u.id === selected.id ? { ...u, saved: newSaved } : u)),
     );
-    showMessage(newSaved ? '⭐ Saved' : 'Unsaved');
+    showMessage(newSaved ? '⭐ Marked pending' : 'No longer pending');
 
-    await persistChange('save', `${newSaved ? 'saved' : 'unsaved'} “${selected.title}”`, () => service.setSaved(selected.id, newSaved));
+    await persistChange('save', `${newSaved ? 'pending' : 'not pending'} “${selected.title}”`, () => service.setSaved(selected.id, newSaved));
   }, [service, persistChange, showMessage]);
 
   const doOpen = useCallback(async () => {
@@ -1401,6 +1417,17 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         setTodosFormField('subject');
         return;
       }
+      if (input === 's') {
+        const next = nextSort(TODO_SORTS, sortsRef.current.todos);
+        sortsRef.current = { ...sortsRef.current, todos: next };
+        setSorts(sortsRef.current);
+        const keep = todosList[todosSelectedIndex]?.id;
+        const sorted = sortTodos(todosList, next);
+        setTodosList(sorted);
+        setTodosSelectedIndex(Math.max(0, sorted.findIndex((t) => t.id === keep)));
+        showTodosMessage(`Sort: ${next.label}`);
+        return;
+      }
       if (key.return && todosList[todosSelectedIndex]) {
         const todo = todosList[todosSelectedIndex];
         const nextStatus: Record<string, string> = {
@@ -1728,7 +1755,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         const next = { ...groupedViewsRef.current, [f]: !groupedViewsRef.current[f] };
         groupedViewsRef.current = next;
         setGroupedViews(next);
-        showMessage(`${f === 'unread' ? 'Unread' : 'Saved'}: ${next[f] ? 'grouped by topic' : 'list'}`);
+        showMessage(`${f === 'unread' ? 'Unread' : 'Pending'}: ${next[f] ? 'grouped by topic' : 'list'}`);
       }
       setFilter(f);
       setSelectedIndex(0);
@@ -1754,13 +1781,36 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       void doSummarize(!!sel?.gist && showDetail && armed?.id === sel.id && Date.now() - armed.at < REGROUP_CONFIRM_MS);
       return;
     }
-    if (input === 'p' && showDetail) {
+    if (input === 'u' && showDetail) {
       const sel = currentUpdate();
       if (sel && !sel.content && !contentCache[sel.id]) void doFetchContent();
       return;
     }
 
-    // ── Digest and Saved views (grouped by topic) ──
+    // s cycles the view's sort; the selected row stays selected
+    if (input === 's') {
+      if (grouped) {
+        const view = filter as GroupableView;
+        const next = nextSort(TOPIC_SORTS, sortsRef.current.topics[view]);
+        sortsRef.current = { ...sortsRef.current, topics: { ...sortsRef.current.topics, [view]: next } };
+        setSorts(sortsRef.current);
+        const keep = digestRows[selectedIndex]?.key;
+        const sorted = sortDigestEntries(digestEntriesRef.current, next);
+        setDigestEntries(sorted);
+        setSelectedIndex(Math.max(0, flattenDigest(sorted, expanded).findIndex((r) => r.key === keep)));
+        showMessage(`Sort: ${next.label}`);
+      } else {
+        const next = nextSort(updateSorts(filter), sortsRef.current.list[filter]);
+        sortsRef.current = { ...sortsRef.current, list: { ...sortsRef.current.list, [filter]: next } };
+        setSorts(sortsRef.current);
+        keepSelectedId.current = updates[selectedIndex]?.id;
+        showMessage(`Sort: ${next.label}`);
+        void loadUpdates(filter);
+      }
+      return;
+    }
+
+    // ── Digest and Pending views (grouped by topic) ──
     if (grouped) {
       const savedView = filter === 'saved';
       const row = digestRows[selectedIndex];
@@ -1795,9 +1845,9 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       if (savedView) {
         if (input === 'r') { doToggleDigestStatus(rowIds); return; }
         if (input === 'x') { void doDigestStatus(rowIds, 'read', true); return; }
-        if (input === 's') {
+        if (input === 'p') {
           if (update) void doUnsave(update.id);
-          else showMessage('Expand the topic to unsave a single update');
+          else showMessage('Expand the topic to change a single update');
           return;
         }
       }
@@ -1809,9 +1859,9 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         doToggleDigestStatus(rowIds);
         return;
       }
-      if (input === 's') {
+      if (input === 'p') {
         if (update) void doDigestToggleSaved(update);
-        else showMessage('Expand the topic to save a single update');
+        else showMessage('Expand the topic to mark a single update pending');
         return;
       }
       if (input === 'o') {
@@ -1842,7 +1892,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
 
     // Actions (work in both list and detail)
     if (input === 'r') { void doToggleStatus();   return; }
-    if (input === 's') { void doToggleSaved();    return; }
+    if (input === 'p') { void doToggleSaved();    return; }
     if (input === 'x') { void doReadAndNext();    return; }
     if (input === 'n') {
       // Next unread (navigate only, don't mark current)
@@ -1881,6 +1931,18 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const sourceFilterLabel = !sourceFilter
     ? undefined
     : sourceFilter.length <= 2 ? sourceFilter.map(sourceName).join(', ') : `${sourceFilter.length} sources`;
+  /** The active view's sort, when it isn't the default order. */
+  const activeSortLabel = (() => {
+    if (refs.active) return refs.sortLabel;
+    if (showTodos) return isDefaultSort(TODO_SORTS, sorts.todos) ? undefined : sortLabel(TODO_SORTS, sorts.todos);
+    if (grouped) {
+      const sort = sorts.topics[filter as GroupableView];
+      return isDefaultSort(TOPIC_SORTS, sort) ? undefined : sortLabel(TOPIC_SORTS, sort);
+    }
+    const options = updateSorts(filter);
+    return isDefaultSort(options, sorts.list[filter]) ? undefined : sortLabel(options, sorts.list[filter]);
+  })();
+
   const filterBar = (
     <FilterBar
       active={refs.active ? 'refs' : showTodos ? 'todos' : filter}
@@ -1890,6 +1952,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       search={!showTodos && !refs.active && search ? search : undefined}
       matches={!showTodos && !refs.active && search ? searchMatches : undefined}
       searchDraft={searchDraft}
+      sortLabel={activeSortLabel}
     />
   );
 
