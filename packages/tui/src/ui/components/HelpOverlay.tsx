@@ -78,7 +78,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['↓/j',  'Move down'],
   ['⇧↑/⇧↓','Jump 5 rows (10 on a tall terminal)'],
   ['1–4',  'All / unread / read / pending'],
-  ['2 / 4','Again: switch Unread / Pending between topics and a list'],
+  ['2 / 4','Again: switch between ▤ topics and ≡ list'],
   ['f',    'Fetch latest updates + group with Copilot'],
   ['z',    'Regroup all topics with Copilot (press twice)'],
   ['c',    'Config: sources, link a device, backup / restore'],

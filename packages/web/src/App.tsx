@@ -771,11 +771,18 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
                 key={f.value}
                 className={['filter-pill', active ? 'filter-pill--active' : ''].join(' ')}
                 onClick={() => setFilter(f.value)}
-                title={active && toggles ? `Show as ${fomo.grouped[f.value as GroupableView] ? 'a list' : 'topics'}` : undefined}
+                title={toggles
+                  ? `${fomo.grouped[f.value as GroupableView] ? 'Showing topics' : 'Showing a list'} — click again to switch`
+                  : undefined}
+                aria-label={toggles
+                  ? `${f.label}, ${fomo.grouped[f.value as GroupableView] ? 'topics' : 'list'}`
+                  : undefined}
               >
                 {f.label}
-                {active && toggles && (
-                  <span className="filter-pill__mode">{fomo.grouped[f.value as GroupableView] ? ' · topics' : ' · list'}</span>
+                {toggles && (
+                  <span className="filter-pill__mode" aria-hidden="true">
+                    {fomo.grouped[f.value as GroupableView] ? '▤' : '≡'}
+                  </span>
                 )}
               </button>
             );

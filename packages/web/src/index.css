@@ -96,7 +96,13 @@ body {
 }
 .filter-pill:hover { border-color: var(--blue-bright); color: var(--text); }
 .filter-pill--active { background: var(--blue-dim); border-color: var(--blue); color: var(--text-bright); }
-.filter-pill__mode { color: var(--text-dim); }
+.filter-pill__mode {
+  display: inline-block;
+  width: 1em;
+  margin-left: 0.35em;
+  color: var(--text-dim);
+  text-align: center;
+}
 
 /* ─── Search (scoped to the current view) ───────────────────────────────────── */
 .search {

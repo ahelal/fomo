@@ -1946,7 +1946,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const filterBar = (
     <FilterBar
       active={refs.active ? 'refs' : showTodos ? 'todos' : filter}
-      grouped={grouped}
+      groupedViews={groupedViews}
       columns={columns}
       sourceLabel={sourceFilterLabel}
       search={!showTodos && !refs.active && search ? search : undefined}

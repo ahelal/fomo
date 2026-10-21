@@ -14,15 +14,18 @@ const PANES = [
   { key: '6', label: 'Todos', value: 'todos' },
 ] as const;
 
+type GroupableView = 'unread' | 'saved';
+type GroupedViews = Readonly<Record<GroupableView, boolean>>;
+
 /** Views that switch between topics and a plain list when their key is pressed again. */
-const GROUPABLE = new Set<string>(['unread', 'saved']);
+const isGroupable = (value: string): value is GroupableView => value === 'unread' || value === 'saved';
 const ESC_HINT = ' · Esc clears';
 
 interface Props {
   /** Active view: a feed filter, or `todos` / `refs` while one of those is open. */
   active: string;
-  /** The active view is listed as topics (Unread and Pending can switch). */
-  grouped?: boolean;
+  /** Whether Unread and Pending are listed as topics. */
+  groupedViews: GroupedViews;
   columns: number;
   /** Sources the view is limited to (names, or a count), if any. */
   sourceLabel?: string;
@@ -36,7 +39,7 @@ interface Props {
   sortLabel?: string;
 }
 
-export function FilterBar({ active, grouped, columns, sourceLabel, search, matches, searchDraft, sortLabel }: Props) {
+export function FilterBar({ active, groupedViews, columns, sourceLabel, search, matches, searchDraft, sortLabel }: Props) {
   if (searchDraft !== undefined) {
     return (
       <Box width={columns} flexShrink={0}>
@@ -51,13 +54,14 @@ export function FilterBar({ active, grouped, columns, sourceLabel, search, match
   }
 
   const showSource = !!sourceLabel;
-  const tabs = FILTERS.map((f) => {
-    const mode = active === f.value && GROUPABLE.has(f.value) ? (grouped ? ' · topics' : ' · list') : '';
-    return { ...f, text: ` ${f.key} ${f.label}${mode} ` };
-  });
+  const tabs = FILTERS.map((f) => ({
+    ...f,
+    text: ` ${f.key} ${f.label} `,
+    mode: isGroupable(f.value) ? (groupedViews[f.value] ? '▤' : '≡') : '',
+  }));
   const panes = PANES.map((p) => ({ ...p, text: ` ${p.key} ${p.label} ` }));
   // Width of the tab strip: tabs and panes, single-space gaps.
-  const tabsW = [...tabs, ...panes].reduce((w, t, i) => w + (i > 0 ? 1 : 0) + t.text.length, 0);
+  const tabsW = [...tabs, ...panes].reduce((w, t, i) => w + (i > 0 ? 1 : 0) + t.text.length + ('mode' in t && t.mode ? 2 : 0), 0);
 
   // Budget the chip area so the match count survives on narrow terminals:
   // the query is truncated first, and the Esc hint is dropped if it can't fit.
@@ -88,6 +92,7 @@ export function FilterBar({ active, grouped, columns, sourceLabel, search, match
                 inverse={isActive}
               >
                 {f.text}
+                {f.mode && <Text>{f.mode} </Text>}
               </Text>
             </React.Fragment>
           );
