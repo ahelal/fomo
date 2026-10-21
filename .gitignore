@@ -26,3 +26,6 @@ Thumbs.db
 tmp/
 
 .tmp
+
+# Local notes (may contain account details)
+.todo/
