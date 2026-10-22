@@ -206,9 +206,9 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
 
   /**
    * A key in the tree: `onKey` (the view's own keys) goes first, after prompts being typed and
-   * moving around. Returns 'close' when the view should close (Esc, ⌫).
+   * moving around. Escape cancels prompts or clears the search, never leaves the tab.
    */
-  const handleInput = (raw: string, key: Key, onKey?: TreeKeyHandler<T>): 'close' | undefined => {
+  const handleInput = (raw: string, key: Key, onKey?: TreeKeyHandler<T>): void => {
     if (searchDraft !== undefined) {
       if (key.escape) setSearchDraft(undefined);
       else if (key.return) { setSearch(searchDraft.trim()); setSearchDraft(undefined); setSelectedIndex(0); }
@@ -235,7 +235,7 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
 
     if (key.escape || key.backspace || key.delete) {
       if (search && key.escape) { setSearch(''); say('Search cleared'); return undefined; }
-      return 'close';
+      return;
     }
     const last = Math.max(0, rows.length - 1);
     const step = key.shift && (key.upArrow || key.downArrow) ? cfg.current.jump : 1;

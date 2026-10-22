@@ -9,6 +9,7 @@ import type { DigestResult } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, maskConnectionString, readConfigFile, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
+import { openTodoAttachment } from '../attachments.js';
 import { AuditView } from './components/AuditView.js';
 import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
@@ -330,7 +331,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     pickColor: colorPicker.open,
     jump: jumpStep(rows),
   });
-  const todos = useTodos({ service, audit, pickColor: colorPicker.open, notify: showMessage, jump: jumpStep(rows) });
+  const todos = useTodos({ service, audit, pickColor: colorPicker.open, notify: showMessage, openAttachment: openTodoAttachment, jump: jumpStep(rows) });
 
   const loadSeq = useRef(0);
   const loadUpdates = useCallback(
@@ -1434,9 +1435,11 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
       if (key.tab && !refs.typing) { cycleView(key.shift ? -1 : 1); return; }
       if (input === 'w' && !refs.typing) { profilePicker.open(); return; }
-      // The other views' numbers switch straight to them (5 itself closes Bookmarks)
       const view = refs.typing ? undefined : viewForKey(input);
-      if (view && view !== 'refs') { showView(view); return; }
+      if (view) {
+        if (view !== 'refs') showView(view);
+        return;
+      }
       refs.handleInput(raw, key);
       return;
     }
@@ -1450,9 +1453,11 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
       if (key.tab && !todos.typing) { cycleView(key.shift ? -1 : 1); return; }
       if (input === 'w' && !todos.typing) { profilePicker.open(); return; }
-      // The other views' numbers switch straight to them (6 itself closes Todos)
       const view = todos.typing ? undefined : viewForKey(input);
-      if (view && view !== 'todos') { showView(view); return; }
+      if (view) {
+        if (view !== 'todos') showView(view);
+        return;
+      }
       todos.handleInput(raw, key);
       return;
     }

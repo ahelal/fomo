@@ -148,8 +148,6 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   /** Filing an update in Bookmarks (b). */
   const [refDialog, setRefDialog] = useState<{ update: Update; reference?: Reference; note?: string } | undefined>();
   const refDialogSeq = useRef(0);
-  /** The view to return to when 5 or 6 leaves Bookmarks or Todos. */
-  const backFilter = useRef<FilterStatus>('unread');
 
   const previewPosition = fomo.settings.previewPosition;
   /** Unread and Pending list topics unless switched to a plain list. */
@@ -198,7 +196,6 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   /** Selecting the current Unread or Pending view again switches it between topics and a plain list. */
   const setFilter = useCallback((f: FilterStatus) => {
     clearSelection();
-    if (isPaneView(f) && !isPaneView(fomo.filter)) backFilter.current = fomo.filter;
     if (f === fomo.filter && canGroup(f)) fomo.toggleGrouped();
     else fomo.setFilter(f);
   }, [fomo, clearSelection]);
@@ -505,8 +502,6 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       }
       // In Bookmarks and Todos c colors the selected folder or item.
       if (key === 'c' && !pane) { setShowSettings(true); return; }
-      if (key === '5' && fomo.filter === 'refs') { setFilter(backFilter.current); return; }
-      if (key === '6' && fomo.filter === 'todos') { setFilter(backFilter.current); return; }
       if (key in FILTER_KEYS) { setFilter(FILTER_KEYS[key]!); return; }
       // Tab / Shift+Tab step through the views in tab order (1–6), wrapping around.
       if (key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {

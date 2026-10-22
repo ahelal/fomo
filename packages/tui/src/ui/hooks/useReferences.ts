@@ -239,7 +239,6 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
   };
 
   const onKey: TreeKeyHandler<Reference> = (input, key, row) => {
-    if (input === '5') { closeAll(); return true; }
     if (input === 's') {
       const next = nextSort(REFERENCE_SORTS, sort);
       tree.keep(row?.key);
@@ -269,7 +268,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
   /** Handle a key while Bookmarks (or its form) is shown; `raw` keeps its case for typing. */
   const handleInput = (raw: string, key: Key) => {
     if (form) { formInput(form, raw, key); return; }
-    if (tree.handleInput(raw, key, onKey) === 'close') closeAll();
+    tree.handleInput(raw, key, onKey);
   };
 
   return {

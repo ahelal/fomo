@@ -5,6 +5,7 @@ import {
   itemColorFallback,
   itemColorRequest,
   normalizeFolder,
+  parseAttachments,
   parseDueDate,
   type FolderColorMap,
   type FomoService,
@@ -20,6 +21,8 @@ export interface TodoDraft {
   due: string;
   folder: string;
   description: string;
+  /** One URL or file path per line. */
+  attachments: string;
   /** `#rrggbb`, or '' for none (it shows its folder's). */
   color: string;
 }
@@ -37,13 +40,14 @@ interface Props {
   onClose(): void;
 }
 
-/** Add or edit a todo: subject, due date (typed or picked), folder, description and color. */
+/** Add or edit a todo, with optional multiline notes and URL/path references. */
 export function TodoDialog({ service, todo, initial, folders, folderColors, onSaved, onClose }: Props) {
   const [values, setValues] = useState<TodoDraft>(() => ({
     subject: todo?.subject ?? initial?.subject ?? '',
     due: todo?.dueDate ?? initial?.due ?? '',
     folder: todo?.folder ?? initial?.folder ?? '',
     description: todo?.description ?? initial?.description ?? '',
+    attachments: todo?.attachments?.join('\n') ?? initial?.attachments ?? '',
     color: todo?.color ?? initial?.color ?? '',
   }));
   const [saving, setSaving] = useState(false);
@@ -74,13 +78,20 @@ export function TodoDialog({ service, todo, initial, folders, folderColors, onSa
     const subject = values.subject.trim();
     if (!subject) { setError('Subject is required'); return; }
     if (due === undefined) { setError(dueDateError(values.due)); return; }
+    let attachments: string[];
+    try {
+      attachments = parseAttachments(values.attachments);
+    } catch (err) {
+      setError(errorText(err));
+      return;
+    }
     setSaving(true);
     setError(undefined);
     try {
-      const req = { subject, description: values.description.trim(), folder: normalizeFolder(values.folder) };
+      const req = { subject, description: values.description, folder: normalizeFolder(values.folder) };
       const saved = todo
-        ? await service.updateTodo(todo.id, { ...req, dueDate: due, color: values.color })
-        : await service.createTodo({ ...req, ...(due ? { dueDate: due } : {}), ...(values.color ? { color: values.color } : {}) });
+        ? await service.updateTodo(todo.id, { ...req, dueDate: due, color: values.color, attachments })
+        : await service.createTodo({ ...req, ...(attachments.length ? { attachments } : {}), ...(due ? { dueDate: due } : {}), ...(values.color ? { color: values.color } : {}) });
       onSaved(saved, !todo);
     } catch (err) {
       setError(errorText(err));
@@ -93,6 +104,7 @@ export function TodoDialog({ service, todo, initial, folders, folderColors, onSa
       title={todo ? '✓ Edit todo' : '✓ Add a todo'}
       error={error}
       saving={saving}
+      multiline
       picker={picker}
       onSubmit={() => void submit()}
       onClose={onClose}
@@ -110,8 +122,12 @@ export function TodoDialog({ service, todo, initial, folders, folderColors, onSa
         </span>
       </DialogField>
       <FolderField value={values.folder} folders={folders} folderColors={folderColors} onChange={set('folder')} />
-      <DialogField label="Description">
-        <textarea value={values.description} onChange={onInput('description')} rows={3} placeholder="Notes (optional)" />
+      <DialogField label="Notes (optional)">
+        <textarea value={values.description} onChange={onInput('description')} rows={5} placeholder="Add notes — Enter starts a new line" />
+      </DialogField>
+      <DialogField label="Attachments (optional)">
+        <textarea value={values.attachments} onChange={onInput('attachments')} rows={3} placeholder={'One URL or file path per line\nhttps://example.com/report\n~/Documents/report.pdf'} spellCheck={false} />
+        <span>References only; files are not uploaded. Local paths open in the TUI.</span>
       </DialogField>
       <ColorField color={values.color} {...itemColorFallback(values.folder, folderColors)} onClick={pickColor} />
     </ItemDialog>

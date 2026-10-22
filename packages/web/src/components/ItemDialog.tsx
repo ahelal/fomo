@@ -9,6 +9,8 @@ interface ItemDialogProps {
   note?: string;
   error?: string;
   saving: boolean;
+  /** Text areas use Enter for new lines and Ctrl/Cmd+S to save. */
+  multiline?: boolean;
   /** The dialog's color picker (useColorPicker): its keys come first while it's open. */
   picker: { active: boolean; element: React.ReactNode };
   onSubmit(): void;
@@ -18,11 +20,12 @@ interface ItemDialogProps {
 
 /**
  * A dialog that adds or edits something filed in a folder (a bookmark, a todo): ↵ saves (⇧↵ adds a
- * line to a text area), Esc cancels, and no key reaches the app behind it.
+ * line to a text area), Esc cancels, and no key reaches the app behind it. Multiline forms use
+ * Enter for new lines and Ctrl/Cmd+S to save.
  */
-export function ItemDialog({ title, note, error, saving, picker, onSubmit, onClose, children }: ItemDialogProps) {
+export function ItemDialog({ title, note, error, saving, multiline = false, picker, onSubmit, onClose, children }: ItemDialogProps) {
   const formRef = useRef<HTMLFormElement>(null);
-  useDialogKeys(formRef, onClose, picker.active);
+  useDialogKeys(formRef, onClose, picker.active, multiline);
   return (
     <>
       <div className="help-overlay" onClick={onClose}>
@@ -41,7 +44,9 @@ export function ItemDialog({ title, note, error, saving, picker, onSubmit, onClo
           {children}
           {error && <p className="item-dialog__error" role="alert">⚠ {error}</p>}
           <div className="item-dialog__actions">
-            <span className="item-dialog__hint"><kbd>↵</kbd> save · <kbd>⇧↵</kbd> new line · <kbd>Esc</kbd> cancel</span>
+            <span className="item-dialog__hint">
+              <kbd>{multiline ? 'Ctrl/Cmd+S' : '↵'}</kbd> save · <kbd>{multiline ? '↵' : '⇧↵'}</kbd> new line · <kbd>Esc</kbd> cancel
+            </span>
             <button type="button" className="btn" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn btn--primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
           </div>

@@ -25,6 +25,7 @@ import {
 import { ColorButton } from './ColorPicker.js';
 import { DeleteButton, FolderDetails, FolderTreeList, Pill, Progress, RenameBar, TreeMessage, TreeSearch } from './FolderTree.js';
 import { TodoDialog, type TodoDraft } from './TodoDialog.js';
+import { TodoAttachments } from './TodoAttachments.js';
 import { plural, useFolderTree, type PaneKeyHandler } from '../hooks/useFolderTree.js';
 import { useWindowKeys } from '../hooks/useKeys.js';
 
@@ -51,6 +52,7 @@ const doneOrReopen = (todo: Todo): TodoStatus => (todo.status === 'done' ? 'pend
 /** Todos filed into folders, like Bookmarks: browse, search, filter, add, edit, color, move folders and delete. */
 export function TodosPane({ service, active }: Props) {
   const [dialog, setDialog] = useState<DialogState | undefined>();
+  const [attachmentTodo, setAttachmentTodo] = useState<Todo | undefined>();
   const [sort, setSort] = useState<TodoSort | undefined>(lastSort);
   const [filter, setFilterState] = useState<TodoFilter>(lastFilter);
   const setFilter = (next: TodoFilter) => setFilterState((lastFilter = next));
@@ -78,6 +80,10 @@ export function TodosPane({ service, active }: Props) {
 
   const addTodo = (folder: string) => setDialog({ initial: { folder } });
   const editTodo = (todo: Todo) => setDialog({ todo });
+  const showAttachments = (todo: Todo) => {
+    if (todo.attachments?.length) setAttachmentTodo(todo);
+    else say('No attachments — e to add URLs or file paths');
+  };
 
   const cycleSort = () => {
     tree.keep(row?.key);
@@ -113,9 +119,10 @@ export function TodosPane({ service, active }: Props) {
     if (k === 'Enter') { setStatus(r.item, nextTodoStatus(r.item.status)); return true; }
     if (k === 'x') { setStatus(r.item, doneOrReopen(r.item)); return true; }
     if (k === 'e') { editTodo(r.item); return true; }
+    if (k === 'o') { showAttachments(r.item); return true; }
     return false;
   };
-  useWindowKeys(active && !dialog, (e) => tree.handleKey(e, onKey));
+  useWindowKeys(active && !dialog && !attachmentTodo, (e) => tree.handleKey(e, onKey));
 
   const onSaved = (saved: Todo, created: boolean) => {
     setDialog(undefined);
@@ -249,6 +256,9 @@ export function TodosPane({ service, active }: Props) {
                     </button>
                   )}
                   <button type="button" className="btn" onClick={() => editTodo(row.item)}>e · Edit</button>
+                  {!!row.item.attachments?.length && (
+                    <button type="button" className="btn" onClick={() => showAttachments(row.item)}>o · Attachments ({row.item.attachments.length})</button>
+                  )}
                   <ColorButton
                     {...tree.itemColorButton(row.item.folder, row.item.color)}
                     title="c · Color the todo"
@@ -274,6 +284,7 @@ export function TodosPane({ service, active }: Props) {
         />
       )}
       {tree.picker.element}
+      {attachmentTodo && <TodoAttachments todo={attachmentTodo} onClose={() => setAttachmentTodo(undefined)} />}
     </div>
   );
 }
@@ -286,7 +297,7 @@ export function TodoDetails({ todo, color, actions }: { todo: Todo; color?: stri
       <p className="tree-details__title" style={color ? { color } : undefined}>{todo.subject}</p>
       {todo.description
         ? <p className="tree-details__desc">{todo.description}</p>
-        : <p className="tree-details__desc tree-details__desc--none">No description — e to add one.</p>}
+        : <p className="tree-details__desc tree-details__desc--none">No notes — e to add them.</p>}
       <p className="tree-details__meta">
         <span className="todo-chip" style={{ color: statusColor, borderColor: statusColor }}>
           {TODO_STATUS_ICON[todo.status]} {TODO_STATUS_LABEL[todo.status]}

@@ -402,7 +402,10 @@ export interface Todo {
   /** Opaque ID: stored as RowKey in Azure Table Storage. */
   id: string;
   subject: string;
+  /** Optional multiline notes, stored as plain text; empty when not supplied. */
   description: string;
+  /** URL or filesystem path references, not uploaded files. */
+  attachments?: string[];
   /** ISO 8601 date string, e.g. '2024-12-31'. Optional. */
   dueDate?: string;
   status: TodoStatus;
@@ -419,6 +422,7 @@ export interface Todo {
 export interface CreateTodoRequest {
   subject: string;
   description?: string;
+  attachments?: string[];
   dueDate?: string;
   folder?: string;
   /** `#rrggbb`; `''` or omitted for none. */
@@ -428,6 +432,8 @@ export interface CreateTodoRequest {
 export interface UpdateTodoRequest {
   subject?: string;
   description?: string;
+  /** Replaces the references; `[]` removes them all. Omit to keep them unchanged. */
+  attachments?: string[];
   /** ISO date, or `''` to clear it. */
   dueDate?: string;
   status?: TodoStatus;

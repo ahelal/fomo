@@ -111,8 +111,7 @@ const REFERENCE_KEYS: [string, string][] = [
   ['d',    'Delete link (press twice)'],
   ['/',    'Search titles, links, folders & notes'],
   ['s',    'Sort links: title, date added (press again for the next)'],
-  ['Esc',  'Clear the search, then close'],
-  ['5/⌫',  'Close'],
+  ['Esc',  'Clear the search'],
 ];
 
 const REFERENCE_FORM_KEYS: [string, string][] = [
@@ -131,21 +130,24 @@ const TODO_KEYS: [string, string][] = [
   ['x',    'Mark done / reopen'],
   ['a',    'Add a todo (in the selected folder)'],
   ['e',    'Edit todo · rename or move folder (with its subfolders)'],
+  ['o',    'Attachments: ↑↓ select, ↵ open a URL or local file, Esc back'],
   ['c',    'Color todo or folder (todos take their folder’s): ←↑↓→ ↵ pick, # hex, d reset'],
   ['d',    'Delete todo (press twice)'],
   ['v',    'Show all, open, in progress or done todos (press again for the next)'],
-  ['/',    'Search subjects, notes & folders'],
+  ['/',    'Search subjects, notes, folders & attachments'],
   ['s',    'Sort: status, due date, newest, subject (press again for the next)'],
-  ['Esc',  'Clear the search, then close'],
-  ['6/⌫',  'Close'],
+  ['Esc',  'Clear the search'],
 ];
 
 const TODO_FORM_KEYS: [string, string][] = [
-  ['Tab/↑↓','Next field (Shift+Tab: previous)'],
+  ['Tab',  'Next field (Shift+Tab: previous); in Attachments, completes a file path first'],
+  ['←↑↓→', 'Move the cursor in Notes and Attachments'],
   ['↑↓',   'In Folder: pick an existing folder'],
   ['Due',  '2026-03-06, today, tomorrow, mon…sun, +3 (days), 2w (weeks)'],
   ['^U',   'Clear field'],
-  ['↵',    'Save (in Color: pick a color)'],
+  ['↵',    'New line in Notes/Attachments; otherwise save (Color: pick)'],
+  ['^S',   'Save from any field'],
+  ['Files','One URL or filesystem path per attachment line; no uploads'],
   ['Esc',  'Cancel'],
 ];
 

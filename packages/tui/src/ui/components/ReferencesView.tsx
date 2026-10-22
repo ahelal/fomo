@@ -132,7 +132,7 @@ export function ReferencesView(props: Props) {
         <Text color={ACCENT} bold>{' 🔖 Bookmarks'}</Text>
         <Text color={MUTED}>{` · ${total} link${total === 1 ? '' : 's'}${loading ? ' · loading…' : ''}`}</Text>
       </Box>
-      {!form && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [e] edit  [d] delete  [c] color  [o] open  [/] search  [s] sort  [5] close'}</Text>}
+      {!form && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [e] edit  [d] delete  [c] color  [o] open  [/] search  [s] sort'}</Text>}
     </Box>
   );
 

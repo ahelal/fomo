@@ -74,7 +74,6 @@ const REFERENCE_KEYS: [string, string][] = [
   ['s',     'Cycle sort order (title, date added)'],
   ['/',     'Search titles, links, folders & descriptions'],
   ['Esc',   'Clear the search'],
-  ['5',     'Back to the previous view'],
 ];
 
 const TODO_KEYS: [string, string][] = [
@@ -82,15 +81,16 @@ const TODO_KEYS: [string, string][] = [
   ['↵',     'Next status (pending → in progress → done) / open folder'],
   ['x',     'Done, or reopen a done todo'],
   ['e',     'Edit todo / rename or move folder'],
+  ['o',     'Attachments: ↑↓ select, Enter opens a URL or copies a local path'],
   ['c',     'Color the todo or folder (←↑↓→ ↵ pick, # hex, d reset)'],
   ['d d',   'Delete todo (press twice)'],
   ['→/l',   'Open folder'],
   ['←',     'Close folder, or go to its parent'],
   ['v',     'Show all / open / in progress / done'],
   ['s',     'Cycle sort order (status, due, created, subject)'],
-  ['/',     'Search subjects, descriptions & folders'],
+  ['/',     'Search subjects, notes, folders & attachments'],
+  ['Ctrl/Cmd+S', 'Save the todo form; Enter adds a line in Notes/Attachments'],
   ['Esc',   'Clear the search'],
-  ['6',     'Back to the previous view'],
 ];
 
 const GLOBAL_KEYS: [string, string][] = [

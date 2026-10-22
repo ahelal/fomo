@@ -173,11 +173,13 @@ Press `u` on an update in the TUI to correct its details from the linked page, e
 
 **Todos** (`6`) are filed in a folder tree like `work/fomo`, exactly like [Bookmarks](#bookmarks): the same folders, keys and colors, in the TUI and the web app.
 
-- **Add** with `a`: subject, due date, folder, description and color. The new todo goes in the selected folder.
+- **Add** with `a`: subject, due date, folder, notes, attachments and color. Only the subject is required. The new todo goes in the selected folder.
   - The due date takes `2026-03-06`, `today`, `tomorrow`, `mon`…`sun`, `+3` (days) or `2w` (weeks), and the form shows the date it read. The web app also has a date picker.
+- **Notes** are optional multiline plain text (the existing Description field). `Enter` adds a line; `Tab` moves to the next field; `Ctrl+S` saves from any field (`Cmd+S` also works on the web). The TUI supports cursor movement with the arrows and scrolls long notes within the form; `e` reads or edits the full notes.
+- **Attachments** are optional references, one URL or filesystem path per line. `o` shows them: `↑↓` selects, `Enter` opens the selected URL or local file in the TUI. The web app opens URLs in a new tab and offers **Copy path** for files, because browsers block local-file launching. Files are **not uploaded or synced**; only their paths are stored. Paths must exist on the computer running the TUI; `~` expands to its home directory, relative paths resolve from its working directory, and absolute paths and `file://` URLs are supported. While typing a path in the TUI form, the line under Attachments lists matching files and folders. `Tab` completes the path, or cycles through the matches when several fit. When there's nothing to complete, `Tab` moves to the next field. The web app can't list local folders, so it has no path completion.
 - **Status:** `Enter` steps a todo from pending to in progress to done; `x` marks it done or reopens it. Overdue dates show in red, and dates due today or tomorrow in yellow.
 - **Folders** exist as long as they hold todos. Each shows a progress bar of how many of its todos are done. `e` on a folder renames or moves it with its subfolders; `e` on a todo edits it.
-- `c` [colors](#colors) a todo or folder. `v` shows all, open, in-progress or done todos; `s` sorts by status, due date, newest or subject; `/` searches subjects, descriptions and folders; `d` twice deletes a todo.
+- `c` [colors](#colors) a todo or folder. `v` shows all, open, in-progress or done todos; `s` sorts by status, due date, newest or subject; `/` searches subjects, notes, folders and attachments; `d` twice deletes a todo.
 
 ### Colors
 
@@ -282,8 +284,8 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 |-----------------|-------------------------------------------|
 | `1` `2` `3` `4` | All / Unread / Read / Pending             |
 | `2` / `4` again | Switch Unread / Pending between topics and a list (or click the active tab) |
-| `5`             | [Bookmarks](#bookmarks) (`5` again returns to the previous view) |
-| `6`             | [Todos](#todos) (`6` again returns to the previous view) |
+| `5`             | [Bookmarks](#bookmarks) tab |
+| `6`             | [Todos](#todos) tab |
 | `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
 | `b`             | File the selected update in Bookmarks     |
 | `/`             | Search titles & content in the current view (`Enter` searches, `Esc` clears) |
@@ -305,6 +307,8 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `h`             | Help (also shows the version)             |
 
 Letter keys work in either case: `B` does the same as `b`.
+
+Bookmarks and Todos behave like regular tabs in both apps: pressing `5` or `6` again keeps the current tab open. Switch with `1`–`6` or `Tab` / `Shift+Tab`; `Esc` cancels a prompt or clears a search, not the tab.
 
 Fetching isn't done in the browser. Run `fomo` on your computer and press `f`, then pull to refresh.
 Post summaries made in the TUI (`g`) show at the top of the detail pane.
@@ -343,8 +347,8 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands. 
 | `z` twice       | Regroup all topics with Copilot (`Esc` after the first `z` cancels) |
 | `c`             | Config: sources, link a device, backup / restore, local settings |
 | `w`             | [Profiles](#profiles-several-storage-accounts): switch, add, rename or remove a storage account (also in Config, Todos and Bookmarks) |
-| `5`             | [Bookmarks](#bookmarks): links filed into folders (`5` again closes) |
-| `6`             | [Todos](#todos): tasks filed into folders (`6` again closes) |
+| `5`             | [Bookmarks](#bookmarks): links filed into folders |
+| `6`             | [Todos](#todos): tasks filed into folders |
 | `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
 | `b`             | File the selected update in Bookmarks (Copilot suggests a folder and note) |
 | `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |
@@ -514,7 +518,7 @@ All are optional. The TUI config screen (`c` → **This computer**) stores the s
 | `updates`  | Source ID (e.g. `azure`, `github`) | `sha256(url).slice(0, 32)`   | Updates, status, saved, `topicId`, Copilot `summary` and `gist` (post summary, JSON) |
 | `topics`   | `topic`                            | Topic id                     | Copilot title, summary, highlights    |
 | `settings` | —                                  | —                            | Shared UI/source settings             |
-| `todos`    | `todo` (`folder` for the colors row) | UUID (`colors`)            | Todos: subject, description, due date, status, folder path (`work/fomo`), color; one `colors` row holds the folder colors (JSON) |
+| `todos`    | `todo` (`folder` for the colors row) | UUID (`colors`)            | Todos: subject, multiline notes (`description`), URL/path attachments (JSON), due date, status, folder path (`work/fomo`), color; one `colors` row holds the folder colors (JSON) |
 | `references` | `ref` (`folder` for the colors row) | UUID (`colors`)           | Bookmarked links: title, URL, folder path (`ai/agents`), description, color, source `updateId`; one `colors` row holds the folder colors (JSON) |
 
 Status updates use ETag-based optimistic concurrency.

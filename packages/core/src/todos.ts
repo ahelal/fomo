@@ -56,11 +56,11 @@ export function matchesTodoFilter(todo: Todo, filter: TodoFilter = 'all'): boole
   return todo.status === filter;
 }
 
-/** True when every word of `query` is in the subject, description or folder (case-insensitive). */
+/** True when every word is in the subject, notes, folder or attachments (case-insensitive). */
 export function matchesTodo(todo: Todo, query: string | undefined): boolean {
   const terms = searchTerms(query);
   if (terms.length === 0) return true;
-  const text = [todo.subject, todo.description, todo.folder].join('\n').toLowerCase();
+  const text = [todo.subject, todo.description, todo.folder, ...(todo.attachments ?? [])].join('\n').toLowerCase();
   return terms.every((t) => text.includes(t));
 }
 

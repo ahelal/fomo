@@ -1296,9 +1296,21 @@ body {
 .todo-due--soon { color: var(--yellow); }
 .todo-due--later { color: var(--text-dim); }
 .todo-chip { padding: 0 8px; border: 1px solid; border-radius: 10px; font-size: 11px; }
+.todo-attachments { width: 680px; min-width: 0; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; }
+.todo-attachments__hint { color: var(--text-dim); font-size: 12px; }
+.todo-attachments__list { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
+.todo-attachments__list li { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.todo-attachments__list .todo-attachments__selected { border-color: var(--blue); }
+.todo-attachments__kind { color: var(--text-dim); font-size: 11px; flex-shrink: 0; }
+.todo-attachments__list a, .todo-attachments__list code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.todo-attachments__list a { color: var(--blue-bright); }
+.todo-attachments__list a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
+.todo-attachments__list .btn { flex-shrink: 0; }
+.todo-attachments__message { min-height: 20px; color: var(--green); font-size: 12px; }
+.todo-attachments__message.tree-error { color: var(--red); }
 
 /* Adding or editing a bookmark or a todo */
-.item-dialog { width: 540px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; gap: 10px; }
+.item-dialog { width: 540px; min-width: 0; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
 .item-dialog .help-panel__header { margin-bottom: 4px; }
 .item-dialog__note { color: var(--purple); font-size: 12px; }
 .item-dialog__field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }

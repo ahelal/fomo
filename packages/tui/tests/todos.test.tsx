@@ -1,4 +1,7 @@
 import React, { act } from 'react';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { render } from 'ink';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +24,9 @@ import type { FomoDirectService } from '@fomo/core/service';
 import { App } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
 import { TODO_FOLDER_COLOR, TODO_ITEM_COLOR } from '../src/ui/hooks/useTodos.js';
+import { openTodoAttachment } from '../src/attachments.js';
+
+vi.mock('../src/attachments.js', () => ({ openTodoAttachment: vi.fn() }));
 
 type FakeStdin = PassThrough & { isTTY: boolean; setRawMode(on: boolean): void; ref(): void; unref(): void };
 
@@ -31,6 +37,8 @@ const DOWN = '\u001B[B';
 const RIGHT = '\u001B[C';
 const LEFT = '\u001B[D';
 const CTRL_U = '\u0015';
+const CTRL_S = '\u0013';
+const UP = '\u001B[A';
 
 /** The color the picker lands on after one → from `start`. */
 const rightOf = (start: string) => COLOR_PALETTE[moveInGrid(paletteIndex(start), 'right')]!;
@@ -79,10 +87,13 @@ function fakeService(initial: Todo[], initialColors: FolderColorMap = {}) {
 }
 
 let columns: PropertyDescriptor | undefined;
+let terminalRows: PropertyDescriptor | undefined;
 let unmount: (() => void) | undefined;
 
 beforeEach(() => {
+  vi.mocked(openTodoAttachment).mockReset().mockResolvedValue(undefined);
   columns = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+  terminalRows = Object.getOwnPropertyDescriptor(process.stdout, 'rows');
   Object.defineProperty(process.stdout, 'columns', { value: 160, configurable: true });
 });
 
@@ -91,6 +102,8 @@ afterEach(() => {
   unmount = undefined;
   if (columns) Object.defineProperty(process.stdout, 'columns', columns);
   else delete (process.stdout as { columns?: number }).columns;
+  if (terminalRows) Object.defineProperty(process.stdout, 'rows', terminalRows);
+  else delete (process.stdout as { rows?: number }).rows;
 });
 
 async function renderApp(todos: Todo[], folderColors?: FolderColorMap) {
@@ -138,7 +151,7 @@ const LIST = [
 ];
 
 describe('6 Todos view', () => {
-  it('files todos into folders with their progress, and closes with 6', async () => {
+  it('keeps the tab and folder state when pressing 6, Esc or Backspace again', async () => {
     const { press, frame } = await renderApp(LIST);
     await press('6');
     expect(frame()).toContain('✓ Todos');
@@ -150,8 +163,10 @@ describe('6 Todos view', () => {
     await press(ENTER); // closes the work folder
     expect(frame()).toMatch(/▸ work\//);
     expect(frame()).not.toContain('Write report');
-    await press('6');
-    expect(frame()).not.toContain('✓ Todos');
+    await press('6', ESC, '\u007f', '\u001b[3~');
+    expect(frame()).toContain('✓ Todos');
+    expect(frame()).toMatch(/▸ work\//);
+    expect(frame()).not.toContain('[6] close');
   });
 
   it('switches straight to another view with its number, but types it in the form', async () => {
@@ -231,8 +246,22 @@ describe('6 Todos view', () => {
     await press('6', '/', ...'milk', ENTER);
     expect(frame()).toContain('Buy milk');
     expect(frame()).not.toContain('Write report');
+    await press('6');
+    expect(frame()).not.toContain('Write report');
     await press(ESC);
     expect(frame()).toContain('Write report');
+    await press(ESC);
+    expect(frame()).toContain('✓ Todos');
+  });
+
+  it('cancels add and rename prompts without leaving the Todos tab', async () => {
+    const { press, frame } = await renderApp(LIST);
+    await press('6', 'a', ESC);
+    expect(frame()).toContain('✓ Todos');
+    expect(frame()).not.toContain('Add todo');
+    await press('e', ESC);
+    expect(frame()).toContain('Write report');
+    expect(frame()).not.toContain('Move work/ to:');
   });
 });
 
@@ -276,7 +305,7 @@ describe('a adds a todo', () => {
     expect(frame()).toContain(`→ ${daysFromNow(1)} · tomorrow`);
     await press(TAB); // folder, prefilled from the selected folder
     expect(frame()).toMatch(/Folder:\s+work/);
-    await press(TAB, ...'notes', TAB, ENTER);
+    await press(TAB, ...'notes', TAB, TAB, ENTER);
     expect(frame()).toContain('Pick a color · “Plan sprint quickly”');
     await press(RIGHT, ENTER);
     expect(frame()).toContain('Add todo');
@@ -313,6 +342,152 @@ describe('a adds a todo', () => {
       folder: 'notes',
       dueDate: '2026-12-01',
       color: '#3fb950',
+      attachments: [],
     });
+  });
+
+  it('preserves multiline notes and saves URL/path references with Ctrl+S', async () => {
+    const { svc, press, frame } = await renderApp([]);
+    await press('6', 'a', 'Report', TAB, TAB, TAB, 'First line', ENTER, 'Second line');
+    expect(svc.createTodo).not.toHaveBeenCalled();
+    expect(frame()).toContain('First line');
+    expect(frame()).toContain('Second line');
+    await press(TAB, 'https://example.com/report', ENTER, '~/Documents/a file.pdf', CTRL_S);
+    expect(svc.createTodo).toHaveBeenCalledWith({
+      subject: 'Report', folder: '', description: 'First line\nSecond line',
+      attachments: ['https://example.com/report', '~/Documents/a file.pdf'],
+    });
+    expect(frame()).toContain('✓ Added in top level');
+  });
+
+  it('pastes multiline notes without flattening them and edits at the cursor', async () => {
+    const { svc, press } = await renderApp([]);
+    await press('6', 'a', 'Notes', TAB, TAB, TAB, 'first\nsecond', UP, '\u0001', 'intro ', CTRL_S);
+    expect(svc.createTodo).toHaveBeenCalledWith(expect.objectContaining({ description: 'intro first\nsecond' }));
+  });
+
+  it('clears optional notes and attachments without changing the other fields', async () => {
+    const { svc, press } = await renderApp([todo('t1', 'Report', '', { description: 'old\nnotes', attachments: ['~/old.pdf'] })]);
+    await press('6', 'e', TAB, TAB, TAB, CTRL_U, TAB, CTRL_U, CTRL_S);
+    expect(svc.updateTodo).toHaveBeenCalledWith('t1', {
+      subject: 'Report', description: '', attachments: [], folder: '', dueDate: '', color: '',
+    });
+  });
+
+  it('keeps invalid attachment input in the form with a visible error', async () => {
+    const { svc, press, frame } = await renderApp([]);
+    await press('6', 'a', 'Report', TAB, TAB, TAB, TAB, 'javascript:alert(1)', CTRL_S);
+    expect(frame()).toContain('Attachments support http://, https:// and file paths only');
+    expect(frame()).toContain('javascript:alert(1)');
+    expect(svc.createTodo).not.toHaveBeenCalled();
+  });
+
+  it('keeps long notes within a short terminal and follows the editing cursor', async () => {
+    Object.defineProperty(process.stdout, 'columns', { value: 80, configurable: true });
+    Object.defineProperty(process.stdout, 'rows', { value: 24, configurable: true });
+    const description = Array.from({ length: 60 }, (_, i) => `note line ${i + 1}`).join('\n');
+    const { press, frame } = await renderApp([todo('t1', 'Long notes', '', { description })]);
+    await press('6', 'e', TAB, TAB, TAB);
+    expect(frame()).toContain('note line 60');
+    expect(frame()).not.toContain('note line 1\n');
+    expect(frame().trimEnd().split('\n').length).toBeLessThanOrEqual(24);
+    await press(...Array.from({ length: 59 }, () => UP));
+    expect(frame()).toContain('note line 1');
+    expect(frame()).not.toContain('note line 60');
+    expect(frame().trimEnd().split('\n').length).toBeLessThanOrEqual(24);
+  });
+});
+
+describe('Tab completes attachment paths', () => {
+  let dir: string;
+  const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'fomo-todo-paths-'));
+    await mkdir(join(dir, 'notebook'));
+    await writeFile(join(dir, 'notes.md'), '');
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('lists matches as you type, extends the common prefix, then cycles', async () => {
+    const { svc, press, frame } = await renderApp([]);
+    await press('6', 'a', 'Report', TAB, TAB, TAB, TAB, ...`${dir}/no`);
+    await settle();
+    expect(frame()).toContain('⇥ (2) notebook/  notes.md');
+    await press(TAB);
+    await settle();
+    expect(frame()).toContain(`${dir}/note`);
+    await press(TAB);
+    await settle();
+    expect(frame()).toContain(`${dir}/notebook/`);
+    await press(TAB);
+    await settle();
+    await press(CTRL_S);
+    expect(svc.createTodo).toHaveBeenCalledWith(expect.objectContaining({ attachments: [`${dir}/notes.md`] }));
+  });
+
+  it('moves to the next field once the path is complete', async () => {
+    const { svc, press, frame } = await renderApp([]);
+    await press('6', 'a', 'Report', TAB, TAB, TAB, TAB, ...`${dir}/notes.m`, TAB);
+    await settle();
+    expect(frame()).toContain(`${dir}/notes.md`);
+    await press(TAB);
+    await settle();
+    expect(frame()).toContain('↵ pick');
+    await press(CTRL_S);
+    expect(svc.createTodo).toHaveBeenCalledWith(expect.objectContaining({ attachments: [`${dir}/notes.md`] }));
+  });
+
+  it('leaves URL lines to Tab field navigation', async () => {
+    const { press, frame } = await renderApp([]);
+    await press('6', 'a', 'Report', TAB, TAB, TAB, TAB, ...'https://exa', TAB);
+    await settle();
+    expect(frame()).toContain('↵ pick');
+  });
+});
+
+describe('o opens todo attachments', () => {
+  const attached = todo('t1', 'Report', '', { attachments: ['https://example.com/report', '~/Documents/a file.pdf'] });
+
+  it('selects and opens individual references only after confirmation', async () => {
+    const { svc, press, frame } = await renderApp([attached]);
+    await press('6', 'o');
+    expect(frame()).toContain('Attachments · Report');
+    expect(openTodoAttachment).not.toHaveBeenCalled();
+    await press('6');
+    expect(frame()).toContain('Attachments · Report');
+    await press(DOWN, ENTER);
+    expect(openTodoAttachment).toHaveBeenLastCalledWith('~/Documents/a file.pdf');
+    await press(UP, ENTER);
+    expect(openTodoAttachment).toHaveBeenLastCalledWith('https://example.com/report');
+    expect(svc.updateTodo).not.toHaveBeenCalled();
+    await press(ESC);
+    expect(frame()).not.toContain('Attachments · Report');
+    expect(frame()).toContain('✓ Todos');
+  });
+
+  it('reports failed file launches and keeps the picker usable', async () => {
+    const { press, frame } = await renderApp([attached]);
+    vi.mocked(openTodoAttachment).mockRejectedValueOnce(new Error('File not found'));
+    await press('6', 'o', DOWN, ENTER);
+    expect(frame()).toContain('Error: File not found');
+    expect(frame()).toContain('Attachments · Report');
+  });
+
+  it('does not hijack view-number shortcuts', async () => {
+    const { svc, press, frame } = await renderApp([attached]);
+    await press('6', 'o', '1');
+    expect(frame()).not.toContain('Attachments · Report');
+    expect(svc.listUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'all' }));
+  });
+
+  it('explains how to add attachments when there are none', async () => {
+    const { press, frame } = await renderApp([todo('t1', 'Plain', '')]);
+    await press('6', 'o');
+    expect(frame()).toContain('No attachments — e to add URLs or file paths');
+    expect(openTodoAttachment).not.toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import { colorName, normalizeHexColor, type FolderRow, type FolderTreeRow } from '@fomo/core';
 import { COLOR_FIELD, FOLDER_FIELD, type FolderForm } from '../hooks/folderForm.js';
 import type { FolderRename } from '../hooks/useFolderTree.js';
+import { textRows } from '../text.js';
 
 export const ACCENT = '#58a6ff';
 export const MUTED = '#8b949e';
@@ -138,11 +139,49 @@ export interface FormFieldSpec<F extends string> {
   label: string;
   /** Shown (muted) while the field is empty and not being typed in. */
   placeholder?: string;
-  /** Shown after the value, e.g. how a typed due date was read. */
+  /** Shown after the value, e.g. how a typed due date was read; under a multiline field while it's focused. */
   hint?: React.ReactNode;
+  /** A fixed-height, scrolling multiline input. */
+  lines?: number;
 }
 
 const LABEL_W = 14;
+
+function MultilineField({ value, cursor, active, placeholder, hint, width, height }: {
+  value: string; cursor?: number; active: boolean; placeholder?: string; hint?: React.ReactNode; width: number; height: number;
+}) {
+  const rows = textRows(value, Math.max(1, width - 1));
+  const position = Math.min(cursor ?? value.length, value.length);
+  let selected = rows.findIndex((row, i) => position <= row.end && rows[i + 1]?.start !== position);
+  if (selected < 0) selected = rows.length - 1;
+  const start = active ? Math.max(0, Math.min(selected - height + 1, rows.length - height)) : 0;
+  return (
+    <Box flexDirection="column" width={width}>
+      <Box flexDirection="column" height={height}>
+        {rows.slice(start, start + height).map((row, i) => (
+          <Text key={row.start} color={BRIGHT} wrap="truncate-end">
+            {active && start + i === selected ? (
+              <>
+                <Text>{value.slice(row.start, position)}</Text>
+                <Cursor />
+                <Text>{value.slice(position, row.end)}</Text>
+              </>
+            ) : <Text>{row.text || ' '}</Text>}
+            {!value && i === 0 && placeholder ? <Text color={MUTED}>{placeholder}</Text> : null}
+          </Text>
+        ))}
+      </Box>
+      <Text color={MUTED} wrap="truncate-end">
+        {active && hint ? hint : (
+          <>
+            {active ? `line ${value.slice(0, position).split('\n').length}/${value.split('\n').length} · ↵ new line · ^S save` : `${value ? value.split('\n').length : 0} lines`}
+            {rows.length > height ? ` · showing ${start + 1}–${Math.min(rows.length, start + height)}/${rows.length} rows` : ''}
+          </>
+        )}
+      </Text>
+    </Box>
+  );
+}
 
 /** The add / edit form of a folder tree. */
 export function FolderFormBox<F extends string>({ title, form, fields, folderMatches, folderColor, colorFallback, colorFallbackLabel, status, footer, columns }: {
@@ -163,7 +202,7 @@ export function FolderFormBox<F extends string>({ title, form, fields, folderMat
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#1c7cd6" paddingX={1} width={width}>
       <Text color={ACCENT} bold>{` ${title}`}</Text>
-      {fields.map(({ field, label, placeholder, hint }) => {
+      {fields.map(({ field, label, placeholder, hint, lines }) => {
         const active = form.field === field;
         const value = form.values[field];
         const isColor = field === COLOR_FIELD;
@@ -174,7 +213,9 @@ export function FolderFormBox<F extends string>({ title, form, fields, folderMat
                 <Text color={active ? BRIGHT : MUTED} bold={active}>{`${active ? '›' : ' '}${label}:`}</Text>
               </Box>
               <Box width={Math.max(10, width - 4 - LABEL_W)}>
-                {isColor ? (
+                {lines ? (
+                  <MultilineField value={value} cursor={form.cursor} active={active} placeholder={placeholder} hint={hint} width={Math.max(10, width - 4 - LABEL_W)} height={lines} />
+                ) : isColor ? (
                   <Text wrap="truncate-end">
                     <ColorChip color={value} fallback={colorFallback} fallbackLabel={colorFallbackLabel} />
                     {active ? <Text color={MUTED}>{`   ↵ pick${value ? ' · ⌫ clear' : ''}`}</Text> : null}

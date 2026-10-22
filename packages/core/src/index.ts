@@ -44,6 +44,7 @@ export {
   type NewSourceInput,
 } from './scraper/specs.js';
 export { shortcutKey, jumpStep, TALL_SCREEN_LINES } from './keys.js';
+export { attachmentTarget, normalizeAttachments, parseAttachments, type AttachmentTarget } from './attachments.js';
 export {
   MAX_FOLDER_DEPTH,
   MAX_FOLDER_MATCHES,

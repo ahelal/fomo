@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Key } from 'ink';
 import {
   buildTodoRows,
@@ -13,9 +13,11 @@ import {
   nextTodoFilter,
   nextTodoStatus,
   normalizeFolder,
+  parseAttachments,
   parseDueDate,
   rowFolder,
   sortLabel,
+  shortcutKey,
   TODO_SORTS,
   TODO_STATUS_ICON,
   TODO_STATUS_LABEL,
@@ -28,20 +30,32 @@ import {
 } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import type { AuditLog } from '../../audit.js';
-import { applyFormColor, formKey, type FolderForm } from './folderForm.js';
+import { completePath, isPathInput, nextPathCompletion, type PathCycle } from '../../pathComplete.js';
+import { cursorLine } from '../editText.js';
+import { applyFormColor, formKey, setFormValue, type FolderForm } from './folderForm.js';
 import { errorText, useFolderTree, type TreeKeyHandler } from './useFolderTree.js';
 import type { OpenColorPicker } from './useColorPicker.js';
 
-export type TodoField = 'subject' | 'due' | 'folder' | 'description' | 'color';
+export type TodoField = 'subject' | 'due' | 'folder' | 'description' | 'attachments' | 'color';
 /** The form's fields in Tab order. */
-export const TODO_FIELDS: TodoField[] = ['subject', 'due', 'folder', 'description', 'color'];
+export const TODO_FIELDS: TodoField[] = ['subject', 'due', 'folder', 'description', 'attachments', 'color'];
+const MULTILINE_FIELDS: TodoField[] = ['description', 'attachments'];
 
 /** Folder color when neither a folder nor its parents have one. */
 export const TODO_FOLDER_COLOR = DEFAULT_FOLDER_COLOR;
 /** A todo's color when neither it nor its folders have one. */
 export const TODO_ITEM_COLOR = DEFAULT_ITEM_COLOR;
 
-export type TodoForm = FolderForm<TodoField>;
+export type TodoForm = FolderForm<TodoField> & {
+  /** Tab cycling through the paths that complete an attachment line. */
+  pathCycle?: PathCycle;
+};
+
+/** Paths completing the attachment line at the cursor; `current` is the one Tab cycled to. */
+export interface PathSuggestions {
+  matches: string[];
+  current: number;
+}
 
 interface Options {
   service: FomoDirectService;
@@ -50,28 +64,30 @@ interface Options {
   pickColor?: OpenColorPicker;
   /** Show a message in the main status bar. */
   notify(message: string, ms?: number): void;
+  openAttachment(target: string): Promise<void>;
   /** Rows Shift+↑/↓ moves (5, or 10 on a tall terminal). */
   jump: number;
 }
 
 function newForm(values: Partial<Record<TodoField, string>>, extra: Partial<TodoForm> = {}): TodoForm {
-  const all = { subject: '', due: '', folder: '', description: '', color: '', ...values };
+  const all = { subject: '', due: '', folder: '', description: '', attachments: '', color: '', ...values };
   return { values: all, field: 'subject', touched: new Set(), folderQuery: all.folder, pick: -1, saving: false, ...extra };
 }
 
 function editForm(todo: Todo): TodoForm {
   return newForm(
-    { subject: todo.subject, due: todo.dueDate ?? '', folder: todo.folder ?? '', description: todo.description, color: todo.color ?? '' },
+    { subject: todo.subject, due: todo.dueDate ?? '', folder: todo.folder ?? '', description: todo.description, attachments: todo.attachments?.join('\n') ?? '', color: todo.color ?? '' },
     { id: todo.id },
   );
 }
 
 /** State and keys of the Todos view (6): todos filed in folders, like Bookmarks. */
-export function useTodos({ service, audit, pickColor, notify, jump }: Options) {
+export function useTodos({ service, audit, pickColor, notify, openAttachment, jump }: Options) {
   const [open, setOpen] = useState(false);
   const [sort, setSort] = useState<TodoSort | undefined>();
   const [filter, setFilter] = useState<TodoFilter>('all');
   const [form, setForm] = useState<TodoForm | undefined>();
+  const [attachmentPicker, setAttachmentPicker] = useState<{ todo: Todo; index: number }>();
 
   const buildRows = useCallback(
     (todos: Todo[], expanded: ReadonlySet<string>, search: string) => buildTodoRows(todos, expanded, { search, sort, filter }),
@@ -101,6 +117,30 @@ export function useTodos({ service, audit, pickColor, notify, jump }: Options) {
   const { load, reveal, say, fail, keep, folders, folderColors, items } = tree;
   const matches = useMemo(() => (form ? folderMatches(folders, form.folderQuery) : []), [folders, form]);
 
+  const [pathMatches, setPathMatches] = useState<{ line: string; matches: string[] }>();
+  const pathLine = form?.field === 'attachments' && !form.saving ? cursorLine(form.values.attachments, form.cursor) : undefined;
+  const pathQuery = pathLine && isPathInput(pathLine.text) ? pathLine.text : undefined;
+  useEffect(() => {
+    if (pathQuery === undefined) { setPathMatches(undefined); return; }
+    let live = true;
+    const timer = setTimeout(() => {
+      void completePath(pathQuery).then((found) => { if (live) setPathMatches({ line: pathQuery, matches: found }); });
+    }, 50);
+    return () => { live = false; clearTimeout(timer); };
+  }, [pathQuery]);
+  let pathSuggestions: PathSuggestions | undefined;
+  if (pathQuery !== undefined) {
+    const cycle = form?.pathCycle;
+    if (cycle && cycle.matches[cycle.index] === pathQuery) pathSuggestions = { matches: cycle.matches, current: cycle.index };
+    else if (pathMatches?.line === pathQuery) pathSuggestions = { matches: pathMatches.matches, current: -1 };
+    else if (pathMatches) {
+      // Until the new lookup lands, narrow the previous one instead of flashing the hint away.
+      const lower = pathQuery.toLowerCase();
+      const narrowed = pathMatches.matches.filter((m) => m.toLowerCase().startsWith(lower));
+      if (narrowed.length) pathSuggestions = { matches: narrowed, current: -1 };
+    }
+  }
+
   const openView = useCallback(() => {
     setOpen(true);
     void load();
@@ -108,6 +148,7 @@ export function useTodos({ service, audit, pickColor, notify, jump }: Options) {
 
   const close = useCallback(() => {
     setForm(undefined);
+    setAttachmentPicker(undefined);
     tree.reset();
     setOpen(false);
   }, [tree.reset]);
@@ -131,12 +172,19 @@ export function useTodos({ service, audit, pickColor, notify, jump }: Options) {
       setForm({ ...current, error: dueDateError(due), field: 'due' });
       return;
     }
+    let attachments: string[];
+    try {
+      attachments = parseAttachments(current.values.attachments);
+    } catch (err) {
+      setForm({ ...current, error: errorText(err), field: 'attachments', cursor: undefined });
+      return;
+    }
     setForm({ ...current, saving: true, error: undefined });
     try {
-      const req = { subject: subject.trim(), description: description.trim(), folder: normalizeFolder(folder) };
+      const req = { subject: subject.trim(), description, folder: normalizeFolder(folder) };
       const saved = current.id
-        ? await service.updateTodo(current.id, { ...req, dueDate, color })
-        : await service.createTodo({ ...req, ...(dueDate ? { dueDate } : {}), ...(color ? { color } : {}) });
+        ? await service.updateTodo(current.id, { ...req, dueDate, color, attachments })
+        : await service.createTodo({ ...req, ...(attachments.length ? { attachments } : {}), ...(dueDate ? { dueDate } : {}), ...(color ? { color } : {}) });
       setForm(undefined);
       if (!matchesTodoFilter(saved, filter)) setFilter('all');
       reveal(saved);
@@ -160,8 +208,29 @@ export function useTodos({ service, audit, pickColor, notify, jump }: Options) {
     }, folderColors, TODO_ITEM_COLOR));
   };
 
+  /** Tab on an attachment line naming a path completes it; with nothing to complete it moves on. */
+  const completeAttachment = (f: TodoForm, raw: string, key: Key): boolean => {
+    const line = cursorLine(f.values.attachments, f.cursor);
+    if (!line || !isPathInput(line.text)) return false;
+    const cycling = f.pathCycle?.matches[f.pathCycle.index] === line.text;
+    void (cycling ? Promise.resolve([]) : completePath(line.text)).then((found) => {
+      const step = nextPathCompletion(line.text, found, f.pathCycle);
+      let next: TodoForm = f;
+      if (step) {
+        const value = f.values.attachments.slice(0, line.start) + step.text + f.values.attachments.slice(line.end);
+        next = { ...setFormValue<TodoField, TodoForm>(f, 'attachments', value), cursor: line.start + step.text.length, pathCycle: step.cycle };
+      } else {
+        const moved = formKey(f, TODO_FIELDS, matches, raw, key, MULTILINE_FIELDS);
+        if (moved && 'form' in moved) next = moved.form;
+      }
+      setForm((cur) => (cur === f ? next : cur));
+    });
+    return true;
+  };
+
   const formInput = (f: TodoForm, raw: string, key: Key) => {
-    const step = formKey(f, TODO_FIELDS, matches, raw, key);
+    if (key.tab && !key.shift && f.field === 'attachments' && !f.saving && completeAttachment(f, raw, key)) return;
+    const step = formKey(f, TODO_FIELDS, matches, raw, key, MULTILINE_FIELDS);
     if (!step) return;
     if ('form' in step) setForm(step.form);
     else if (step.action === 'cancel') setForm(undefined);
@@ -170,7 +239,6 @@ export function useTodos({ service, audit, pickColor, notify, jump }: Options) {
   };
 
   const onKey: TreeKeyHandler<Todo> = (input, key, row) => {
-    if (input === '6') { close(); return true; }
     if (input === 's') {
       const next = nextSort(TODO_SORTS, sort);
       keep(row?.key);
@@ -191,13 +259,31 @@ export function useTodos({ service, audit, pickColor, notify, jump }: Options) {
     if (key.return) { setStatus(todo, nextTodoStatus(todo.status)); return true; }
     if (input === 'x') { setStatus(todo, todo.status === 'done' ? 'pending' : 'done'); return true; }
     if (input === 'e') { setForm(editForm(todo)); return true; }
+    if (input === 'o') {
+      if (todo.attachments?.length) setAttachmentPicker({ todo, index: 0 });
+      else say('No attachments — e to add URLs or file paths');
+      return true;
+    }
     return false;
   };
 
   /** Handle a key while Todos (or its form) is shown; `raw` keeps its case for typing. */
   const handleInput = (raw: string, key: Key) => {
     if (form) { formInput(form, raw, key); return; }
-    if (tree.handleInput(raw, key, onKey) === 'close') close();
+    if (attachmentPicker) {
+      const input = shortcutKey(raw);
+      const targets = attachmentPicker.todo.attachments ?? [];
+      if (key.escape || key.backspace || key.delete) { setAttachmentPicker(undefined); return; }
+      if (input === 'e') { setForm(editForm(attachmentPicker.todo)); setAttachmentPicker(undefined); return; }
+      const delta = key.upArrow || input === 'k' ? -1 : key.downArrow || input === 'j' ? 1 : key.pageUp ? -10 : key.pageDown ? 10 : 0;
+      if (delta) setAttachmentPicker({ ...attachmentPicker, index: Math.max(0, Math.min(targets.length - 1, attachmentPicker.index + delta)) });
+      if (key.return || input === 'o') {
+        const target = targets[attachmentPicker.index];
+        if (target) void openAttachment(target).then(() => say(`Opened ${target}`), (err) => fail(`open attachment “${target}”`, err));
+      }
+      return;
+    }
+    tree.handleInput(raw, key, onKey);
   };
 
   const counts = useMemo(() => todoCounts(items), [items]);
@@ -215,6 +301,8 @@ export function useTodos({ service, audit, pickColor, notify, jump }: Options) {
     view: {
       ...tree.view,
       form,
+      attachmentPicker,
+      pathSuggestions,
       folderMatches: matches,
       filter,
       counts,

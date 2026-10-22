@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import {
+  attachmentTarget,
   dueHint,
   dueLabel,
   dueTone,
@@ -14,7 +15,8 @@ import {
   type Todo,
   type TodoRow,
 } from '@fomo/core';
-import { TODO_FIELDS, TODO_FOLDER_COLOR, TODO_ITEM_COLOR, type TodoField, type TodosViewState } from '../hooks/useTodos.js';
+import { TODO_FIELDS, TODO_FOLDER_COLOR, TODO_ITEM_COLOR, type PathSuggestions, type TodoField, type TodosViewState } from '../hooks/useTodos.js';
+import { pathMatchName } from '../../pathComplete.js';
 import {
   ACCENT,
   ColorChip,
@@ -45,13 +47,16 @@ const FIELD_LABEL: Record<TodoField, string> = {
   subject: 'Subject',
   due: 'Due',
   folder: 'Folder',
-  description: 'Description',
+  description: 'Notes',
+  attachments: 'Attachments',
   color: 'Color',
 };
 
 const PLACEHOLDER: Partial<Record<TodoField, string>> = {
   due: '(none) — 2026-03-06, today, fri, +3, 2w',
   folder: '(top level)',
+  description: '(optional)',
+  attachments: 'One URL or file path per line (optional)',
 };
 
 /** How the due date being typed was read: `→ 2026-03-06 · in 3d`, or that it isn't a date. */
@@ -66,14 +71,41 @@ function dueColor(todo: Todo): string {
   return DUE_COLOR[dueTone(todo)];
 }
 
-function Form({ form, folderMatches, folderColors, columns }: Pick<Props, 'form' | 'folderMatches' | 'folderColors' | 'columns'>) {
+/** Under Attachments: the files and folders Tab completes the path being typed to. */
+function PathHint({ suggestions }: { suggestions: PathSuggestions }) {
+  const { matches, current } = suggestions;
+  if (!matches.length) return <Text color={MUTED}>⇥ no matching file or folder</Text>;
+  // Keep the entry Tab cycled to in view; the row is truncated at its end.
+  const first = Math.max(0, current - 1);
+  return (
+    <Text>
+      <Text color={MUTED}>{`⇥ ${matches.length > 1 ? `(${matches.length}) ` : ''}${first > 0 ? '… ' : ''}`}</Text>
+      {matches.slice(first, first + 40).map((match, i) => {
+        const selected = first + i === current;
+        return (
+          <React.Fragment key={match}>
+            {i > 0 ? <Text>{'  '}</Text> : null}
+            <Text color={selected ? DARK : /[\\/]$/.test(match) ? ACCENT : TEXT} backgroundColor={selected ? ACCENT : undefined}>
+              {pathMatchName(match)}
+            </Text>
+          </React.Fragment>
+        );
+      })}
+    </Text>
+  );
+}
+
+function Form({ form, folderMatches, folderColors, pathSuggestions, columns, height }: Pick<Props, 'form' | 'folderMatches' | 'folderColors' | 'pathSuggestions' | 'columns' | 'height'>) {
   if (!form) return null;
   const inherited = folderColor(folderColors, normalizeFolder(form.values.folder));
   const fields: FormFieldSpec<TodoField>[] = TODO_FIELDS.map((field) => ({
     field,
     label: FIELD_LABEL[field],
     placeholder: PLACEHOLDER[field],
-    hint: field === 'due' ? <DueHint text={form.values.due} /> : undefined,
+    hint: field === 'due' ? <DueHint text={form.values.due} />
+      : field === 'attachments' && pathSuggestions ? <PathHint suggestions={pathSuggestions} />
+      : undefined,
+    lines: field === 'description' || field === 'attachments' ? Math.max(1, Math.min(5, Math.floor((height - 13) / 2))) : undefined,
   }));
   return (
     <FolderFormBox
@@ -84,7 +116,7 @@ function Form({ form, folderMatches, folderColors, columns }: Pick<Props, 'form'
       folderColor={TODO_FOLDER_COLOR}
       colorFallback={inherited ?? TODO_ITEM_COLOR}
       colorFallbackLabel={inherited ? 'folder color' : 'none'}
-      footer="[Tab/↑↓] field  [↵] save  [Esc] cancel  [^U] clear field  · folders nest with /"
+      footer="[Tab] field  [^S] save  [Esc] cancel  [^U] clear · Notes/Attachments: ↵ new line, arrows edit · Tab completes paths"
       columns={columns}
     />
   );
@@ -140,10 +172,14 @@ function Details({ row, columns, confirmDelete, folderColors, folderColorOf }: {
     );
   } else {
     const todo = row.item;
+    const notes = todo.description.split(/\r\n?|\n/);
     const due = todo.dueDate ? `due ${todo.dueDate} (${dueLabel(todo.dueDate)})` : 'no due date';
     const inherited = folderColor(folderColors, todo.folder);
     lines.push(
-      <Text key="d" color={TEXT} wrap="truncate-end">{` ${todo.description || '(no description — e to add one)'}`}</Text>,
+      <Text key="d" color={TEXT} wrap="truncate-end">
+        {` ${notes[0] || '(no notes — e to add them)'}`}
+        {notes.length > 1 ? <Text color={MUTED}>{` · ${notes.length} lines (e to read/edit)`}</Text> : null}
+      </Text>,
       <Text key="s" color={MUTED} wrap="truncate-end">
         {' '}
         <Text color={TODO_STATUS_COLOR[todo.status]}>{`${TODO_STATUS_ICON[todo.status]} ${TODO_STATUS_LABEL[todo.status]}`}</Text>
@@ -151,11 +187,12 @@ function Details({ row, columns, confirmDelete, folderColors, folderColorOf }: {
         <Text color={dueColor(todo)}>{due}</Text>
         {` · ${todo.folder || 'top level'} · `}
         <ColorChip color={todo.color} fallback={inherited} fallbackLabel={inherited ? 'folder color' : 'no color'} />
+        {todo.attachments?.length ? ` · ${todo.attachments.length} attachment(s)` : ''}
       </Text>,
       <Text key="k" color={confirmDelete === todo.id ? ERROR : MUTED} wrap="truncate-end">
         {confirmDelete === todo.id
           ? ' d again to delete · any other key cancels'
-          : ` [↵] → ${TODO_STATUS_LABEL[nextTodoStatus(todo.status)]}  [x] ${todo.status === 'done' ? 'reopen' : 'done'}  [e] edit  [c] color  [d] delete`}
+          : ` [↵] → ${TODO_STATUS_LABEL[nextTodoStatus(todo.status)]}  [x] ${todo.status === 'done' ? 'reopen' : 'done'}  [e] edit  [o] attachments  [c] color  [d] delete`}
       </Text>,
     );
   }
@@ -163,7 +200,7 @@ function Details({ row, columns, confirmDelete, folderColors, folderColorOf }: {
 }
 
 export function TodosView(props: Props) {
-  const { rows, total, selectedIndex, loading, search, searchDraft, form, rename, folderColors, filter, counts, height, columns } = props;
+  const { rows, total, selectedIndex, loading, search, searchDraft, form, attachmentPicker, rename, folderColors, filter, counts, height, columns } = props;
   const folderColorOf = (path: string) => folderColor(folderColors, path) ?? TODO_FOLDER_COLOR;
   const colorOf = (todo: Todo) => todo.color || folderColor(folderColors, todo.folder);
 
@@ -179,7 +216,7 @@ export function TodosView(props: Props) {
           {loading ? ' · loading…' : ''}
         </Text>
       </Box>
-      {!form && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [↵] status  [x] done  [e] edit  [c] color  [v] show  [/] search  [s] sort  [6] close'}</Text>}
+      {!form && !attachmentPicker && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [↵] status  [x] done  [e] edit  [o] attachments  [c] color  [v] show  [/] search  [s] sort'}</Text>}
     </Box>
   );
 
@@ -187,7 +224,31 @@ export function TodosView(props: Props) {
     return (
       <Box flexDirection="column" width={columns} height={height}>
         {header}
-        <Form form={form} folderMatches={props.folderMatches} folderColors={folderColors} columns={columns} />
+        <Form form={form} folderMatches={props.folderMatches} folderColors={folderColors} pathSuggestions={props.pathSuggestions} columns={columns} height={height - 2} />
+      </Box>
+    );
+  }
+
+  if (attachmentPicker) {
+    const targets = attachmentPicker.todo.attachments ?? [];
+    const room = Math.max(1, height - 7);
+    const start = Math.max(0, Math.min(attachmentPicker.index - Math.floor(room / 2), targets.length - room));
+    return (
+      <Box flexDirection="column" width={columns} height={height}>
+        {header}
+        <Text color={ACCENT} bold wrap="truncate-end">{` Attachments · ${attachmentPicker.todo.subject}`}</Text>
+        <Text color={MUTED}>{' Files open on this computer; relative paths use the TUI working directory.'}</Text>
+        <Box flexDirection="column" height={room}>
+          {targets.slice(start, start + room).map((target, i) => {
+            const selected = start + i === attachmentPicker.index;
+            return (
+              <Text key={`${start + i}:${target}`} color={selected ? DARK : TEXT} backgroundColor={selected ? ACCENT : undefined} wrap="truncate-end">
+                {` ${selected ? '›' : ' '} ${attachmentTarget(target).kind === 'url' ? 'URL ' : 'FILE'}  ${target}`}
+              </Text>
+            );
+          })}
+        </Box>
+        <Text color={MUTED} wrap="truncate-end">{` ${attachmentPicker.index + 1}/${targets.length}  [↑↓/j/k] select  [↵/o] open  [e] edit  [Esc] back`}</Text>
       </Box>
     );
   }

@@ -5,6 +5,7 @@ import { matchesSearch, searchTerms } from '../search.js';
 import { compareUpdates, sortTodos } from '../sort.js';
 import { folderMove, isInFolder, moveFolderPath, normalizeFolder } from '../folders.js';
 import { cleanColor } from '../colors.js';
+import { normalizeAttachments } from '../attachments.js';
 import type {
   StoreConnection,
   Update,
@@ -624,6 +625,8 @@ const TODO_PK = 'todo';
 type TodoEntity = TableEntity<{
   subject: string;
   description: string;
+  /** JSON array; missing on todos stored before attachments. */
+  attachments?: string;
   dueDate: string;
   status: string;
   /** Missing on todos stored before folders. */
@@ -634,6 +637,11 @@ type TodoEntity = TableEntity<{
 }>;
 
 function entityToTodo(e: TodoEntity): Todo {
+  const stored: unknown = JSON.parse(e.attachments || '[]');
+  if (!Array.isArray(stored) || !stored.every((value): value is string => typeof value === 'string')) {
+    throw new Error(`Invalid attachments stored for todo ${e.rowKey}`);
+  }
+  const attachments = normalizeAttachments(stored);
   const todo: Todo = {
     id: e.rowKey,
     subject: e.subject,
@@ -644,6 +652,7 @@ function entityToTodo(e: TodoEntity): Todo {
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
+  if (attachments.length) todo.attachments = attachments;
   if (e.color) todo.color = e.color;
   return todo;
 }
@@ -670,6 +679,7 @@ export class TodoStore {
       rowKey: id,
       subject: req.subject,
       description: req.description ?? '',
+      attachments: JSON.stringify(normalizeAttachments(req.attachments ?? [])),
       dueDate: req.dueDate ?? '',
       status: 'pending',
       folder: normalizeFolder(req.folder),
@@ -714,6 +724,7 @@ export class TodoStore {
       ...entity,
       subject: patch.subject ?? entity.subject,
       description: patch.description !== undefined ? patch.description : entity.description,
+      attachments: patch.attachments !== undefined ? JSON.stringify(normalizeAttachments(patch.attachments)) : (entity.attachments ?? '[]'),
       dueDate: patch.dueDate !== undefined ? (patch.dueDate ?? '') : entity.dueDate,
       status: patch.status ?? entity.status,
       folder: patch.folder !== undefined ? normalizeFolder(patch.folder) : (entity.folder ?? ''),

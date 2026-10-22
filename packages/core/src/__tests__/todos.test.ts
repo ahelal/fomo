@@ -58,6 +58,13 @@ describe('todo status and filter', () => {
     expect(matchesTodo(t, 'report home')).toBe(false);
     expect(matchesTodo(t, '  ')).toBe(true);
   });
+
+  it('searches multiline notes and attachment references', () => {
+    const t = todo('x', '', { description: 'First line\nSecond line', attachments: ['https://example.com/report', '~/Documents/budget.pdf'] });
+    expect(matchesTodo(t, 'first second')).toBe(true);
+    expect(matchesTodo(t, 'REPORT budget')).toBe(true);
+    expect(matchesTodo(t, 'missing.pdf')).toBe(false);
+  });
 });
 
 describe('buildTodoRows', () => {
@@ -222,6 +229,36 @@ describe('TodoStore folders and colors', () => {
     const { store } = storeWith([row('old'), row('new', 'home', { color: '#ff0000' })]);
     const { todos } = await store.listTodos();
     expect(todos.map((t) => [t.id, t.folder, t.color])).toEqual([['old', '', undefined], ['new', 'home', '#ff0000']]);
+    expect(todos[0]).not.toHaveProperty('attachments');
+  });
+
+  it('stores multiline notes and attachment references, not file contents', async () => {
+    const { store, calls } = storeWith([]);
+    const description = 'First line\n\n  Indented second line';
+    const attachments = ['https://example.com/report', '~/Documents/a file.pdf'];
+    const created = await store.createTodo({ subject: 'Report', description, attachments });
+    expect(created).toMatchObject({ description, attachments });
+    expect(calls.created[0]).toMatchObject({ description, attachments: JSON.stringify(attachments) });
+    await expect(store.createTodo({ subject: 'Bad', attachments: ['javascript:alert(1)'] })).rejects.toThrow(/support/);
+    expect(calls.created).toHaveLength(1);
+  });
+
+  it('reads, replaces, preserves and clears attachments independently of other fields', async () => {
+    const attachments = ['https://example.com/report', '/tmp/report.pdf'];
+    const { store, calls } = storeWith([row('a', 'work', { attachments: JSON.stringify(attachments), description: 'Line 1\nLine 2' })]);
+    expect(await store.getTodo('a')).toMatchObject({ attachments, description: 'Line 1\nLine 2' });
+    expect((await store.listTodos()).todos[0]).toMatchObject({ attachments });
+    expect(await store.updateTodo('a', { status: 'done' })).toMatchObject({ attachments, description: 'Line 1\nLine 2' });
+    expect(await store.updateTodo('a', { attachments: ['~/new.txt'] })).toMatchObject({ attachments: ['~/new.txt'] });
+    expect(await store.updateTodo('a', { attachments: [], description: '' })).not.toHaveProperty('attachments');
+    expect(calls.updated.at(-1)).toMatchObject({ attachments: '[]', description: '', mode: 'Replace' });
+  });
+
+  it('reports corrupted stored attachment data instead of silently losing it', async () => {
+    for (const attachments of ['not JSON', '{"path":"a"}', '[42]', '["javascript:alert(1)"]']) {
+      const { store } = storeWith([row('bad', '', { attachments })]);
+      await expect(store.getTodo('bad')).rejects.toThrow();
+    }
   });
 
   it('moves, recolors and clears through an update', async () => {

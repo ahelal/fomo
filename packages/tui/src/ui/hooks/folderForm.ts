@@ -1,5 +1,5 @@
 import type { Key } from 'ink';
-import { editText } from '../editText.js';
+import { editMultiline, editText } from '../editText.js';
 
 /** The form that files something into a folder (a bookmark, a todo). */
 export interface FolderForm<F extends string> {
@@ -7,6 +7,8 @@ export interface FolderForm<F extends string> {
   id?: string;
   values: Record<F, string>;
   field: F;
+  /** Cursor in the focused multiline field; undefined starts at its end. */
+  cursor?: number;
   /** Fields typed in by hand. */
   touched: ReadonlySet<F>;
   /** What was typed into the folder field; ↑↓ pick among existing folders matching it. */
@@ -49,8 +51,8 @@ export function applyFormColor<F extends string, Form extends FolderForm<F>>(for
 
 /**
  * One key in a folder form: Tab / ↑↓ move between `fields` (↑↓ pick a folder in the folder field
- * when some match), ↵ saves, Esc cancels, ^G asks Copilot. The color field isn't typed into: ↵ or
- * space opens the picker and ⌫ clears it. Returns undefined when the key does nothing.
+ * when some match), ↵ saves, Esc cancels, ^G asks Copilot. Multiline fields use ↵ for new lines,
+ * arrows for editing and ^S to save. The color field uses ↵/space to pick and ⌫ to clear.
  */
 export function formKey<F extends string, Form extends FolderForm<F>>(
   form: Form,
@@ -58,22 +60,30 @@ export function formKey<F extends string, Form extends FolderForm<F>>(
   matches: readonly string[],
   raw: string,
   key: Key,
+  multilineFields: readonly F[] = [],
 ): FormStep<Form> {
   if (key.escape) return { action: 'cancel' };
   if (form.saving) return undefined;
+  if (key.ctrl && raw === 's') return { action: 'save' };
   const field: string = form.field;
   if (field === COLOR_FIELD) {
     if (key.return || raw === ' ') return { action: 'color' };
     if (key.backspace || key.delete || (key.ctrl && raw === 'u')) return { form: setFormValue(form, form.field, '') };
   }
-  if (key.return) return { action: 'save' };
   if (key.ctrl && raw === 'g') return { action: 'suggest' };
   const move = (dir: 1 | -1): FormStep<Form> => {
     const i = fields.indexOf(form.field);
     const next = fields[(i + dir + fields.length) % fields.length]!;
-    return { form: { ...form, field: next, pick: -1, folderQuery: (form.values as Record<string, string>)[FOLDER_FIELD] ?? '' } };
+    return { form: { ...form, field: next, cursor: undefined, pick: -1, folderQuery: (form.values as Record<string, string>)[FOLDER_FIELD] ?? '' } };
   };
   if (key.tab) return move(key.shift ? -1 : 1);
+  if (multilineFields.includes(form.field)) {
+    const value = form.values[form.field];
+    const next = editMultiline(value, form.cursor ?? value.length, raw, key);
+    if (!next) return undefined;
+    return { form: { ...setFormValue(form, form.field, next.value), cursor: next.cursor } };
+  }
+  if (key.return) return { action: 'save' };
   if (field === FOLDER_FIELD && (key.upArrow || key.downArrow) && matches.length > 0) {
     const pick = key.downArrow ? Math.min(matches.length - 1, form.pick + 1) : Math.max(-1, form.pick - 1);
     const folder = pick === -1 ? form.folderQuery : matches[pick]!;

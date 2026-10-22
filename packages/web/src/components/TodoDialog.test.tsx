@@ -5,6 +5,7 @@ import type { FomoService, Reference, Todo } from '@fomo/core';
 import { TodoDialog } from './TodoDialog.js';
 import { TodoDetails } from './TodosPane.js';
 import { ReferenceDialog } from './ReferenceDialog.js';
+import { TodoAttachments } from './TodoAttachments.js';
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 const service = {} as FomoService;
@@ -66,6 +67,16 @@ describe('TodoDialog', () => {
     expect(html).toContain('In both apps</textarea>');
     expect(html).toContain('background-color:#3fb950');
   });
+
+  it('edits multiline notes and URL/path references without flattening their lines', () => {
+    const html = renderTodoDialog({ todo: { ...TODO, description: 'First line\n\n  Second line', attachments: ['https://example.com/report', '~/Documents/a file.pdf'] } });
+    expect(html).toContain('First line\n\n  Second line</textarea>');
+    expect(html).toContain('https://example.com/report\n~/Documents/a file.pdf</textarea>');
+    expect(text(html)).toContain('Notes (optional)');
+    expect(text(html)).toContain('files are not uploaded');
+    expect(text(html)).toContain('Ctrl/Cmd+S');
+    expect(html).not.toContain('type="file"');
+  });
 });
 
 describe('TodoDetails', () => {
@@ -75,13 +86,32 @@ describe('TodoDetails', () => {
     expect(text(html)).toContain('◑ In progress');
     expect(html).toContain('<span class="todo-due--overdue">due 2026-03-02 (2d overdue)</span>');
     expect(text(html)).toContain('work/fomo/');
-    expect(text(html)).toContain('No description — e to add one.');
+    expect(text(html)).toContain('No notes — e to add them.');
   });
 
   it('never calls a done todo overdue', () => {
     const html = renderToStaticMarkup(<TodoDetails todo={{ ...TODO, status: 'done', folder: '' }} />);
     expect(html).toContain('todo-due--later');
     expect(text(html)).toContain('top level');
+  });
+
+  it('renders notes as plain text with their line breaks intact', () => {
+    const html = renderToStaticMarkup(<TodoDetails todo={{ ...TODO, description: 'First line\n<script>alert(1)</script>\nLast line' }} />);
+    expect(html).toContain('First line\n&lt;script&gt;alert(1)&lt;/script&gt;\nLast line');
+    expect(html).not.toContain('<script>');
+  });
+});
+
+describe('TodoAttachments', () => {
+  it('opens web URLs in new tabs but offers copy actions for paths, not file links', () => {
+    const html = renderToStaticMarkup(
+      <TodoAttachments todo={{ ...TODO, attachments: ['https://example.com/report', '~/Documents/a file.pdf', 'file:///tmp/report.pdf'] }} onClose={vi.fn()} />,
+    );
+    expect(html).toContain('href="https://example.com/report" target="_blank" rel="noopener noreferrer"');
+    expect(html).toContain('aria-label="Copy path ~/Documents/a file.pdf"');
+    expect(html).toContain('aria-label="Copy path file:///tmp/report.pdf"');
+    expect(html).not.toContain('href="file:');
+    expect(html).not.toContain('href="~/');
   });
 });
 

@@ -153,7 +153,7 @@ describe('folderMatches', () => {
 describe('5 Bookmarks view', () => {
   const library = [ref('1', 'Agents guide', 'ai/agents'), ref('2', 'Prompting', 'ai'), ref('3', 'Bicep docs', 'azure')];
 
-  it('shows the folder tree and closes with 5', async () => {
+  it('keeps the tab and its folder state when pressing 5, Esc or Backspace again', async () => {
     const { press, frame } = await renderApp(library);
     await press('5');
     expect(frame()).toContain('Bookmarks');
@@ -163,8 +163,10 @@ describe('5 Bookmarks view', () => {
     await press(ENTER); // close the ai folder
     expect(frame()).toMatch(/▸ ai\/ 2/);
     expect(frame()).not.toContain('Agents guide');
-    await press('5');
-    expect(frame()).not.toContain('3 links');
+    await press('5', ESC, '\u007f', '\u001b[3~');
+    expect(frame()).toContain('3 links');
+    expect(frame()).toMatch(/▸ ai\/ 2/);
+    expect(frame()).not.toContain('[5] close');
   });
 
   it('shows messages in the status bar, so the tree never moves', async () => {
@@ -200,12 +202,25 @@ describe('5 Bookmarks view', () => {
     await press('5', '/', 'b', 'i', 'c', 'e', 'p', ENTER);
     expect(frame()).toContain('Bicep docs');
     expect(frame()).not.toContain('Prompting');
+    await press('5');
+    expect(frame()).not.toContain('Prompting');
     await press(ESC);
     expect(frame()).toContain('Prompting');
+    await press(ESC);
+    expect(frame()).toContain('3 links');
     await press('e', '\u0015', 'm', 'l', ENTER); // ^U clears the prefilled path
     expect(svc.moveReferenceFolder).toHaveBeenCalledWith('ai', 'ml');
     expect(frame()).toContain('Moved 2 links to ml');
     expect(frame()).toMatch(/▾ ml\/ 2/);
+  });
+
+  it('cancels add and rename prompts without leaving the Bookmarks tab', async () => {
+    const { press, frame } = await renderApp(library);
+    await press('5', 'a', ESC);
+    expect(frame()).toContain('3 links');
+    await press('e', ESC);
+    expect(frame()).toContain('3 links');
+    expect(frame()).not.toContain('Move ai/ to:');
   });
 
   it('deletes a link only on the second d', async () => {
