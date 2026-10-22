@@ -16,7 +16,6 @@ dist/
 .env.local
 .env.*.local
 .devcontainer/.env
-.allowed_users.txt
 
 # OS
 .DS_Store

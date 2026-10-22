@@ -10,14 +10,6 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./store": {
-      "import": "./dist/store/tables.js",
-      "types": "./dist/store/tables.d.ts"
-    },
-    "./scrapers": {
-      "import": "./dist/scraper/registry.js",
-      "types": "./dist/scraper/registry.d.ts"
-    },
     "./service": {
       "import": "./dist/service.js",
       "types": "./dist/service.d.ts"
@@ -25,10 +17,6 @@
     "./digest": {
       "import": "./dist/digest/index.js",
       "types": "./dist/digest/index.d.ts"
-    },
-    "./store/topics": {
-      "import": "./dist/store/topics.js",
-      "types": "./dist/store/topics.d.ts"
     },
     "./store/sas": {
       "import": "./dist/store/sas.js",
