@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createAuditLog, redact } from '../src/audit.js';
+import { createAuditLog, createMemoryAuditLog, redact } from '../src/audit.js';
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'fomo-audit-')); });
@@ -69,6 +69,36 @@ describe('audit log', () => {
     expect(audit.recent()).toEqual([]);
     expect(() => createAuditLog(file).recent()).not.toThrow();
   });
+
+  it('stamps the entries that follow with the profile, until it is cleared', () => {
+    const file = join(dir, 'audit.log');
+    const audit = createAuditLog(file);
+    audit.log('app', 'no profile yet');
+    audit.setProfile('work');
+    audit.log('fetch', 'added 3');
+    audit.error('digest', 'quota exceeded');
+    audit.setProfile('private');
+    audit.log('fetch', 'added 1');
+    audit.setProfile(undefined);
+    audit.log('status', 'back to one profile');
+
+    expect(audit.recent().map((e) => e.profile)).toEqual([undefined, 'private', 'work', 'work', undefined]);
+    const lines = readFileSync(file, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines[0]).not.toHaveProperty('profile');
+    expect(lines[1]).toMatchObject({ action: 'fetch', profile: 'work' });
+    expect(lines[2]).toMatchObject({ level: 'error', profile: 'work' });
+    expect(lines[4]).not.toHaveProperty('profile');
+  });
+
+  it('stamps the in-memory log the same way', () => {
+    const audit = createMemoryAuditLog();
+    audit.setProfile('work');
+    audit.log('fetch');
+    audit.error('digest', 'boom');
+    audit.setProfile(undefined);
+    audit.log('fetch');
+    expect(audit.entries.map((e) => e.profile)).toEqual(['work', 'work', undefined]);
+  });
 });
 
 describe('startup', () => {
@@ -77,7 +107,8 @@ describe('startup', () => {
     writeFileSync(join(dir, '.fomo', 'config.json'), '{ not json');
     const tsx = fileURLToPath(new URL('../node_modules/.bin/tsx', import.meta.url));
     const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-    const run = spawnSync(tsx, [entry], { env: { ...process.env, HOME: dir, USERPROFILE: dir }, encoding: 'utf-8' });
+    // FOMO_CONFIG_DIR is unset for the child so that HOME decides where ~/.fomo is.
+    const run = spawnSync(tsx, [entry], { env: { ...process.env, HOME: dir, USERPROFILE: dir, FOMO_CONFIG_DIR: '' }, encoding: 'utf-8' });
 
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('Failed to parse');

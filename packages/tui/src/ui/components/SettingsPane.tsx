@@ -1,13 +1,17 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Box, Text } from 'ink';
 import { timeAgo, type AppSettings, type PreviewPosition, type SourceFetchResult, type StatsResponse } from '@fomo/core';
-import { maskConnectionString, readConfigFile, type LocalConfig } from '../../config.js';
+import { maskConnectionString, type LocalConfig } from '../../config.js';
 import { ADD_SOURCE_PROMPTS, configDisplay, rowHint, type AddSourceStep, type SettingsRow } from '../settings.js';
 
 interface Props {
   rows: SettingsRow[];
   settings: AppSettings;
   config: LocalConfig;
+  /** What the profile's config file stores, without environment overrides: tells which values come from environment variables. */
+  file: LocalConfig;
+  /** Profile in use. */
+  profile: string;
   stats?: StatsResponse;
   /** Result of the last fetch per source in this session. */
   lastFetch: Record<string, SourceFetchResult>;
@@ -63,6 +67,8 @@ export const SettingsPane = React.memo(function SettingsPane({
   rows,
   settings,
   config,
+  file,
+  profile,
   stats,
   lastFetch,
   focusIndex,
@@ -84,10 +90,6 @@ export const SettingsPane = React.memo(function SettingsPane({
   const restW = Math.max(0, innerW - 4 - NAME_W);
   const editing = editBuffer !== undefined;
   const focused = rows[focusIndex];
-  // Read once per config change: tells which values come from environment variables
-  const file = useMemo(() => {
-    try { return readConfigFile(); } catch { return {}; }
-  }, [config]);
 
   const editBox = (text: string) => (
     <Text color="#e3b341" backgroundColor="#2d1b00">{` ${tail(text, restW - 3)}▏`.padEnd(restW)}</Text>
@@ -248,7 +250,7 @@ export const SettingsPane = React.memo(function SettingsPane({
         </Text>
       );
     }
-    const shown = configDisplay(config, row.field, file);
+    const shown = configDisplay(config, row.field, file, profile);
     const envTag = shown.env ? ` [${shown.env}]` : '';
     const value = clip(shown.value, restW - envTag.length);
     return (

@@ -1,4 +1,5 @@
 import React, { act } from 'react';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { render } from 'ink';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,9 +11,9 @@ import type { FomoDirectService } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { App, REGROUP_CONFIRM_MS } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
-import type { LocalConfig } from '../src/config.js';
+import { DEFAULT_BACKUP_DIR, tildify, type LocalConfig } from '../src/config.js';
 import type { GhAccount } from '../src/ghAccounts.js';
-import { buildSettingsRows, configDisplay, findRow, firstFocusable, moveFocus, parseConfigEdit } from '../src/ui/settings.js';
+import { buildSettingsRows, configDisplay, editStartValue, findRow, firstFocusable, moveFocus, parseConfigEdit, settingsRowText } from '../src/ui/settings.js';
 
 /** The built-in sources the config screen lists with the default settings. */
 const SOURCES = sourceInfos(DEFAULT_SETTINGS);
@@ -531,7 +532,7 @@ describe('Config sections', () => {
     await press('k'); // first row → Actions header
     expect(frame()).toContain('↵/← collapse');
     await press('\r');
-    expect(frame()).toContain('▸ Actions (5)');
+    expect(frame()).toContain('▸ Actions (6)');
     expect(frame()).not.toContain('Link a device');
     await press('\u001B[C'); // →
     expect(frame()).toContain('▾ Actions');
@@ -543,7 +544,7 @@ describe('Config sections', () => {
     await press('c');
     await press('j');
     await press('\u001B[D'); // ←
-    expect(frame()).toContain('▸ Actions (5)');
+    expect(frame()).toContain('▸ Actions (6)');
     expect(frame()).toContain('↵/→ expand');
   });
 
@@ -618,8 +619,43 @@ describe('settings rows', () => {
   it('leaves out the rows of collapsed sections', () => {
     const rows = buildSettingsRows([], new Set(['h-local', 'h-actions']));
     expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'add-source', 'h-display', 'preview', 'h-local']);
-    expect(rows[0]).toMatchObject({ collapsed: true, count: 5 });
+    expect(rows[0]).toMatchObject({ collapsed: true, count: 6 });
     expect(moveFocus(rows, 5, 10)).toBe(5);
     expect(moveFocus(rows, 1, -10)).toBe(0);
+  });
+
+  it('names the profile in the title of the local section only when told to', () => {
+    const title = (profile?: string) => {
+      const header = buildSettingsRows([], new Set(), undefined, 0, [], profile).find((r) => r.key === 'h-local');
+      return header?.kind === 'header' ? header.label : undefined;
+    };
+    expect(title()).toMatch(/^This computer · .*config\.json$/);
+    expect(title('work')).toMatch(/^This computer · profile work · .*config\.json$/);
+  });
+
+  it('offers the profile list as an action', () => {
+    const row = buildSettingsRows([]).find((r) => r.key === 'a-profiles');
+    expect(row).toMatchObject({ kind: 'action', action: 'profiles', label: 'Switch profile' });
+  });
+});
+
+describe('config values per profile', () => {
+  it('defaults the backup folder to one named after the profile, except for the default profile', () => {
+    expect(configDisplay({}, 'backupDir', {}).value).toBe(`${tildify(DEFAULT_BACKUP_DIR)} (default)`);
+    expect(configDisplay({}, 'backupDir', {}, 'work').value).toBe(`${tildify(join(DEFAULT_BACKUP_DIR, 'work'))} (default)`);
+    expect(configDisplay({ backupDir: '/b' }, 'backupDir', { backupDir: '/b' }, 'work').value).toBe('/b');
+  });
+
+  it('starts an edit from the profile’s own stored value', () => {
+    expect(editStartValue('interests', { interests: 'ai' })).toBe('ai');
+    expect(editStartValue('interests', {})).toBe('');
+    expect(editStartValue('connectionString', { connectionString: 'AccountKey=secret' })).toBe('');
+    expect(editStartValue('autoFetch', { autoFetch: false })).toBe('off');
+    expect(editStartValue('autoFetch', { autoFetchMinutes: 30 })).toBe('30');
+  });
+
+  it('searches the values of the profile in use', () => {
+    const row = buildSettingsRows([]).find((r) => r.key === 'c-interests')!;
+    expect(settingsRowText(row, { interests: 'rust' }, { interests: 'rust' }, 'work')).toContain('rust');
   });
 });

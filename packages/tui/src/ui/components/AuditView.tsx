@@ -53,6 +53,7 @@ export function AuditView({ file, entries, focusIndex, errorsOnly, height, colum
               <Text color="#8b949e" backgroundColor={bg}>{`${stamp(e.ts)}  `}</Text>
               <Text color={isError ? '#f85149' : '#3fb950'} backgroundColor={bg}>{isError ? '✗ ' : '· '}</Text>
               <Text color={isError ? '#f85149' : '#58a6ff'} backgroundColor={bg}>{e.action.padEnd(ACTION_W)}</Text>
+              {e.profile ? <Text color="#d2a8ff" backgroundColor={bg}>{` [${e.profile}]`}</Text> : null}
               <Text color="#c9d1d9" backgroundColor={bg}>{` ${firstLine(e.detail)}`}</Text>
             </Text>
           );

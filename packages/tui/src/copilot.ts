@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelRequest, Summarizer } from '@fomo/core/digest';
+import { CONFIG_DIR } from './config.js';
 import { ghAuthToken } from './ghAccounts.js';
 
 export const DEFAULT_COPILOT_MODEL = 'gpt-5-mini';
@@ -81,7 +81,7 @@ export class CopilotSummarizer implements Summarizer {
 
   private async startClient(): Promise<CopilotClientLike> {
     const { CopilotClient } = await import('@github/copilot-sdk');
-    const baseDirectory = join(homedir(), '.fomo', 'copilot');
+    const baseDirectory = join(CONFIG_DIR, 'copilot');
     mkdirSync(baseDirectory, { recursive: true });
     const envName = copilotTokenEnv();
     let token: string | undefined;

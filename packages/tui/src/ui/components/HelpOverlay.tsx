@@ -86,6 +86,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['f',    'Fetch latest updates + group with Copilot'],
   ['z',    'Regroup all topics with Copilot (press twice)'],
   ['c',    'Config: sources, link a device, backup / restore'],
+  ['w',    'Switch profile (storage account): ↵ switch, a add, e rename, x remove'],
   ['5',    'Bookmarks: links filed into folders'],
   ['6',    'Todos'],
   ['b',    'File the selected update in Bookmarks (Copilot suggests folder + note)'],

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { render } from 'ink';
 import { createElement } from 'react';
-import { AUDIT_FILE, CONFIG_FILE, LOG_FILE, loadConfig } from './config.js';
+import { AUDIT_FILE, CONFIG_FILE, LOG_FILE, loadConfig, selectProfile } from './config.js';
+import { parseArgs } from './args.js';
 import { createAuditLog } from './audit.js';
 import { SummarizerCache } from './copilot.js';
 import { Root } from './ui/Root.js';
@@ -10,10 +11,17 @@ import { VERSION } from './version.js';
 
 const USAGE = `📰 FOMO — release & update tracker (v${VERSION})
 
-Usage: fomo    open the terminal UI
+Usage: fomo [-p <name>]    open the terminal UI
+
+Options:
+  -p, --profile <name>  open this profile (storage account) instead of the one used last
+                        (or set FOMO_PROFILE)
+  -v, --version         print the version
+  -h, --help            show this help
 
 Everything happens inside the UI:
   f   fetch all sources and group them into topics with Copilot
+  w   switch profile: add, rename and remove storage accounts
   c   config: sources, local settings, link a device, regroup, backup / restore
   t   todos
   b   references: links filed into folders (m files the selected update)
@@ -26,17 +34,18 @@ Audit trail:  ${AUDIT_FILE}
 `;
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  if (args.includes('--version') || args.includes('-v')) {
+  const parsed = parseArgs(process.argv.slice(2));
+  if (parsed.kind === 'version') {
     console.log(VERSION);
     return;
   }
-  if (args.length > 0) {
-    const help = args.includes('--help') || args.includes('-h');
-    (help ? console.log : console.error)(
-      help ? USAGE : `fomo has no subcommands any more; run \`fomo\` and use the UI.\n\n${USAGE}`,
-    );
-    if (!help) process.exitCode = 1;
+  if (parsed.kind === 'help') {
+    console.log(USAGE);
+    return;
+  }
+  if (parsed.kind === 'error') {
+    console.error(`${parsed.message}\n\n${USAGE}`);
+    process.exitCode = 1;
     return;
   }
 
@@ -47,13 +56,15 @@ async function main(): Promise<void> {
   const summarizers = new SummarizerCache();
   let restoreScreen: (() => void) | undefined;
   try {
-    // Inside the try so startup failures (e.g. a malformed config.json) are audited too.
-    const config = loadConfig();
+    // Inside the try so startup failures (e.g. a malformed config.json or an unknown profile) are audited too.
+    const profile = selectProfile(parsed.profile ?? process.env.FOMO_PROFILE);
+    const config = loadConfig(profile);
     restoreScreen = enterFullScreen(LOG_FILE, (text) => audit.error('console', text));
     // Console output goes to LOG_FILE (see enterFullScreen); Ink's console patch would print it over the UI.
-    const { waitUntilExit } = render(createElement(Root, { initialConfig: config, summarizers, audit, auditFile: AUDIT_FILE }), {
-      patchConsole: false,
-    });
+    const { waitUntilExit } = render(
+      createElement(Root, { initialProfile: profile, initialConfig: config, summarizers, audit, auditFile: AUDIT_FILE }),
+      { patchConsole: false },
+    );
     await waitUntilExit();
     audit.log('app', 'quit');
   } catch (err) {

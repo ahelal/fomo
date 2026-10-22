@@ -25,6 +25,7 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
   - [Keys](#keys)
   - [Config Screen](#config-screen)
   - [Backup & Restore](#backup--restore)
+  - [Profiles (several storage accounts)](#profiles-several-storage-accounts)
 - [Sources](#sources)
 - [Security](#security)
 - [Environment Variables](#environment-variables)
@@ -63,7 +64,8 @@ packages/
 - **No compute in Azure.** Everything lives in one Storage Account: Table Storage for data and the static website for the web app.
 - **Fetch and digest run in the TUI** (`fomo`, then `f`) on your machine, using your GitHub Copilot subscription.
 - **The web app is static.** It reads and writes Table Storage from the browser with a SAS token handed over by the TUI's **Link a device** action (magic link / QR code).
-- **No command-line arguments.** `fomo` opens the TUI; everything else (setup, config, links, backups) is done from inside it.
+- **One storage account per profile.** To keep feeds apart (say work and private), give each its own account and switch with `w`; see [Profiles](#profiles-several-storage-accounts).
+- **One command-line option.** `fomo` opens the TUI (`-p <profile>` picks the profile to open); everything else (setup, config, links, backups) is done from inside it.
 
 ---
 
@@ -196,7 +198,7 @@ The first time, `fomo` asks for the storage connection string. Get it with:
 az storage account show-connection-string -g fomo -n <account> -o tsv
 ```
 
-Paste it and press `Enter`; FOMO checks the connection and saves it to `~/.fomo/config.json`.
+Paste it and press `Enter`; FOMO checks the connection and saves it to `~/.fomo/config.json`. For a second account (work and private, say), see [Profiles](#profiles-several-storage-accounts).
 Then press `c` and set **Web app URL** (printed by `deploy.sh`, e.g. `https://<account>.z1.web.core.windows.net/`).
 
 The digest needs GitHub Copilot. If you use the Copilot CLI, you're already signed in; otherwise export `COPILOT_GITHUB_TOKEN`.
@@ -238,7 +240,8 @@ az storage cors add --services t --origins http://localhost:5173 http://localhos
 # Web app dev server
 pnpm --filter @fomo/web dev
 
-# TUI against Azurite: paste UseDevelopmentStorage=true at setup (or set it under c → Connection string),
+# TUI against Azurite: paste UseDevelopmentStorage=true at setup (or set it under c → Connection string;
+# w, then a, adds it as a profile of its own, apart from your real accounts),
 # set Web app URL to http://localhost:5173/, press f, then c → Link a device to connect the dev server.
 fomo
 ```
@@ -292,7 +295,7 @@ Post summaries made in the TUI (`g`) show at the top of the detail pane.
 
 ## Using the TUI
 
-Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: `fomo --help` and `fomo --version` are the only flags.
+Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands. The flags are `-p`/`--profile <name>` (open that [profile](#profiles-several-storage-accounts)), `-v`/`--version` and `-h`/`--help`.
 
 ### Keys
 
@@ -315,6 +318,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `f`             | Fetch latest updates + Copilot digest     |
 | `z` twice       | Regroup all topics with Copilot (`Esc` after the first `z` cancels) |
 | `c`             | Config: sources, link a device, backup / restore, local settings |
+| `w`             | [Profiles](#profiles-several-storage-accounts): switch, add, rename or remove a storage account (also in Config, Todos and Bookmarks) |
 | `5`             | [Bookmarks](#bookmarks): links filed into folders (`5` again closes) |
 | `6`             | Todos (`a` add, `Enter` cycle status, `d` delete, `6` again closes) |
 | `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
@@ -338,14 +342,16 @@ Fetch errors and Copilot runtime logs are written to `~/.fomo/fomo.log` instead 
 
 #### Audit trail
 
-Every action and every error is recorded in `~/.fomo/audit.log`, one JSON object per line (`ts`, `level`: `info` or `error`, `action`, `detail`). This covers:
+Every action and every error is recorded in `~/.fomo/audit.log`, one JSON object per line (`ts`, `level`: `info` or `error`, `action`, `detail`, and `profile` once there is more than one [profile](#profiles-several-storage-accounts)). This covers:
 
 - **Runs:** manual and automatic fetches (including skipped runs and each failed source), Copilot digests and regroups (each failed Copilot call), summaries, backups and restores.
 - **Reading:** read / unread / save changes (with the update title), opening links, views, searches and source filters.
-- **Settings, todos and references:** todos, references, source and config changes, linking a device and setup.
+- **Settings, todos and references:** todos, references, source and config changes, profile switches, additions, renames and removals, linking a device and setup.
 - **Errors:** storage errors, `console.error` output and crashes.
 
 Press `a` to browse it, newest first. Use `↑`/`↓` to move (the full message of the selected entry shows below the list), `e` to show errors only and `Esc` to close. The view updates while it's open.
+
+With several profiles, the list tags each entry with the profile it happened in (`[work]`).
 
 Connection-string keys and SAS signatures are masked, and the device link itself is never recorded. When the file reaches 1 MB it moves to `audit.log.1`, so at most about 2 MB is kept.
 
@@ -356,22 +362,46 @@ Press `c`. The bottom line shows the keys for the selected row. Each section hea
 | Section | Row | Keys |
 |---------|-----|------|
 | **Actions** | Link a device | `Enter`: magic link + QR code for the web app (`o` open, `y` copy) |
+| | Switch profile | `Enter`: open the [profile](#profiles-several-storage-accounts) list (same as `w`) |
 | | Show web app QR | `Enter`: QR code of the plain web app URL (no access token) to open it on your phone · `o` opens it in the browser |
 | | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread and pending update |
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
 | **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed, GitHub repo or YouTube channel; **Restore removed** brings back removed built-ins |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
-| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (minutes), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (Auto-fetch takes 5–1440 minutes or `off`; Group after fetch toggles; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. |
+| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (minutes), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (Auto-fetch takes 5–1440 minutes or `off`; Group after fetch toggles; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. With several [profiles](#profiles-several-storage-accounts) the section title names the one being edited; every setting here belongs to it. |
 
 ### Backup & Restore
 
 **Back up updates** writes every update from Table Storage to `fomo-backup-<timestamp>.json` in the backup folder
-(default `~/.fomo/backups`, change it under **Backup folder**).
+(default `~/.fomo/backups`, or `~/.fomo/backups/<profile>` for every [profile](#profiles-several-storage-accounts) except `default`; change it under **Backup folder**).
 
 **Restore from backup** lists the `.json` files in the backup folder, newest first. Pick one and press `Enter` twice.
 Entities are upserted, so this is safe for both fresh and incremental restores; nothing is deleted.
 
 The backup format is `{ version: 1, exportedAt, count, entities: [...] }`.
+
+### Profiles (several storage accounts)
+
+A profile is one storage account plus the local settings that go with it (Copilot account, interests, backup folder, …). Keep feeds apart by giving each its own account, for example **work** and **private**: each has its own updates, topics, todos and bookmarks, and nothing from one shows up in the other. First-run setup creates the `default` profile.
+
+Press `w` (in the main list, Config, Todos or Bookmarks, or **Config → Switch profile**) to open the list. With two or more profiles the status bar shows `[w] <name>`, and the config screen and audit trail name the profile too.
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓`, `j`/`k` | Move (`Shift`+`↑`/`↓` jumps 5 rows, 10 on a tall screen) |
+| `Enter` | Switch to the profile; FOMO opens it again next time |
+| `a` | Add: type a name, then paste its connection string. FOMO checks it, saves the profile and switches to it. When the check fails (storage unreachable, say), `Enter` again saves it anyway |
+| `e` | Rename (the profile keeps its settings and backups) |
+| `x` | Remove (`x`, `y` or `Enter` confirms; any other key cancels) |
+| `Esc` / `w` | Close |
+
+- **Start on a profile:** `fomo -p work`, or `FOMO_PROFILE=work fomo`. This applies to that run only; the profile you switch to inside the app is the one `fomo` opens when you give none.
+- **Names:** 1–32 letters, digits, `.`, `_` or `-`, starting with a letter or digit; unique ignoring case (a profile's name is also its backup folder).
+- **Switching or adding** while a fetch, digest or restore is running is refused until it finishes. A profile without a connection string can't be switched to.
+- **Removing** only forgets the profile in `config.json`. The storage account, its data and its backup files are not touched. You can't remove the profile in use or the last one.
+- **Web app:** one account per install. Each storage account has its own web app URL, so set **Web app URL** in every profile, use **Link a device** in the profile you want on that device, and install one PWA per account.
+- **Config file:** `~/.fomo/config.json` becomes `{ "activeProfile": …, "profiles": { … } }` the first time you save in a version with profiles; an existing file becomes the `default` profile. An older `fomo` doesn't know this format and would overwrite it, so keep a copy before going back to one.
+- **Environment variables:** `FOMO_WEB_URL`, `FOMO_COPILOT_MODEL`, `FOMO_INTERESTS` and `FOMO_GROUPING_HINTS` override every profile. `AZURE_STORAGE_CONNECTION_STRING` is only a fallback for a profile whose config has no connection string.
 
 ---
 
@@ -420,7 +450,7 @@ See [EXTENDING.md](EXTENDING.md) for the spec fields and the shared helpers for 
 
 ## Security
 
-- **TUI:** uses the storage connection string (account key). Keep `~/.fomo/config.json` private (it is created with mode `600`).
+- **TUI:** uses the storage connection string (account key). Keep `~/.fomo/config.json` private (it is created with mode `600`); with several [profiles](#profiles-several-storage-accounts) it holds the key of each account.
 - **Web app:** uses an **account SAS token** limited to the Table service and entity operations (`ss=t`, `srt=o`, `sp=raud`), HTTPS only, and valid for **Link valid (days)** (default 365).
   - It can read and update your FOMO tables, but it cannot create or delete tables or touch blobs.
   - It is delivered in the URL fragment, so it never reaches a web server or logs, and it is stored in the browser's `localStorage`.
@@ -428,7 +458,7 @@ See [EXTENDING.md](EXTENDING.md) for the spec fields and the shared helpers for 
   ```bash
   az storage account keys renew -g fomo -n <account> --key key1
   ```
-  Then set the new connection string in the TUI (`c` → **Connection string**) and link your devices again.
+  Then set the new connection string in the TUI (switch to that account's profile, then `c` → **Connection string**) and link your devices again.
 - **CORS:** Table Storage only accepts browser calls from the static website origin (and localhost dev ports). Add custom domains with the `extraCorsOrigins` Bicep parameter.
 - The static website itself is public, but it contains no data.
 
@@ -436,15 +466,17 @@ See [EXTENDING.md](EXTENDING.md) for the spec fields and the shared helpers for 
 
 ## Environment Variables
 
-All are optional. The TUI config screen (`c` → **This computer**) stores the same values in `~/.fomo/config.json`.
+All are optional. The TUI config screen (`c` → **This computer**) stores the same values in `~/.fomo/config.json`, per [profile](#profiles-several-storage-accounts).
 
 | Variable                          | Description                                                  |
 |-----------------------------------|--------------------------------------------------------------|
-| `AZURE_STORAGE_CONNECTION_STRING` | Connection string (fallback when the config file has none)   |
-| `FOMO_WEB_URL`                    | Web app URL for **Link a device** (overrides config)         |
-| `FOMO_COPILOT_MODEL`              | Copilot model for the digest (overrides config)              |
-| `FOMO_INTERESTS`                  | Interests note for digest importance (overrides config)      |
-| `FOMO_GROUPING_HINTS`             | Grouping hints for the digest (overrides config)             |
+| `AZURE_STORAGE_CONNECTION_STRING` | Connection string (fallback for a profile whose config has none) |
+| `FOMO_PROFILE`                    | Profile to open when `-p`/`--profile` isn't given (default: the one used last) |
+| `FOMO_CONFIG_DIR`                 | Folder for the config file, logs, audit trail and backups (default `~/.fomo`) |
+| `FOMO_WEB_URL`                    | Web app URL for **Link a device** (overrides config, every profile) |
+| `FOMO_COPILOT_MODEL`              | Copilot model for the digest (overrides config, every profile) |
+| `FOMO_INTERESTS`                  | Interests note for digest importance (overrides config, every profile) |
+| `FOMO_GROUPING_HINTS`             | Grouping hints for the digest (overrides config, every profile) |
 | `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` | Token for the Copilot SDK when **Copilot account** is Automatic (default: logged-in Copilot CLI user or gh's active account) |
 
 ---

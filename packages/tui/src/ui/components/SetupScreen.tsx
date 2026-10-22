@@ -4,6 +4,8 @@ import { CONFIG_FILE, connectionStringProblem, maskConnectionString, tildify } f
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 
 interface Props {
+  /** Profile being set up; given only when there is more than one, so the screen says which. */
+  profile?: string;
   /** Why the saved connection string can't be used, if it can't. */
   error?: string;
   /** Check and save the connection string; resolves to an error message on failure. */
@@ -11,7 +13,7 @@ interface Props {
 }
 
 /** First-run screen: asks for the Azure Storage connection string. */
-export function SetupScreen({ error, onSubmit }: Props) {
+export function SetupScreen({ profile, error, onSubmit }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const [buffer, setBuffer] = useState('');
@@ -47,7 +49,7 @@ export function SetupScreen({ error, onSubmit }: Props) {
 
   return (
     <Box flexDirection="column" height={rows} width={columns} paddingX={2} paddingY={1}>
-      <Text color="#f0f6fc" bold>{'📰 FOMO — first-time setup'}</Text>
+      <Text color="#f0f6fc" bold>{profile ? `📰 FOMO — set up profile “${profile}”` : '📰 FOMO — first-time setup'}</Text>
       <Box height={1} />
       <Text color="#c9d1d9">Paste the connection string of your FOMO storage account:</Text>
       <Text color="#8b949e">{'  az storage account show-connection-string -g fomo -n <account> -o tsv'}</Text>

@@ -6,13 +6,14 @@ import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSet
 import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, sortTodos, TODO_SORTS, TOPIC_SORTS, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
-import { AUDIT_FILE, autoFetchInterval, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
+import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, maskConnectionString, readConfigFile, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
 import { AuditView } from './components/AuditView.js';
 import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
+import { ProfilePicker } from './components/ProfilePicker.js';
 import { SourceDetailsPane, detailsFields, type SourceDetailsState } from './components/SourceDetailsPane.js';
 import { LinkOverlay, type LinkView } from './components/LinkOverlay.js';
 import { RestorePicker, type BackupFile } from './components/RestorePicker.js';
@@ -30,6 +31,7 @@ import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/Setti
 import { TodosView, type TodoFormField } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
 import { editText, useReferences } from './hooks/useReferences.js';
+import { useProfilePicker, type ProfileControls } from './hooks/useProfilePicker.js';
 import { useDuplicates } from './hooks/useDuplicates.js';
 
 type FilterStatus = Status | 'all' | 'saved';
@@ -70,6 +72,10 @@ interface Props {
   auditFile?: string;
   /** gh CLI accounts offered for Config → Copilot account. */
   listAccounts?(): Promise<GhAccount[]>;
+  /** Storage-account profiles (`w`); without it the app has the single `default` profile and no switcher. */
+  profiles?: ProfileControls;
+  /** Shown once on opening: what the profile switch that replaced the previous app did. */
+  notice?: string;
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -108,10 +114,17 @@ export function refreshMessage(previous: Update, update: Update): string {
 const STATUSBAR_H = 2; // content + border line
 const FILTERBAR_H = 1;
 
-export function App({ service, config, onConfigChange, digest, summarize, suggestReference, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts }: Props) {
+export function App({ service, config, onConfigChange, digest, summarize, suggestReference, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts, profiles, notice }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const audit = useMemo(() => auditProp ?? createMemoryAuditLog(), [auditProp]);
+  const profile = profiles?.active ?? DEFAULT_PROFILE;
+  /** Named in the status bar and the config screen only once there is something to tell apart. */
+  const shownProfile = profiles && profiles.profiles.length > 1 ? profile : undefined;
+  /** What the profile's config file stores, without environment overrides: tells which values come from environment variables. */
+  const configFile = useMemo<LocalConfig>(() => {
+    try { return readConfigFile(profile); } catch { return {}; }
+  }, [profile, config]);
 
   const [updates, setUpdates] = useState<Update[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -144,11 +157,11 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const settingsRows = useMemo(() => {
     const terms = searchTerms(settingsSearch);
     const matches = terms.length === 0 ? undefined : (row: SettingsRow) => {
-      const text = settingsRowText(row, config, (id) => appSettings.sourceLabels[id] ?? '').toLowerCase();
+      const text = settingsRowText(row, config, configFile, profile, (id) => appSettings.sourceLabels[id] ?? '').toLowerCase();
       return terms.every((t) => text.includes(t));
     };
-    return buildSettingsRows(sources, collapsedSections, matches, removedCount, retired);
-  }, [sources, collapsedSections, settingsSearch, config, appSettings.sourceLabels, removedCount, retired]);
+    return buildSettingsRows(sources, collapsedSections, matches, removedCount, retired, shownProfile);
+  }, [sources, collapsedSections, settingsSearch, config, configFile, profile, shownProfile, appSettings.sourceLabels, removedCount, retired]);
 
   /** Collapse or expand a config section; the focus stays on its header. */
   const setSectionCollapsed = useCallback((header: string, collapsed: boolean) => {
@@ -306,6 +319,9 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     clearTimeout(messageTimer.current);
     messageTimer.current = setTimeout(() => setMessage(undefined), ms);
   }, []);
+  useEffect(() => {
+    if (notice) showMessage(notice);
+  }, [notice, showMessage]);
 
   const refs = useReferences({
     service,
@@ -429,6 +445,13 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     setDigesting(false);
   }, []);
 
+  const profilePicker = useProfilePicker({
+    controls: profiles,
+    busy: () => busyRef.current,
+    notify: showMessage,
+    jump: jumpStep(rows),
+  });
+
   /** Record a digest run and each of its errors. */
   const logDigest = useCallback((action: string, result: DigestResult) => {
     audit.log(action, `grouped ${result.processed} update(s): ${result.created} new topic(s), ${result.updated} updated, ${result.remaining} left${result.errors.length ? `, ${result.errors.length} error(s)` : ''}`);
@@ -531,7 +554,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   /** When `z` asked to confirm a regroup (0 = not waiting for the second `z`). */
   const regroupArmedAt = useRef(0);
 
-  const backupDir = config.backupDir ?? DEFAULT_BACKUP_DIR;
+  const backupDir = config.backupDir ?? defaultBackupDir(profile);
 
   const doBackup = useCallback(async () => {
     showMessage('Backing up updates…', 600_000);
@@ -561,11 +584,13 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
       names = [];
     }
-    const files = await Promise.all(names.map(async (name) => {
+    // A profile named like a backup file (“x.json”) has a folder here; only files are backups.
+    const found = await Promise.all(names.map(async (name) => {
       const path = join(backupDir, name);
       const s = await stat(path);
-      return { name, path, size: s.size, mtime: s.mtime };
+      return s.isFile() ? { name, path, size: s.size, mtime: s.mtime } : undefined;
     }));
+    const files = found.filter((f): f is BackupFile => f !== undefined);
     if (files.length === 0) {
       showMessage(`No backups in ${tildify(backupDir)} — use “Back up updates” first`, 5000);
       return;
@@ -1092,7 +1117,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         showMessage(`⚠ Could not save: ${err}`, 6000);
         return;
       }
-      const env = envSource(row.field);
+      // Read back what was just stored: the connection string in the file wins over the environment variable.
+      const env = envSource(row.field, readConfigFile(profile));
       audit.log('config', `${describeConfig(parsed.patch)}${env ? ` (overridden by ${env})` : ''}`);
       showMessage(env ? `✓ Saved, but ${env} is set and takes precedence` : `✓ Saved ${row.label.toLowerCase()}`, env ? 6000 : 2500);
     };
@@ -1114,7 +1140,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       return;
     }
     save();
-  }, [service, appSettings, addDraft, doFetch, onConfigChange, showMessage, audit]);
+  }, [service, appSettings, addDraft, doFetch, onConfigChange, showMessage, audit, profile]);
 
   /** Save settings shared with the web app; `what` describes the change for the audit trail. */
   const updateRemoteSettings = useCallback((patch: Partial<AppSettings>, action: string, what: string) => {
@@ -1174,7 +1200,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     // Shortcuts ignore case (Shift+b does what b does); typed text keeps `raw`.
     const input = shortcutKey(raw);
     // ── Quit from any screen (but not while typing) ──
-    if (input === 'q' && !editingKey && sourceDetails?.editing === undefined && !todosAddMode && !refs.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
+    if (input === 'q' && !editingKey && sourceDetails?.editing === undefined && !todosAddMode && !refs.typing && !profilePicker.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
 
     // ── Search prompt (opened with /) ──
     if (searchDraft !== undefined) {
@@ -1309,6 +1335,12 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       return;
     }
 
+    // ── Profile picker (w, or Config → Switch profile) ──
+    if (profilePicker.active) {
+      profilePicker.handleInput(raw, key);
+      return;
+    }
+
     // ── Source details popup (Config → ↵ on a source) ──
     if (sourceDetails) {
       const d = sourceDetails;
@@ -1406,6 +1438,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         return;
       }
       if (key.tab && !refs.typing) { cycleView(key.shift ? -1 : 1); return; }
+      if (input === 'w' && !refs.typing) { profilePicker.open(); return; }
       if (input === '6' && !refs.typing) {
         refs.close();
         setShowTodos(true);
@@ -1477,6 +1510,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
 
       // List mode inside todos view
       if (key.tab) { cycleView(key.shift ? -1 : 1); return; }
+      if (input === 'w') { profilePicker.open(); return; }
       if (key.escape || key.backspace || input === '6') {
         setShowTodos(false);
         return;
@@ -1570,6 +1604,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       if (key.escape && confirmKey) { setConfirmKey(undefined); return; }
       if (key.escape && settingsSearch) { setSettingsSearch(''); setSettingsFocusIndex(firstFocusable(buildSettingsRows(sources, collapsedSections))); return; }
       if (input === '/') { setSettingsSearchTyping(true); setConfirmKey(undefined); return; }
+      if (input === 'w') { setConfirmKey(undefined); profilePicker.open(); return; }
       if (key.escape || key.backspace || key.delete || input === 'c') {
         setShowSettings(false);
         setConfirmKey(undefined);
@@ -1706,7 +1741,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           void openAccountPicker();
           return;
         }
-        setEditBuffer(editStartValue(row.field));
+        setEditBuffer(editStartValue(row.field, configFile));
         setEditingKey(row.key);
         return;
       }
@@ -1721,6 +1756,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           case 'webapp': void doWebAppQr(); break;
           case 'backup': void doBackup(); break;
           case 'restore': void openRestore(); break;
+          case 'profiles': profilePicker.open(); break;
           case 'regroup':
             if (confirmKey !== row.key) { setConfirmKey(row.key); break; }
             setConfirmKey(undefined);
@@ -1802,6 +1838,12 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       setShowSettings(true);
       setSettingsFocusIndex(firstFocusable(settingsRows));
       setConfirmKey(undefined);
+      return;
+    }
+
+    // Switch profile (storage account)
+    if (input === 'w') {
+      profilePicker.open();
       return;
     }
 
@@ -2007,7 +2049,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const availableH = rows - chrome;
   const selectedUpdate = updates[selectedIndex];
   const statusBar = (
-    <StatusBar stats={stats} loading={loading} message={message} activity={activity} fetchInfo={fetchInfo} columns={columns} />
+    <StatusBar stats={stats} loading={loading} message={message} activity={activity} fetchInfo={fetchInfo} columns={columns} profile={shownProfile} />
   );
   const searchMatches = grouped
     ? digestEntries.reduce((n, e) => n + e.items.length, 0)
@@ -2209,6 +2251,16 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     );
   }
 
+  if (profilePicker.view) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        {statusBar}
+        {filterBar}
+        <ProfilePicker {...profilePicker.view} height={availableH} columns={columns} />
+      </Box>
+    );
+  }
+
   if (accountPicker) {
     return (
       <Box flexDirection="column" height={rows}>
@@ -2270,6 +2322,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           rows={settingsRows}
           settings={appSettings}
           config={config}
+          file={configFile}
+          profile={profile}
           stats={stats}
           lastFetch={lastFetch}
           focusIndex={settingsFocusIndex}

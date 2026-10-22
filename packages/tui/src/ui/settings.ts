@@ -5,22 +5,22 @@ import {
   CONFIG_FILE,
   connectionStringProblem,
   DEFAULT_AUTO_FETCH_MINUTES,
-  DEFAULT_BACKUP_DIR,
   DEFAULT_DIGEST_MAX_ITEMS,
   DEFAULT_LINK_DAYS,
+  DEFAULT_PROFILE,
+  defaultBackupDir,
   envSource,
   isAutoFetchMinutes,
   MAX_AUTO_FETCH_MINUTES,
   MIN_AUTO_FETCH_MINUTES,
   maskConnectionString,
-  readConfigFile,
   tildify,
   untildify,
   type LocalConfig,
 } from '../config.js';
 
 export type ConfigField = keyof LocalConfig;
-export type ActionId = 'link' | 'webapp' | 'regroup' | 'backup' | 'restore';
+export type ActionId = 'link' | 'webapp' | 'regroup' | 'backup' | 'restore' | 'profiles';
 
 export type SettingsRow =
   | { kind: 'header'; key: string; label: string; collapsed: boolean; count: number }
@@ -37,6 +37,7 @@ const ACTIONS: { action: ActionId; label: string; hint: string }[] = [
   { action: 'regroup', label: 'Regroup all topics', hint: 'rerun Copilot on every unread and saved update (takes a few minutes)' },
   { action: 'backup', label: 'Back up updates', hint: 'save all updates as JSON in the backup folder' },
   { action: 'restore', label: 'Restore from backup', hint: 'pick a backup file from the backup folder' },
+  { action: 'profiles', label: 'Switch profile', hint: 'another storage account, or add one · w from anywhere' },
 ];
 
 const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
@@ -70,6 +71,8 @@ export function buildSettingsRows(
   removedSources = 0,
   /** Removed sources whose updates are still stored, shown greyed out after “Add source”. */
   retired: SourceInfo[] = [],
+  /** Profile in use; named in the local section's title when given (only when there is more than one). */
+  profile?: string,
 ): SettingsRow[] {
   const sourceRows: SettingsRow[] = [
     ...sources.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source })),
@@ -91,7 +94,7 @@ export function buildSettingsRows(
     ...section('h-actions', 'Actions', ACTIONS.map((a) => ({ kind: 'action' as const, key: `a-${a.action}`, ...a }))),
     ...section('h-sources', 'Sources · shared with the web app', sourceRows),
     ...section('h-display', 'Display · shared with the web app', [{ kind: 'preview', key: 'preview' }]),
-    ...section('h-local', `This computer · ${tildify(CONFIG_FILE)}`, CONFIG_FIELDS.map((f) => ({ kind: 'config' as const, key: `c-${f.field}`, ...f }))),
+    ...section('h-local', `This computer${profile ? ` · profile ${profile}` : ''} · ${tildify(CONFIG_FILE)}`, CONFIG_FIELDS.map((f) => ({ kind: 'config' as const, key: `c-${f.field}`, ...f }))),
   ];
 }
 
@@ -128,11 +131,12 @@ export function automaticAccount(): string {
   return tokenEnv ? `token in ${tokenEnv}` : 'gh’s active account';
 }
 
-/** What the config screen shows for a local setting. */
+/** What the config screen shows for a local setting. `file` is the profile's stored config. */
 export function configDisplay(
   config: LocalConfig,
   field: ConfigField,
-  file: LocalConfig = readConfigFile(),
+  file: LocalConfig,
+  profile: string = DEFAULT_PROFILE,
 ): { value: string; muted: boolean; env?: string } {
   const env = envSource(field, file);
   const muted = (value: string) => ({ value, muted: true, env });
@@ -163,7 +167,7 @@ export function configDisplay(
     case 'linkDays':
       return config.linkDays ? { value: String(config.linkDays), muted: false } : muted(`${DEFAULT_LINK_DAYS} (default)`);
     case 'backupDir':
-      return config.backupDir ? { value: tildify(config.backupDir), muted: false } : muted(`${tildify(DEFAULT_BACKUP_DIR)} (default)`);
+      return config.backupDir ? { value: tildify(config.backupDir), muted: false } : muted(`${tildify(defaultBackupDir(profile))} (default)`);
   }
 }
 
@@ -179,7 +183,6 @@ export type PickerField = (typeof PICKER_FIELDS)[number];
 export const isPickerField = (field: ConfigField): field is PickerField =>
   (PICKER_FIELDS as readonly ConfigField[]).includes(field);
 
-/** Starting text when editing a field. The connection string starts empty so the key is never shown. */
 /** Steps of adding a source: what is typed, and the footer prompt. */
 export type AddSourceStep = 'url' | 'name' | 'include';
 export interface AddSourceDraft { step: AddSourceStep; url: string; name: string }
@@ -190,13 +193,13 @@ export const ADD_SOURCE_PROMPTS: Record<AddSourceStep, string> = {
   include: 'keywords to keep, as a regex, e.g. copilot|agents   (empty keeps everything)',
 };
 
-export function editStartValue(field: ConfigField): string {
+/** Starting text when editing a field, from the profile's stored config `file`. The connection string starts empty so the key is never shown. */
+export function editStartValue(field: ConfigField, file: LocalConfig): string {
   if (field === 'connectionString' || isToggleField(field)) return '';
   if (field === 'autoFetch') {
-    const file = readConfigFile();
     return file.autoFetch === false ? 'off' : file.autoFetchMinutes ? String(file.autoFetchMinutes) : '';
   }
-  const value = readConfigFile()[field];
+  const value = file[field];
   if (value === undefined) return '';
   return field === 'backupDir' ? tildify(String(value)) : String(value);
 }
@@ -240,8 +243,14 @@ export function parseConfigEdit(field: ConfigField, text: string): { patch: Part
   }
 }
 
-/** The text of a row that `/` searches. `sourceLabel` gives a source's custom label. */
-export function settingsRowText(row: SettingsRow, config: LocalConfig, sourceLabel: (id: string) => string = () => ''): string {
+/** The text of a row that `/` searches. `file` and `profile` are the profile's stored config and name; `sourceLabel` gives a source's custom label. */
+export function settingsRowText(
+  row: SettingsRow,
+  config: LocalConfig,
+  file: LocalConfig,
+  profile: string,
+  sourceLabel: (id: string) => string = () => '',
+): string {
   switch (row.kind) {
     case 'header': return row.label;
     case 'action': return `${row.label} ${row.hint}`;
@@ -249,7 +258,7 @@ export function settingsRowText(row: SettingsRow, config: LocalConfig, sourceLab
     case 'add-source': return 'Add source feed rss atom github releases youtube';
     case 'restore-sources': return 'Restore removed sources';
     case 'preview': return 'Preview position right bottom off';
-    case 'config': return `${row.label} ${row.field} ${configDisplay(config, row.field).value}`;
+    case 'config': return `${row.label} ${row.field} ${configDisplay(config, row.field, file, profile).value}`;
   }
 }
 
@@ -257,7 +266,9 @@ export function settingsRowText(row: SettingsRow, config: LocalConfig, sourceLab
 export function rowHint(row: SettingsRow | undefined): string {
   switch (row?.kind) {
     case 'header': return row.collapsed ? '↵/→ expand' : '↵/← collapse';
-    case 'action': return row.action === 'webapp' ? '↵ show QR   o open in browser' : '↵ run';
+    case 'action':
+      if (row.action === 'webapp') return '↵ show QR   o open in browser';
+      return row.action === 'profiles' ? '↵ open the profile list' : '↵ run';
     case 'source': return row.source.removed
       ? '↵ details   v show its updates   x delete its items (removes it for good)'
       : '↵ details & edit   space on/off   e label   d color   f fetch now   v show its updates   x remove';

@@ -16,6 +16,8 @@ interface Props {
   activity?: Activity;
   /** Last / next fetch times, e.g. `fetched 19:30 · next 19:45`. */
   fetchInfo?: string;
+  /** Profile in use; given only when there is more than one, as a `[w]` switch hint. */
+  profile?: string;
   columns: number;
 }
 
@@ -23,13 +25,15 @@ const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', 
 const SPIN_MS = 120;
 /** Columns the activity label keeps when a message competes for space. */
 const MIN_LABEL = 16;
+/** Columns of the profile name in the bar. */
+const MAX_PROFILE = 16;
 
 function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
 }
 
-export const StatusBar = React.memo(function StatusBar({ stats, loading, message, activity, fetchInfo, columns }: Props) {
+export const StatusBar = React.memo(function StatusBar({ stats, loading, message, activity, fetchInfo, profile, columns }: Props) {
   // Animate while a background job runs, so it's obvious the app is still working.
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -51,7 +55,9 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
   const statsStr = stats
     ? `Total: ${total}  Unread: ${unread}  Read: ${read}  Pending: ${saved}`
     : 'loading…';
-  const leftW = textWidth(brandStr + sep + statsStr);
+  const profileName = profile ? fit(profile, MAX_PROFILE) : '';
+  const profileStr = profileName ? `[w] ${profileName}${sep}` : '';
+  const leftW = textWidth(brandStr + sep + profileStr + statsStr);
   let room = columns - leftW - textWidth(sep + helpStr) - 1;
 
   // Fetch times give way first when the bar is narrow or a job is running.
@@ -78,6 +84,13 @@ export const StatusBar = React.memo(function StatusBar({ stats, loading, message
       <Text backgroundColor={bg} wrap="truncate">
         <Text color="#f0f6fc" bold backgroundColor={bg}>{brandStr}</Text>
         <Text color="#8b949e" backgroundColor={bg}>{sep}</Text>
+        {profileName && (
+          <>
+            <Text color="#58a6ff" bold backgroundColor={bg}>{'[w]'}</Text>
+            <Text color="#d2a8ff" bold backgroundColor={bg}>{` ${profileName}`}</Text>
+            <Text color="#8b949e" backgroundColor={bg}>{sep}</Text>
+          </>
+        )}
         {stats ? (
           <>
             <Text color="#8b949e" backgroundColor={bg}>{'Total: '}</Text>

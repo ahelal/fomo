@@ -5,7 +5,7 @@
 - Main packages:
   - `packages/core/`: shared types, Azure Table stores, services, scrapers, source registry and the digest engine.
   - `packages/web/`: static React/Vite PWA that talks to Azure Table Storage directly with a SAS token (no server).
-  - `packages/tui/`: Ink TUI (`fomo`, no subcommands); setup, config, fetches, the GitHub Copilot SDK digest, link/backup/restore all live in the UI.
+  - `packages/tui/`: Ink TUI (`fomo`, no subcommands, one flag: `-p <profile>`); setup, config, fetches, the GitHub Copilot SDK digest, link/backup/restore all live in the UI. A **profile** is one storage account plus its local settings: `~/.fomo/config.json` holds all of them (`packages/tui/src/config.ts`), `w` switches (`ui/hooks/useProfilePicker.ts`, `ui/Root.tsx` owns the session). The web stays one account per PWA.
 - Infra/deployment files: `infra/` (storage-only Bicep), `deploy.sh`, `.env.example`.
 
 ## Architecture

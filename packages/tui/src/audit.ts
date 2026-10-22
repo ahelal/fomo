@@ -11,12 +11,16 @@ export interface AuditEntry {
   /** What happened, e.g. `fetch`, `status`, `config`. */
   action: string;
   detail?: string;
+  /** Profile that was open. Only recorded once there is more than one profile. */
+  profile?: string;
 }
 
 /** Records user actions and errors; never throws (auditing must not break the UI). */
 export interface AuditLog {
   log(action: string, detail?: string): void;
   error(action: string, err: unknown): void;
+  /** Stamp the entries that follow with this profile; undefined stops stamping. */
+  setProfile(profile: string | undefined): void;
   /** Newest entries first. */
   recent(limit?: number): AuditEntry[];
   /** Called after each new entry; returns an unsubscribe function. */
@@ -35,9 +39,9 @@ export function redact(text: string): string {
     .replace(/([?&#;]sig=)[^&;\s]+/gi, '$1***');
 }
 
-function entry(level: AuditLevel, action: string, detail?: string): AuditEntry {
+function entry(level: AuditLevel, action: string, detail?: string, profile?: string): AuditEntry {
   const clean = detail === undefined ? undefined : redact(detail).slice(0, MAX_DETAIL);
-  return { ts: new Date().toISOString(), level, action, ...(clean ? { detail: clean } : {}) };
+  return { ts: new Date().toISOString(), level, action, ...(clean ? { detail: clean } : {}), ...(profile ? { profile } : {}) };
 }
 
 function parseLines(text: string): AuditEntry[] {
@@ -69,6 +73,7 @@ function createListeners() {
 export function createAuditLog(file: string, { maxBytes = DEFAULT_AUDIT_MAX_BYTES } = {}): AuditLog {
   const rotated = `${file}.1`;
   const { notify, subscribe } = createListeners();
+  let profile: string | undefined;
   let size = 0;
   try {
     mkdirSync(dirname(file), { recursive: true });
@@ -101,8 +106,9 @@ export function createAuditLog(file: string, { maxBytes = DEFAULT_AUDIT_MAX_BYTE
   };
 
   return {
-    log: (action, detail) => write(entry('info', action, detail)),
-    error: (action, err) => write(entry('error', action, errorText(err))),
+    log: (action, detail) => write(entry('info', action, detail, profile)),
+    error: (action, err) => write(entry('error', action, errorText(err), profile)),
+    setProfile: (name) => { profile = name; },
     recent: (limit = 500) => {
       let entries = read(file);
       if (entries.length < limit) entries = [...read(rotated), ...entries];
@@ -116,11 +122,13 @@ export function createAuditLog(file: string, { maxBytes = DEFAULT_AUDIT_MAX_BYTE
 export function createMemoryAuditLog(): AuditLog & { entries: AuditEntry[] } {
   const entries: AuditEntry[] = [];
   const { notify, subscribe } = createListeners();
+  let profile: string | undefined;
   const add = (e: AuditEntry) => { entries.push(e); notify(); };
   return {
     entries,
-    log: (action, detail) => add(entry('info', action, detail)),
-    error: (action, err) => add(entry('error', action, errorText(err))),
+    log: (action, detail) => add(entry('info', action, detail, profile)),
+    error: (action, err) => add(entry('error', action, errorText(err), profile)),
+    setProfile: (name) => { profile = name; },
     recent: (limit = 500) => entries.slice(-limit).reverse(),
     subscribe,
   };
