@@ -150,7 +150,7 @@ describe('refreshMessage', () => {
   const base = upd('v', 'Video', 'yt', '2026-01-01');
   it('says what the refresh corrected', () => {
     expect(refreshMessage(base, { ...base, readingTimeMinutes: 9, content: 'more' })).toBe('Reading time ~9m · fuller preview');
-    expect(refreshMessage({ ...base, durationSeconds: 60 }, { ...base, durationSeconds: 849 })).toBe('Video length 1:00 → 14:09');
+    expect(refreshMessage({ ...base, durationSeconds: 60 }, { ...base, durationSeconds: 849 })).toBe('Video length 1m → 15m');
     expect(refreshMessage({ ...base, readingTimeMinutes: 3 }, { ...base, readingTimeMinutes: 3 })).toBe('Reading time ~3m (unchanged)');
     expect(refreshMessage(base, base)).toBe('Nothing to correct');
   });

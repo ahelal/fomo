@@ -44,7 +44,7 @@ describe('DetailPane refresh (u)', () => {
 
   it('shows the reading time or the video length', () => {
     expect(pane({ update: { ...POST, readingTimeMinutes: 9 } })).toMatch(/Published 2026-10-01\s+Reading ~9m/);
-    expect(pane({ update: { ...POST, durationSeconds: 849 } })).toMatch(/Length 14:09/);
+    expect(pane({ update: { ...POST, durationSeconds: 849 } })).toMatch(/Length 15m/);
     expect(pane({})).not.toMatch(/Reading ~|Length /);
   });
 
