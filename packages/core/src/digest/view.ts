@@ -96,6 +96,20 @@ export function soloUpdate(entry: DigestEntry): Update | undefined {
   return entry.items.length === 1 ? entry.items[0] : undefined;
 }
 
+/**
+ * The row that shows `updateId`: its topic's own row when the topic has just that update, otherwise its
+ * item row, which only exists while that topic (`expand`) is expanded. Undefined when it is not listed.
+ */
+export function locateUpdate(entries: readonly DigestEntry[], updateId: string): { key: string; expand?: string } | undefined {
+  for (const entry of entries) {
+    if (!entry.items.some((u) => u.id === updateId)) continue;
+    return entry.items.length === 1
+      ? { key: entry.topic.id }
+      : { key: `${entry.topic.id}/${updateId}`, expand: entry.topic.id };
+  }
+  return undefined;
+}
+
 /** Flatten entries into navigable rows; expanded multi-update topics list their items beneath. */
 export function flattenDigest(entries: DigestEntry[], expanded: ReadonlySet<string>): DigestRow[] {
   const rows: DigestRow[] = [];

@@ -1,11 +1,13 @@
-import type { BackupPayload } from './store/tables.js';
+import type { BackupPayload, PageInfo } from './store/tables.js';
 import { makeId } from './store/tables.js';
 import { DuplicateIndex } from './duplicates.js';
 import { mapLimit } from './util.js';
 import { getAllSources, getSource, getSourceIds } from './scraper/registry.js';
+import { estimateReadingTimeMinutes } from './scraper/feed.js';
+import { isYoutubeVideoUrl, videoDuration } from './scraper/youtube.js';
 import { FomoStorageService } from './storage-service.js';
 import { runDigest, type Summarizer, type DigestOptions, type DigestResult } from './digest/run.js';
-import { GIST_MAX_INPUT_CHARS, GIST_MIN_CHARS, gistSource, writeGist } from './digest/gist.js';
+import { GIST_MAX_INPUT_CHARS, GIST_MIN_CHARS, gistSource, mentionsTitle, writeGist } from './digest/gist.js';
 import { REFERENCE_MAX_INPUT_CHARS, suggestReferenceWith } from './digest/reference.js';
 import { excerpt } from './digest/prompt.js';
 import { normalizeReferenceUrl, referenceFolders } from './references.js';
@@ -35,6 +37,15 @@ export interface PostGistResult {
   from?: 'page' | 'preview';
 }
 
+/** What `refreshUpdate` saved: the update before and after, to show what changed. */
+export interface RefreshResult {
+  previous: Update;
+  update: Update;
+}
+
+/** Longest preview `refreshUpdate` keeps from the page (the pane shows less). */
+const REFRESH_PREVIEW_CHARS = 5000;
+
 /**
  * Node-side service for the TUI: storage access plus scraping, AI digest and backup.
  * Requires a connection string (or a SAS) with network access to the sources.
@@ -44,15 +55,34 @@ export class FomoDirectService extends FomoStorageService {
     super(conn);
   }
 
-  async fetchContent(id: string): Promise<Update> {
+  /**
+   * Re-read the post's page to correct what the feed got wrong or left out (`u` in the TUI): a
+   * YouTube video's length, otherwise the reading time and, when the page says more, the preview.
+   * A page that isn't about the post (sign-in wall, rendered by JavaScript) is not used.
+   */
+  async refreshUpdate(id: string): Promise<RefreshResult> {
     await this.ensureInit();
-    const update = await this.store.getUpdate(id);
-    if (!update) throw new Error(`Update not found: ${id}`);
+    const previous = await this.store.getUpdate(id);
+    if (!previous) throw new Error(`Update not found: ${id}`);
 
-    const content = await fetchPageText(update.url);
-    if (!content) throw new Error('Could not extract content');
-
-    return this.store.updateContent(id, content);
+    let info: PageInfo;
+    if (isYoutubeVideoUrl(previous.url)) {
+      const durationSeconds = await videoDuration(previous.url);
+      if (!durationSeconds) throw new Error('Could not read the video length from YouTube');
+      info = { durationSeconds };
+    } else {
+      const text = await fetchPageText(previous.url, Number.MAX_SAFE_INTEGER);
+      if (!text || !mentionsTitle(text, previous.title)) {
+        throw new Error('The page does not show the post (it may need JavaScript or a sign-in)');
+      }
+      const preview = text.slice(0, REFRESH_PREVIEW_CHARS);
+      info = {
+        readingTimeMinutes: estimateReadingTimeMinutes(text),
+        ...(preview.length > previous.content.length ? { content: preview } : {}),
+      };
+    }
+    await this.store.setPageInfo(id, info);
+    return { previous, update: { ...previous, ...info } };
   }
 
   /**
@@ -199,6 +229,7 @@ export class FomoDirectService extends FomoStorageService {
       }),
     );
 
+    this.forgetDuplicates();
     return { added: totalAdded, results };
   }
 
@@ -211,7 +242,11 @@ export class FomoDirectService extends FomoStorageService {
   /** Restore updates from a backup payload into remote table storage. */
   async restore(payload: BackupPayload): Promise<number> {
     await this.ensureInit();
-    return this.store.restore(payload);
+    try {
+      return await this.store.restore(payload);
+    } finally {
+      this.forgetDuplicates();
+    }
   }
 
   // ─── Digest ────────────────────────────────────────────────────────────────

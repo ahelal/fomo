@@ -101,8 +101,21 @@ async function feed(query: string): Promise<string | undefined> {
   return res.text();
 }
 
+/** True for a video page: `youtube.com/watch?v=…`, `/shorts/…`, `/live/…` or `youtu.be/…`. */
+export function isYoutubeVideoUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^(www|m)\./, '');
+    if (host === 'youtu.be') return u.pathname.length > 1;
+    if (host !== 'youtube.com') return false;
+    return u.pathname === '/watch' ? u.searchParams.has('v') : /^\/(shorts|live)\/[\w-]+/.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 /** Read duration metadata from a watch page, stopping once the player metadata is found. */
-async function videoDuration(url: string): Promise<number | undefined> {
+export async function videoDuration(url: string): Promise<number | undefined> {
   const res = await globalThis.fetch(url, {
     headers: { 'User-Agent': USER_AGENT, Cookie: CONSENT },
     signal: AbortSignal.timeout(TIMEOUT_MS),

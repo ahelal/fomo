@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalUrl, DuplicateIndex, titleKey, type DuplicateRow } from '../duplicates.js';
+import { canonicalUrl, DuplicateIndex, nextDuplicate, titleKey, type DuplicateRow } from '../duplicates.js';
+import type { Update } from '../types.js';
 
 describe('canonicalUrl', () => {
   it('ignores scheme, www, fragment, trailing slash and tracking parameters', () => {
@@ -68,5 +69,36 @@ describe('DuplicateIndex', () => {
     const index = new DuplicateIndex([]);
     expect(index.check('a__1', 'https://example.com/x', 'one', '2026-01-01')).toEqual({ kind: 'new' });
     expect(index.check('b__1', 'https://example.com/x#frag', 'one', '2026-01-01')).toEqual({ kind: 'skip', of: 'a__1' });
+  });
+});
+
+describe('nextDuplicate', () => {
+  const u = (id: string, duplicateOf?: string) => ({ id, ...(duplicateOf ? { duplicateOf } : {}) }) as Update;
+  // Listed in this order: a original, x unrelated, b copy of a, y unrelated, c copy of a, z unrelated.
+  const list = [u('a__1'), u('x__1'), u('b__2', 'a__1'), u('y__1'), u('c__3', 'a__1'), u('z__1')];
+
+  it('goes from a copy to its original, and from the original to a copy', () => {
+    expect(nextDuplicate([u('a__1'), u('b__2', 'a__1')], u('b__2', 'a__1'))?.id).toBe('a__1');
+    expect(nextDuplicate([u('a__1'), u('b__2', 'a__1')], u('a__1'))?.id).toBe('b__2');
+  });
+
+  it('cycles through every listed member of the group, wrapping around, and ignores other posts', () => {
+    expect(nextDuplicate(list, list[0]!)?.id).toBe('b__2');
+    expect(nextDuplicate(list, list[2]!)?.id).toBe('c__3');
+    expect(nextDuplicate(list, list[4]!)?.id).toBe('a__1');
+  });
+
+  it('finds the other copies of a group whose original is not listed', () => {
+    expect(nextDuplicate([u('b__2', 'a__1'), u('c__3', 'a__1')], u('b__2', 'a__1'))?.id).toBe('c__3');
+  });
+
+  it('is undefined when nothing else in the list repeats the post', () => {
+    expect(nextDuplicate([u('a__1'), u('x__1')], u('a__1'))).toBeUndefined();
+    expect(nextDuplicate([u('b__2', 'a__1')], u('b__2', 'a__1'))).toBeUndefined();
+    expect(nextDuplicate([], u('a__1'))).toBeUndefined();
+  });
+
+  it('works for an update that is not in the list', () => {
+    expect(nextDuplicate([u('x__1'), u('a__1')], u('b__2', 'a__1'))?.id).toBe('a__1');
   });
 });

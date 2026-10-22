@@ -4,7 +4,7 @@ import { render } from 'ink';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, type DigestEntry, type ListOptions, type Todo, type Update } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
-import { App } from '../src/ui/App.js';
+import { App, refreshMessage } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
 
 type FakeStdin = PassThrough & { isTTY: boolean; setRawMode(on: boolean): void; ref(): void; unref(): void };
@@ -64,7 +64,10 @@ async function renderApp() {
     }),
     getStats: async () => ({ total: 3, byStatus: { unread: 3, read: 0 }, bySource: {}, saved: 0 }),
     setSaved: vi.fn(async (id: string, saved: boolean) => ({ ...UPDATES.find((u) => u.id === id)!, saved })),
-    fetchContent: vi.fn(async (id: string) => ({ ...UPDATES.find((u) => u.id === id)!, content: 'full' })),
+    refreshUpdate: vi.fn(async (id: string) => {
+      const previous = UPDATES.find((u) => u.id === id)!;
+      return { previous, update: { ...previous, readingTimeMinutes: 9, content: 'The whole page text' } };
+    }),
     getUpdate: async (id: string) => UPDATES.find((u) => u.id === id)!,
     listTodos: async () => ({ todos: TODOS }),
   };
@@ -122,20 +125,34 @@ describe('Pending (p)', () => {
   });
 });
 
-describe('fetch full content (u)', () => {
-  it('fetches with u in the detail view; p no longer does', async () => {
-    UPDATES[0]!.content = '';
-    try {
-      const { service, press } = await renderApp();
-      await press('1');
-      await press('\r');
-      await press('p');
-      expect(service.fetchContent).not.toHaveBeenCalled();
-      await press('u');
-      expect(service.fetchContent).toHaveBeenCalledWith('a');
-    } finally {
-      UPDATES[0]!.content = 'body';
-    }
+describe('refresh from the page (u)', () => {
+  it('re-reads the selected update from the list, opens the pane and shows what changed', async () => {
+    const { service, press, frame } = await renderApp();
+    await press('1');
+    await press('p');
+    expect(service.refreshUpdate).not.toHaveBeenCalled();
+    await press('u');
+    expect(service.refreshUpdate).toHaveBeenCalledWith('a');
+    expect(frame()).toContain('✓ Reading time ~9m · fuller preview');
+    expect(frame()).toContain('The whole page text');
+  });
+
+  it('refreshes a single-update topic and reports a failure', async () => {
+    const { service, press, frame } = await renderApp();
+    service.refreshUpdate.mockRejectedValueOnce(new Error('HTTP 403'));
+    await press('u');
+    expect(service.refreshUpdate).toHaveBeenCalledWith('a');
+    expect(frame()).toContain('⚠ Refresh failed: HTTP 403');
+  });
+});
+
+describe('refreshMessage', () => {
+  const base = upd('v', 'Video', 'yt', '2026-01-01');
+  it('says what the refresh corrected', () => {
+    expect(refreshMessage(base, { ...base, readingTimeMinutes: 9, content: 'more' })).toBe('Reading time ~9m · fuller preview');
+    expect(refreshMessage({ ...base, durationSeconds: 60 }, { ...base, durationSeconds: 849 })).toBe('Video length 1:00 → 14:09');
+    expect(refreshMessage({ ...base, readingTimeMinutes: 3 }, { ...base, readingTimeMinutes: 3 })).toBe('Reading time ~3m (unchanged)');
+    expect(refreshMessage(base, base)).toBe('Nothing to correct');
   });
 });
 

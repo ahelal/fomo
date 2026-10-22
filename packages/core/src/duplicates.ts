@@ -5,6 +5,8 @@
  * the same time (kept, but flagged with `duplicateOf`).
  */
 
+import type { Update } from './types.js';
+
 /** Query parameters that only track where a click came from. */
 const TRACKING_PARAM = /^(utm_.*|fbclid|gclid|msclkid|mc_cid|mc_eid|ref_src|wt\.mc_id|ocid)$/i;
 
@@ -40,6 +42,20 @@ export function titleKey(title: string): string | undefined {
   const words = title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
   const key = words.join(' ');
   return words.length >= 4 && key.length >= 20 ? key : undefined;
+}
+
+/**
+ * The update after `current` in `updates` (wrapping around) that repeats the same post, meaning its
+ * original or another copy of it; undefined when none is listed. Repeated calls cycle through the group.
+ */
+export function nextDuplicate(updates: readonly Update[], current: Pick<Update, 'id' | 'duplicateOf'>): Update | undefined {
+  const root = current.duplicateOf ?? current.id;
+  const start = updates.findIndex((u) => u.id === current.id) + 1;
+  for (let i = 0; i < updates.length; i++) {
+    const u = updates[(start + i) % updates.length]!;
+    if (u.id !== current.id && (u.id === root || u.duplicateOf === root)) return u;
+  }
+  return undefined;
 }
 
 /** What duplicate detection needs of a stored update. */

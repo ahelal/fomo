@@ -13,6 +13,8 @@ import {
   soloUpdate,
   shortcutKey,
   jumpStep,
+  nextDuplicate,
+  locateUpdate,
   type Update,
   type Status,
   type PreviewPosition,
@@ -30,6 +32,7 @@ import {
   daysUntilExpiry,
 } from './store/connection.js';
 import { useFomo, canGroup, isGroupedView, isPaneView, type FilterStatus, type GroupableView } from './hooks/useFomo.js';
+import { useDuplicates } from './hooks/useDuplicates.js';
 import { StatusBar } from './components/StatusBar.js';
 import { UpdatesTable } from './components/UpdatesTable.js';
 import { DigestList } from './components/DigestList.js';
@@ -173,6 +176,13 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     }
   }, [detailUpdate, fomo]);
 
+  // The other updates of the viewed post, read again when a refresh changes the total.
+  const duplicates = useDuplicates(
+    service,
+    previewPosition !== 'off' ? detailUpdate?.id : undefined,
+    fomo.stats?.total,
+  );
+
   const withContent = useCallback(
     (u: Update): Update => (u.content ? u : { ...u, content: fomo.content[u.id] ?? '' }),
     [fomo.content],
@@ -310,6 +320,46 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     }
     clearSelection();
   }, [isGrouped, digestRow, clearSelection]);
+
+  // ── Duplicates ──
+
+  /** The updates in this view, which are the ones a duplicate can be jumped to. */
+  const listedUpdates = useMemo(
+    () => (isGrouped ? fomo.digest.flatMap((e) => e.items) : fomo.updates),
+    [isGrouped, fomo.digest, fomo.updates],
+  );
+  const listedIds = useMemo(() => new Set(listedUpdates.map((u) => u.id)), [listedUpdates]);
+
+  /** Select an update of this view, opening its topic when it is inside one; false when it is not listed. */
+  const selectInView = useCallback((id: string): boolean => {
+    if (isGrouped) {
+      const target = locateUpdate(fomo.digest, id);
+      if (!target) return false;
+      if (target.expand) setTopicExpanded(target.expand, true);
+      setDigestKey(target.key);
+      return true;
+    }
+    const update = fomo.updates.find((u) => u.id === id);
+    if (!update) return false;
+    setSelected(update);
+    return true;
+  }, [isGrouped, fomo.digest, fomo.updates, setTopicExpanded]);
+
+  /** From the preview: jump to a duplicate that is in this view. */
+  const jumpTo = useCallback((id: string) => {
+    if (!selectInView(id)) fomo.notify('Not in this view');
+  }, [selectInView, fomo]);
+
+  /** d: select the next update of the same post (its original or a copy of it) that is in this view. */
+  const jumpToDuplicate = useCallback(() => {
+    const current = isGrouped ? rowUpdate(digestRow) : selected;
+    if (!current) {
+      fomo.notify(isGrouped && digestRow ? 'Expand the topic to jump to its duplicate' : 'Nothing selected');
+      return;
+    }
+    const next = nextDuplicate(listedUpdates, current);
+    if (!next || !selectInView(next.id)) fomo.notify('No duplicate in this view');
+  }, [isGrouped, digestRow, selected, listedUpdates, selectInView, fomo]);
 
   // ── List actions ──
 
@@ -479,6 +529,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
       if (key === 's') { fomo.cycleSort(); return; }
 
+      if (key === 'd' && !e.metaKey && !e.ctrlKey && !e.altKey) { jumpToDuplicate(); return; }
+
       if (isGrouped) {
         const idx = digestKey ? digestRows.findIndex((r) => r.key === digestKey) : -1;
         const row = idx >= 0 ? digestRows[idx] : undefined;
@@ -565,7 +617,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     fomo, selected, isGrouped, isSaved, pane, viewHelp, digestRow, refDialog, fileReference, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
     sourcePicker, openSourcePicker, applySourceFilter,
     previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, digestReadAndNext, savedReadAndNext, toggleDigestRead, groupedToggleSaved,
-    digestNextTopic, handleNextUnread, handleReadAndNext, handleSetStatus, handleToggleSaved,
+    digestNextTopic, handleNextUnread, handleReadAndNext, handleSetStatus, handleToggleSaved, jumpToDuplicate,
   ]);
 
   // ── Settings callbacks ──
@@ -654,6 +706,13 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   function renderDetail() {
     if (!showPreview) return null;
+    const duplicateProps = {
+      duplicates,
+      listed: listedIds,
+      onJumpDuplicate: jumpTo,
+      labelOf: sourceName,
+      colorOf: (id: string) => fomo.settings.sourceColors[id],
+    };
     if (isGrouped && digestRow) {
       if (digestTopic) {
         return (
@@ -681,6 +740,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           onOpen={() => openUrl(update.url)}
           onFileReference={() => void fileReference(update)}
           onClose={goBack}
+          {...duplicateProps}
         />
       );
     }
@@ -696,6 +756,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         onOpen={() => selected.url && openUrl(selected.url)}
         onFileReference={() => void fileReference(selected)}
         onClose={() => setSelected(undefined)}
+        {...duplicateProps}
       />
     );
   }

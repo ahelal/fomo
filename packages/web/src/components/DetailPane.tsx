@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Update, Status } from '@fomo/core';
+import { DuplicateLinks } from './DuplicateLinks.js';
 
 interface Props {
   update: Update;
@@ -13,7 +14,18 @@ interface Props {
   /** File the update in References (m). */
   onFileReference?(): void;
   onClose?(): void;
+  /** The other updates of this update's duplicate group, original first; they are listed at the bottom. */
+  duplicates?: readonly Update[];
+  /** Ids of the updates in the current view, which can be jumped to. */
+  listed?: ReadonlySet<string>;
+  onJumpDuplicate?(id: string): void;
+  labelOf?(source: string): string;
+  colorOf?(source: string): string | undefined;
 }
+
+const NO_IDS: ReadonlySet<string> = new Set();
+const sourceId = (source: string) => source;
+const noColor = () => undefined;
 
 function stripHtml(html: string): string {
   return html
@@ -23,7 +35,10 @@ function stripHtml(html: string): string {
     .slice(0, 1000);
 }
 
-export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading, onReadAndNext, onNextUnread, onOpen, onFileReference, onClose }: Props) {
+export function DetailPane({
+  update, onSetStatus, onToggleSaved, contentLoading, onReadAndNext, onNextUnread, onOpen, onFileReference, onClose,
+  duplicates = [], listed = NO_IDS, onJumpDuplicate, labelOf = sourceId, colorOf = noColor,
+}: Props) {
   const hasContent = !!update.content;
   const content = hasContent ? stripHtml(update.content) : '';
 
@@ -127,6 +142,15 @@ export function DetailPane({ update, onSetStatus, onToggleSaved, contentLoading,
           </a>
         </p>
       )}
+
+      <DuplicateLinks
+        source={update.source}
+        duplicates={duplicates}
+        listed={listed}
+        onJump={(id) => onJumpDuplicate?.(id)}
+        labelOf={labelOf}
+        colorOf={colorOf}
+      />
     </div>
   );
 }

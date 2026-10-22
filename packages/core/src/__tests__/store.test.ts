@@ -62,6 +62,48 @@ describe('UpdateStore.insertUpdate', () => {
   });
 });
 
+describe('UpdateStore.setPageInfo', () => {
+  it('merges only the fields given, cutting the preview to the Table Storage limit', async () => {
+    const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+    const store = new UpdateStore(conn as any);
+    const calls: Array<[Record<string, unknown>, string]> = [];
+    (store as any).client = { updateEntity: async (e: Record<string, unknown>, mode: string) => { calls.push([e, mode]); } };
+
+    await store.setPageInfo('yt__r1', { durationSeconds: 849 });
+    await store.setPageInfo('blog__r2', { readingTimeMinutes: 7, content: 'z'.repeat(40_000) });
+    expect(calls[0]).toEqual([{ partitionKey: 'yt', rowKey: 'r1', durationSeconds: 849 }, 'Merge']);
+    expect(calls[1]![0]).toMatchObject({ partitionKey: 'blog', rowKey: 'r2', readingTimeMinutes: 7 });
+    expect(calls[1]![0].content).toHaveLength(MAX_CONTENT_CHARS);
+  });
+});
+
+describe('UpdateStore.listDuplicateCopies', () => {
+  it('reads the flagged updates without content, ignoring rows a store returns without the flag', async () => {
+    const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+    const store = new UpdateStore(conn as any);
+    const queries: Array<{ queryOptions?: { filter?: string; select?: string[] } }> = [];
+    const entity = (rowKey: string, extra: Record<string, unknown> = {}) => ({
+      partitionKey: 'blog', rowKey, title: `T${rowKey}`, url: `https://example.com/${rowKey}`,
+      datePublished: '2026-10-18T00:00:00Z', dateAdded: '2026-10-19T00:00:00Z', status: 'unread', saved: false, ...extra,
+    });
+    (store as any).client = {
+      listEntities: (options: (typeof queries)[number]) => {
+        queries.push(options);
+        return (async function* () {
+          yield entity('1', { duplicateOf: 'azure__9', content: 'ignored' });
+          yield entity('2');
+        })();
+      },
+    };
+
+    const copies = await store.listDuplicateCopies();
+    expect(copies).toEqual([expect.objectContaining({ id: 'blog__1', source: 'blog', duplicateOf: 'azure__9', content: '' })]);
+    expect(queries[0]!.queryOptions!.filter).toBe("duplicateOf gt ''");
+    expect(queries[0]!.queryOptions!.select).toContain('duplicateOf');
+    expect(queries[0]!.queryOptions!.select).not.toContain('content');
+  });
+});
+
 describe('makeId / parseId', () => {
   it('creates a deterministic id from source + url', async () => {
     const id1 = await makeId('github', 'https://example.com/a');

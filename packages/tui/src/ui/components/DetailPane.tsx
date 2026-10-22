@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Update } from '@fomo/core';
+import { formatUpdateTime, type Update } from '@fomo/core';
 import { textWidth } from '../text.js';
 import { DUP_COLOR } from './UpdatesTable.js';
 
@@ -10,9 +10,18 @@ interface Props {
   loading?: boolean;
   /** Copilot is summarising this post (g, or g again to regenerate). */
   summarizing?: boolean;
+  /** The post's page is being re-read (u). */
+  refreshing?: boolean;
   height: number;
   columns: number;
   position?: 'bottom' | 'right';
+  /** The other updates of this one's duplicate group (the original first), also those outside the current view. */
+  duplicates?: Update[];
+  /** Ids of `duplicates` that are listed in the current view, which `d` jumps to. */
+  listed?: ReadonlySet<string>;
+  /** Display name and colour of a source, as in the list. */
+  labelOf?: (source: string) => string;
+  colorOf?: (source: string) => string;
 }
 
 const STATUS_BADGE: Record<string, { label: string; color: string }> = {
@@ -27,6 +36,19 @@ const SOURCE_COLOR: Record<string, string> = {
 };
 
 const GIST_COLOR = '#d2a8ff';
+const ORIGINAL_COLOR = '#3fb950';
+
+/** Most duplicates listed at the bottom; the rest is only counted. */
+const MAX_DUPLICATES = 2;
+
+/** How many of `count` duplicates fit in `room` rows (a divider, two rows each, and a row for the rest), and the rows they take. */
+export function duplicateRows(count: number, room: number): { shown: number; rows: number } {
+  for (let shown = Math.min(count, MAX_DUPLICATES); shown > 0; shown--) {
+    const rows = 1 + 2 * shown + (count > shown ? 1 : 0);
+    if (rows <= room) return { shown, rows };
+  }
+  return { shown: 0, rows: 0 };
+}
 
 /** Rows `text` takes when word-wrapped to `width` columns. */
 function wrappedRows(text: string, width: number): number {
@@ -42,9 +64,22 @@ function wrappedRows(text: string, width: number): number {
   return rows;
 }
 
-export function DetailPane({ update, loading = false, summarizing = false, height, columns, position = 'bottom' }: Props) {
+export function DetailPane({
+  update,
+  loading = false,
+  summarizing = false,
+  refreshing = false,
+  height,
+  columns,
+  position = 'bottom',
+  duplicates = [],
+  listed,
+  labelOf = (source) => source,
+  colorOf = () => '#58a6ff',
+}: Props) {
   const badge = STATUS_BADGE[update.status] ?? { label: '???', color: 'white' };
   const sourceColor = SOURCE_COLOR[update.source] ?? '#58a6ff';
+  const time = formatUpdateTime(update);
 
   const content = update.content
     ? update.content
@@ -56,7 +91,10 @@ export function DetailPane({ update, loading = false, summarizing = false, heigh
   const hasContent = content.length > 0;
 
   // Title, source, status, URL and divider (+ the top divider at the bottom); the rest is the body.
-  const bodyRows = Math.max(1, height - (position === 'bottom' ? 6 : 5));
+  const fixedRows = position === 'bottom' ? 6 : 5;
+  // The duplicates take what is left after a row of preview.
+  const links = duplicateRows(duplicates.length, height - fixedRows - 1);
+  const bodyRows = Math.max(1, height - fixedRows - links.rows);
   const gist = update.gist;
   // The saved summary goes first: its sentence, then as many bullets as fit above a divider and a line of preview.
   const gistWidth = Math.max(columns - 6, 10);
@@ -100,6 +138,12 @@ export function DetailPane({ update, loading = false, summarizing = false, heigh
           <Text color={sourceColor} bold>{update.source}</Text>
           {'   Published '}
           <Text color="#c9d1d9">{update.datePublished.slice(0, 10)}</Text>
+          {time && (
+            <>
+              {update.durationSeconds ? '   Length ' : '   Reading '}
+              <Text color="#c9d1d9">{time}</Text>
+            </>
+          )}
           {update.duplicateOf && (
             <>
               {'   '}
@@ -116,9 +160,11 @@ export function DetailPane({ update, loading = false, summarizing = false, heigh
         {update.saved && <Text color="#e3b341" bold>{' ⭐'}</Text>}
         {summarizing ? (
           <Text color={GIST_COLOR} wrap="truncate">{'   ⟳ Copilot is summarising…'}</Text>
-        ) : !gist ? (
-          <Text color="#8b949e" dimColor wrap="truncate">{'   g summarise'}</Text>
-        ) : null}
+        ) : refreshing ? (
+          <Text color="#8b949e" wrap="truncate">{'   ⟳ Refreshing from the page…'}</Text>
+        ) : (
+          <Text color="#8b949e" dimColor wrap="truncate">{gist ? '   u refresh' : '   g summarise · u refresh'}</Text>
+        )}
       </Box>
 
       {/* URL */}
@@ -164,7 +210,7 @@ export function DetailPane({ update, loading = false, summarizing = false, heigh
           ) : (
             <Text wrap="wrap" color="#8b949e">
               {'No preview — press '}
-              <Text color="#58a6ff" bold>p</Text>
+              <Text color="#58a6ff" bold>u</Text>
               {gist ? ' to fetch content or ' : ' to fetch content, '}
               {!gist && <Text color="#58a6ff" bold>g</Text>}
               {!gist && ' to summarise or '}
@@ -173,6 +219,47 @@ export function DetailPane({ update, loading = false, summarizing = false, heigh
             </Text>
           )}
         </Box>
+      )}
+
+      {/* Duplicates: the original of this update, or its copies, wherever they are */}
+      {links.shown > 0 && (
+        <>
+          {contentLines <= 0 && <Box flexGrow={1} />}
+          <Box paddingX={2} flexShrink={0}>
+            <Text wrap="truncate">
+              <Text color="#30363d">{'─ '}</Text>
+              <Text color="#8b949e">{'duplicates'}</Text>
+              <Text color="#30363d">{` ${'─'.repeat(Math.max(columns - 19, 4))}`}</Text>
+            </Text>
+          </Box>
+          {duplicates.slice(0, links.shown).map((other) => {
+            const isOriginal = !other.duplicateOf;
+            return (
+              <React.Fragment key={other.id}>
+                <Box paddingX={2} flexShrink={0}>
+                  <Text wrap="truncate">
+                    <Text color={isOriginal ? ORIGINAL_COLOR : DUP_COLOR} bold>{isOriginal ? 'original' : 'duplicate'}</Text>
+                    {'  '}
+                    <Text color={colorOf(other.source)} bold>{labelOf(other.source)}</Text>
+                    {other.source !== update.source && <Text color={DUP_COLOR} bold>{'  other source'}</Text>}
+                    <Text color="#8b949e">{`   ${other.datePublished.slice(0, 10)}   `}</Text>
+                    {listed?.has(other.id)
+                      ? <Text color="#58a6ff" bold>{'d jump'}</Text>
+                      : <Text color="#8b949e" dimColor>{'not in this view'}</Text>}
+                  </Text>
+                </Box>
+                <Box paddingX={2} flexShrink={0}>
+                  <Text color="#c9d1d9" wrap="truncate">{other.title}</Text>
+                </Box>
+              </React.Fragment>
+            );
+          })}
+          {duplicates.length > links.shown && (
+            <Box paddingX={2} flexShrink={0}>
+              <Text color="#8b949e" dimColor>{`+${duplicates.length - links.shown} more`}</Text>
+            </Box>
+          )}
+        </>
       )}
     </Box>
   );

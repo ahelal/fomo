@@ -30,6 +30,7 @@ const DIGEST_KEYS: [string, string][] = [
   ['p',    'Mark update pending / not pending'],
   ['s',    'Sort: importance, date, title, size (press again for the next)'],
   ['g',    'Summarise update with Copilot (g again: regenerate)'],
+  ['u',    'Refresh update from its page: reading time, video length, preview'],
   ['o',    'Open in browser (newest in topic)'],
   ['Esc/⌫','Close detail'],
   ['q',    'Quit'],
@@ -45,6 +46,7 @@ const SAVED_KEYS: [string, string][] = [
   ['p',    'Remove update from Pending'],
   ['s',    'Sort: importance, date, title, size (press again for the next)'],
   ['g',    'Summarise update with Copilot (g again: regenerate)'],
+  ['u',    'Refresh update from its page: reading time, video length, preview'],
   ['o',    'Open in browser (newest in topic)'],
   ['Esc/⌫','Close detail'],
   ['q',    'Quit'],
@@ -56,6 +58,7 @@ const LIST_KEYS: [string, string][] = [
   ['p',    'Mark pending / not pending'],
   ['s',    'Sort: date, source, title, status (press again for the next)'],
   ['g',    'Summarise with Copilot (saved; g again: regenerate)'],
+  ['u',    'Refresh from the page: reading time, video length, preview'],
   ['x',    'Mark read & next unread'],
   ['n',    'Jump to next unread'],
   ['o',    'Open in browser'],
@@ -67,10 +70,10 @@ const DETAIL_KEYS: [string, string][] = [
   ['r',     'Toggle read / unread'],
   ['p',     'Mark pending / not pending'],
   ['g',     'Summarise with Copilot (saved; g again: regenerate)'],
+  ['u',     'Refresh from the page: reading time, video length, preview'],
   ['x',     'Mark read & next unread'],
   ['n',     'Jump to next unread'],
   ['o',     'Open URL in browser'],
-  ['u',     'Fetch full content'],
 ];
 
 const GLOBAL_KEYS: [string, string][] = [
@@ -86,6 +89,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['5',    'References: links filed into folders'],
   ['6',    'Todos'],
   ['m',    'File the selected update in References (Copilot suggests folder + note)'],
+  ['d',    'Jump to the duplicate / original of the update, if it is in this view'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],
   ['Esc',  'Clear the search, then the source filter'],

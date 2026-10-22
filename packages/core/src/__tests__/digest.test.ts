@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Topic, Update } from '../types.js';
-import { buildDigest, flattenDigest, nextRowKey, patchDigest, removeFromDigest, removeAndAdvance, soloUpdate } from '../digest/view.js';
+import { buildDigest, flattenDigest, locateUpdate, nextRowKey, patchDigest, removeFromDigest, removeAndAdvance, soloUpdate } from '../digest/view.js';
 import {
   DIGEST_PLAN_SYSTEM_PROMPT,
   DIGEST_SPLIT_SYSTEM_PROMPT,
@@ -142,6 +142,19 @@ describe('flattenDigest / removeFromDigest', () => {
     expect(nextRowKey(rows, 'item:c__3')).toBe('item:c__3');
     expect(nextRowKey(rows, 'gone')).toBe('t1');
     expect(nextRowKey([], undefined)).toBeUndefined();
+  });
+
+  it('locateUpdate finds the row of an update, and the topic to expand for one of several', () => {
+    expect(locateUpdate(digest.entries, 'c__3')).toEqual({ key: 'item:c__3' });
+    expect(locateUpdate(digest.entries, 'b__2')).toEqual({ key: 't1/b__2', expand: 't1' });
+    expect(locateUpdate(digest.entries, 'gone__9')).toBeUndefined();
+
+    // The keys are those of the rows once the topic is expanded.
+    const target = locateUpdate(digest.entries, 'a__1')!;
+    const rows = flattenDigest(digest.entries, new Set([target.expand!]));
+    expect(rows.some((r) => r.key === target.key)).toBe(true);
+    const solo = buildDigest([upd('a__1', { topicId: 't1' })], new Map([['t1', topic('t1')]]));
+    expect(flattenDigest(solo.entries, new Set()).some((r) => r.key === locateUpdate(solo.entries, 'a__1')!.key)).toBe(true);
   });
 });
 

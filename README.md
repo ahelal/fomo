@@ -139,6 +139,15 @@ Press `g` on an update in the TUI to have Copilot summarise it: one sentence wit
 - Summaries appear at the top of the detail pane in the TUI and the web app, and search matches them too. The web app only shows saved summaries; it can't create them.
 - When Copilot groups a post or writes its topic, it reads the post's summary instead of the start of the feed preview. Summarise posts before they're grouped (or before **Regroup all topics**) to have it take effect.
 
+### Refreshing an Update
+
+Press `u` on an update in the TUI to correct its details from the linked page, e.g. when the reading time is wrong because the feed only had a teaser.
+
+- For YouTube videos it reads the video length again.
+- For other posts it works out the reading time from the whole page, and replaces the preview when the page has more text. The page is only used if it mentions the post's title, so a sign-in wall or a JavaScript-only page leaves the update unchanged.
+- The status line says what changed. The detail pane shows the reading time or the video length next to the published date.
+- The web app can't fetch pages, so it has no `u`. It shows the corrected details after a refresh in the TUI.
+
 ### References
 
 **References** is a bookmark library. It keeps links you want to come back to, filed in a folder tree like `ai/agents` or `azure/iac` (up to 6 levels deep). **Pending** is still for reading later; References is for links worth keeping.
@@ -261,6 +270,7 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `r`             | Toggle read / unread (a whole topic when grouped) |
 | `n`             | Next topic / next unread                  |
 | `p`             | Mark pending / not pending (leaves the Pending view) |
+| `d`             | Jump to the duplicate / original of the selected update, if it is in this view |
 | `s`             | Cycle the sort order of the view (or click ↕) |
 | `o`             | Open URL in a new tab                     |
 | `.`             | Toggle preview position (right / bottom)  |
@@ -275,6 +285,8 @@ Post summaries made in the TUI (`g`) show at the top of the detail pane.
 **Search** only looks inside the view you're in: searching under Unread only finds unread updates (or unread topics when grouped), and under Pending only pending updates. Every word must appear in the title, summary, [post summary](#post-summaries) or content (case-insensitive). The query stays applied when you switch views until you clear it with `Esc` or ✕. On a phone, tap the search box in the filter bar.
 
 **Sorting.** `s` cycles through the sort orders of the current view, the same in the web app and the TUI: lists by date, source, title (each ascending / descending) and unread first; topics by importance, date, title and size; References by title and date added; Todos by status, due date, created and subject. Each view keeps its own order until you reload or restart.
+
+**Duplicates.** When two sources carry the same post (same title within 60 days), the later copy is kept but flagged `dup`. In both apps, the detail pane lists the rest of the group at the bottom: the original on a copy, the copies on the original. Each entry shows its source, an **other source** tag when it comes from a different feed, and **not in this view** when the current view or filters hide it, so you can always find the counterpart. `d` jumps to the next one that is in the view (press it again to cycle through a group of three or more), expanding its topic when the view is grouped. The web app's **Jump** button in the pane does the same.
 
 ---
 
@@ -295,9 +307,10 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `x` / `r`       | Mark topic (or update) read & next (grouped Pending: `r` toggles read in place) |
 | `n`             | Next topic / next unread                  |
 | `p`             | Mark pending / not pending (leaves the Pending view) |
+| `d`             | Jump to the duplicate / original of the selected update, if it is in this view |
 | `s`             | Cycle the sort order of the view          |
 | `o`             | Open in browser (newest update of a topic)|
-| `u`             | Fetch full content (detail view)          |
+| `u`             | [Refresh the update from its page](#refreshing-an-update): reading time, video length, fuller preview |
 | `g`             | [Summarise the update with Copilot](#post-summaries) (saved); `g` again while it's shown regenerates it |
 | `f`             | Fetch latest updates + Copilot digest     |
 | `z` twice       | Regroup all topics with Copilot (`Esc` after the first `z` cancels) |

@@ -153,6 +153,9 @@ export interface BackupPayload {
   entities: BackupEntity[];
 }
 
+/** What re-reading a post's page corrects (`UpdateStore.setPageInfo`). */
+export type PageInfo = Partial<Pick<Update, 'content' | 'readingTimeMinutes' | 'durationSeconds'>>;
+
 // ─── Store ─────────────────────────────────────────────────────────────────
 export class UpdateStore {
   private readonly client: TableClient;
@@ -238,13 +241,19 @@ export class UpdateStore {
     }
   }
 
-  /** Update the content field on an existing entity. */
-  async updateContent(id: string, content: string): Promise<Update> {
+  /** Overwrite what was read from the post's page; fields left out stay as they are. */
+  async setPageInfo(id: string, info: PageInfo): Promise<void> {
     const { source, rowKey } = parseId(id);
-    const entity = await this.client.getEntity<UpdateEntity>(source, rowKey);
-    const updated: UpdateEntity = { ...entity, content: clampContent(content) };
-    await this.client.updateEntity(updated, 'Replace', { etag: entity.etag });
-    return entityToUpdate(updated);
+    await this.client.updateEntity(
+      {
+        partitionKey: source,
+        rowKey,
+        ...(info.content !== undefined ? { content: clampContent(info.content) } : {}),
+        ...(info.readingTimeMinutes ? { readingTimeMinutes: info.readingTimeMinutes } : {}),
+        ...(info.durationSeconds ? { durationSeconds: info.durationSeconds } : {}),
+      },
+      'Merge',
+    );
   }
 
   /**
@@ -362,6 +371,17 @@ export class UpdateStore {
       });
     }
     return rows;
+  }
+
+  /** Every update flagged as a repeat of another, without content. */
+  async listDuplicateCopies(): Promise<Update[]> {
+    // The filter only keeps the response small; the check below guards against a store matching rows that lack the property.
+    const iter = this.client.listEntities<UpdateEntity>({ queryOptions: { filter: "duplicateOf gt ''", select: LIST_COLUMNS } });
+    const copies: Update[] = [];
+    for await (const entity of iter) {
+      if (entity.duplicateOf) copies.push({ ...entityToUpdate(entity as UpdateEntity), content: '' });
+    }
+    return copies;
   }
 
   async getUpdate(id: string): Promise<Update | null> {

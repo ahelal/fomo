@@ -308,6 +308,11 @@ export interface FomoService {
   deleteSourceUpdates(source: SourceId): Promise<number>;
   getStats(): Promise<StatsResponse>;
   getDigest(query?: DigestQuery): Promise<DigestResponse>;
+  /**
+   * The other updates that repeat the same post as `id`: its original first, then its copies,
+   * without content. Empty when `id` is not part of a duplicate group.
+   */
+  getDuplicates(id: string): Promise<Update[]>;
   /** Updates per source in a view, to pick which sources to show. */
   countSources(query: SourceCountQuery): Promise<Record<SourceId, number>>;
   getSources(): Promise<SourceInfo[]>;

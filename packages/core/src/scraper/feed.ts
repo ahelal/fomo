@@ -44,7 +44,7 @@ export function parseFeed(xml: string, filter: FeedFilter = {}): ScrapedItem[] {
 }
 
 /** Estimate reading time at 230 words per minute, rounding up to a whole minute. */
-function estimateReadingTimeMinutes(content: string): number {
+export function estimateReadingTimeMinutes(content: string): number {
   const words = content.match(/\S+/g)?.length ?? 0;
   return Math.max(1, Math.ceil(words / 230));
 }

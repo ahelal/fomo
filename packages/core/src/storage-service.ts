@@ -29,6 +29,13 @@ import type {
   ListReferencesResponse,
 } from './types.js';
 
+/** How long the list of duplicate copies is reused before it is read again. */
+const DUPLICATES_TTL_MS = 30_000;
+
+/** Oldest first, like the original of a group is the first one added. */
+const byAdded = (a: Update, b: Update) =>
+  a.dateAdded.localeCompare(b.dateAdded) || a.datePublished.localeCompare(b.datePublished) || a.id.localeCompare(b.id);
+
 /**
  * Talks to Azure Table Storage directly. Browser-safe: used by the web/PWA with a
  * SAS token and by the TUI (via `FomoDirectService`) with a connection string.
@@ -39,6 +46,7 @@ export class FomoStorageService implements FomoService {
   protected readonly topicStore: TopicStore;
   protected readonly referenceStore: ReferenceStore;
   private initPromise: Promise<void> | undefined;
+  private duplicateCopies: { loadedAt: number; list: Promise<Update[]> } | undefined;
 
   constructor(conn: StoreConnection) {
     this.store = new UpdateStore(conn);
@@ -88,7 +96,11 @@ export class FomoStorageService implements FomoService {
 
   async deleteSourceUpdates(source: SourceId): Promise<number> {
     await this.ensureInit();
-    return this.store.deleteSourceUpdates(source);
+    try {
+      return await this.store.deleteSourceUpdates(source);
+    } finally {
+      this.forgetDuplicates();
+    }
   }
 
     async getStats(): Promise<StatsResponse> {
@@ -114,6 +126,35 @@ export class FomoStorageService implements FomoService {
       items: e.items.map((u) => ({ ...u, content: '' })),
     }));
     return { entries, pending: entries.filter((e) => e.synthetic).length };
+  }
+
+  async getDuplicates(id: string): Promise<Update[]> {
+    await this.ensureInit();
+    const copies = await this.loadDuplicateCopies();
+    const own = copies.find((u) => u.id === id);
+    const root = own?.duplicateOf ?? id;
+    const others = copies.filter((u) => u.duplicateOf === root && u.id !== id).sort(byAdded);
+    if (!own && others.length === 0) return [];
+    // The original is not flagged, so it is not among the copies.
+    const original = root === id ? undefined : await this.store.getUpdate(root);
+    return [...(original ? [{ ...original, content: '' }] : []), ...others];
+  }
+
+  /** Drop the cached duplicate copies, after something that adds, removes or re-flags updates. */
+  protected forgetDuplicates(): void {
+    this.duplicateCopies = undefined;
+  }
+
+  private loadDuplicateCopies(): Promise<Update[]> {
+    const cached = this.duplicateCopies;
+    if (cached && Date.now() - cached.loadedAt < DUPLICATES_TTL_MS) return cached.list;
+    const entry = { loadedAt: Date.now(), list: this.store.listDuplicateCopies() };
+    this.duplicateCopies = entry;
+    // A failed read is not kept.
+    entry.list.catch(() => {
+      if (this.duplicateCopies === entry) this.duplicateCopies = undefined;
+    });
+    return entry.list;
   }
 
   async countSources(query: SourceCountQuery): Promise<Record<SourceId, number>> {

@@ -12,9 +12,10 @@ vi.mock('../store/tables.js', () => {
     setTopicId: vi.fn().mockResolvedValue(undefined),
     setGist: vi.fn().mockResolvedValue(undefined),
     setSaved: vi.fn(),
-    updateContent: vi.fn(),
+    setPageInfo: vi.fn().mockResolvedValue(undefined),
     insertUpdate: vi.fn().mockResolvedValue(true),
     listDuplicateRows: vi.fn().mockResolvedValue([]),
+    listDuplicateCopies: vi.fn().mockResolvedValue([]),
     setDuplicateOf: vi.fn().mockResolvedValue(undefined),
     getStats: vi.fn().mockResolvedValue({
       total: 0,
@@ -190,6 +191,105 @@ describe('FomoDirectService', () => {
 
     expect(result.results['mock-source'].added).toBe(1);
     expect(__mockStore.insertUpdate).toHaveBeenCalledWith(expect.objectContaining({ duplicateOf: 'azure__a' }));
+  });
+
+  describe('getDuplicates', () => {
+    const upd = (id: string, over: Record<string, unknown> = {}) => ({
+      id,
+      source: id.split('__')[0],
+      title: `Title ${id}`,
+      url: `https://example.com/${id}`,
+      datePublished: '2025-01-01T00:00:00Z',
+      dateAdded: '2025-01-01T00:00:00Z',
+      status: 'unread',
+      saved: false,
+      content: '',
+      ...over,
+    });
+
+    it('lists the original and the other copies of a copy, oldest first', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      __mockStore.listDuplicateCopies.mockResolvedValueOnce([
+        upd('c__3', { duplicateOf: 'a__1', dateAdded: '2025-03-01T00:00:00Z' }),
+        upd('d__4', { duplicateOf: 'a__1', dateAdded: '2025-02-01T00:00:00Z' }),
+        upd('y__1', { duplicateOf: 'x__1' }),
+      ]);
+      __mockStore.getUpdate.mockResolvedValue(upd('a__1', { content: '<p>long body</p>' }));
+
+      const related = await svc.getDuplicates('c__3');
+
+      expect(related.map((u) => u.id)).toEqual(['a__1', 'd__4']);
+      expect(related[0]!.content).toBe('');
+      expect(__mockStore.getUpdate).toHaveBeenCalledWith('a__1');
+    });
+
+    it('lists the copies of an original without reading it again', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      __mockStore.listDuplicateCopies.mockResolvedValueOnce([
+        upd('c__3', { duplicateOf: 'a__1', dateAdded: '2025-03-01T00:00:00Z' }),
+        upd('b__2', { duplicateOf: 'a__1', dateAdded: '2025-02-01T00:00:00Z' }),
+      ]);
+
+      const related = await svc.getDuplicates('a__1');
+
+      expect(related.map((u) => u.id)).toEqual(['b__2', 'c__3']);
+      expect(__mockStore.getUpdate).not.toHaveBeenCalled();
+    });
+
+    it('is empty for an update that is in no duplicate group', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      __mockStore.listDuplicateCopies.mockResolvedValueOnce([upd('b__2', { duplicateOf: 'a__1' })]);
+
+      expect(await svc.getDuplicates('z__1')).toEqual([]);
+      expect(__mockStore.getUpdate).not.toHaveBeenCalled();
+    });
+
+    it('leaves out an original that is gone', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      __mockStore.listDuplicateCopies.mockResolvedValueOnce([
+        upd('b__2', { duplicateOf: 'a__1' }),
+        upd('c__3', { duplicateOf: 'a__1' }),
+      ]);
+      __mockStore.getUpdate.mockResolvedValue(null);
+
+      expect((await svc.getDuplicates('b__2')).map((u) => u.id)).toEqual(['c__3']);
+    });
+
+    it('reuses the list of copies for a while, and reads it again after a fetch', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      try {
+        __mockStore.listDuplicateCopies.mockResolvedValueOnce([upd('b__2', { duplicateOf: 'a__1' })]);
+        __mockStore.getUpdate.mockResolvedValue(upd('a__1'));
+
+        expect((await svc.getDuplicates('b__2')).map((u) => u.id)).toEqual(['a__1']);
+        await svc.getDuplicates('b__2');
+        await svc.getDuplicates('a__1');
+        expect(__mockStore.listDuplicateCopies).toHaveBeenCalledTimes(1);
+
+        await svc.fetch();
+        __mockStore.listDuplicateCopies.mockResolvedValueOnce([upd('c__3', { duplicateOf: 'a__1' })]);
+        expect((await svc.getDuplicates('a__1')).map((u) => u.id)).toEqual(['c__3']);
+        expect(__mockStore.listDuplicateCopies).toHaveBeenCalledTimes(2);
+
+        now.mockReturnValue(1_000_000 + 60_000);
+        __mockStore.listDuplicateCopies.mockResolvedValueOnce([]);
+        expect(await svc.getDuplicates('a__1')).toEqual([]);
+        expect(__mockStore.listDuplicateCopies).toHaveBeenCalledTimes(3);
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it('does not keep a failed read', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      __mockStore.listDuplicateCopies.mockRejectedValueOnce(new Error('offline'));
+      await expect(svc.getDuplicates('b__2')).rejects.toThrow('offline');
+
+      __mockStore.listDuplicateCopies.mockResolvedValueOnce([upd('b__2', { duplicateOf: 'a__1' })]);
+      __mockStore.getUpdate.mockResolvedValue(upd('a__1'));
+      expect((await svc.getDuplicates('b__2')).map((u) => u.id)).toEqual(['a__1']);
+    });
   });
 
   it('returns per-source fetch failures instead of treating them as empty results', async () => {
@@ -547,6 +647,74 @@ describe('FomoDirectService', () => {
       await mockStore(post);
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 403 })));
       await expect(svc.summarizePost('github__1', { generateJson: vi.fn() })).rejects.toThrow(/HTTP 403/);
+    });
+  });
+
+  describe('refreshUpdate', () => {
+    const post = {
+      id: 'blog__1',
+      source: 'blog',
+      title: 'Copilot code review gets agentic tools',
+      url: 'https://example.com/post',
+      datePublished: '2026-10-01T00:00:00Z',
+      dateAdded: 'x',
+      status: 'read',
+      saved: false,
+      content: 'Short preview.',
+      readingTimeMinutes: 1,
+    };
+    const page = (body: string) =>
+      `<html><body><nav>Menu</nav><article><h1>Copilot code review gets agentic tools</h1><p>${body}</p></article></body></html>`;
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    async function mockStore(update: Record<string, unknown>) {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      __mockStore.getUpdate.mockResolvedValue(update);
+      __mockStore.setPageInfo.mockClear();
+      return __mockStore;
+    }
+
+    it('recomputes the reading time from the whole page and keeps a fuller preview', async () => {
+      const store = await mockStore(post);
+      // 2,000 words: ~9 minutes at 230 wpm, far past the 5,000-character preview
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(page('word '.repeat(2000)))));
+      const { previous, update } = await svc.refreshUpdate('blog__1');
+      expect(previous.readingTimeMinutes).toBe(1);
+      expect(update).toMatchObject({ readingTimeMinutes: 9, status: 'read' });
+      expect(update.content).toHaveLength(5000);
+      expect(update.content).not.toContain('Menu');
+      expect(store.setPageInfo).toHaveBeenCalledWith('blog__1', { readingTimeMinutes: 9, content: update.content });
+    });
+
+    it('keeps a stored preview longer than the page', async () => {
+      const store = await mockStore({ ...post, content: 'Preview. '.repeat(200) });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(page('A few words.'))));
+      await svc.refreshUpdate('blog__1');
+      expect(store.setPageInfo).toHaveBeenCalledWith('blog__1', { readingTimeMinutes: 1 });
+    });
+
+    it('reads a YouTube video’s length from its watch page, leaving the rest alone', async () => {
+      const store = await mockStore({ ...post, source: 'yt', url: 'https://www.youtube.com/watch?v=abc', durationSeconds: 60 });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>"lengthSeconds":"849"</html>')));
+      const { previous, update } = await svc.refreshUpdate('blog__1');
+      expect(previous.durationSeconds).toBe(60);
+      expect(update.durationSeconds).toBe(849);
+      expect(store.setPageInfo).toHaveBeenCalledWith('blog__1', { durationSeconds: 849 });
+    });
+
+    it('changes nothing when the page is not the post or cannot be read', async () => {
+      const store = await mockStore(post);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(`<main>${'Please sign in to continue. '.repeat(50)}</main>`)));
+      await expect(svc.refreshUpdate('blog__1')).rejects.toThrow(/does not show the post/);
+
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 403 })));
+      await expect(svc.refreshUpdate('blog__1')).rejects.toThrow(/HTTP 403/);
+
+      store.getUpdate.mockResolvedValue({ ...post, url: 'https://youtu.be/abc' });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>no player</html>')));
+      await expect(svc.refreshUpdate('blog__1')).rejects.toThrow(/video length/);
+      expect(store.setPageInfo).not.toHaveBeenCalled();
     });
   });
 

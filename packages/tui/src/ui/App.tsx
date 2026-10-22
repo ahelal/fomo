@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TodoSort, TopicSort, UpdateSort } from '@fomo/core';
-import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, isDefaultSort, jumpStep, nextRowKey, nextSort, sortDigestEntries, sortLabel, sortTodos, TODO_SORTS, TOPIC_SORTS, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
+import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, sortTodos, TODO_SORTS, TOPIC_SORTS, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_BACKUP_DIR, DEFAULT_LINK_DAYS, envSource, maskConnectionString, tildify, type LocalConfig } from '../config.js';
@@ -30,6 +30,7 @@ import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/Setti
 import { TodosView, type TodoFormField } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
 import { editText, useReferences } from './hooks/useReferences.js';
+import { useDuplicates } from './hooks/useDuplicates.js';
 
 type FilterStatus = Status | 'all' | 'saved';
 /** Views that can be listed as topics; pressing the view's key again toggles it. */
@@ -89,6 +90,18 @@ function rowUpdate(row: DigestRow | undefined): Update | undefined {
   if (!row) return undefined;
   if (row.kind === 'item') return row.update;
   return soloUpdate(row.entry);
+}
+
+/** What `u` corrected, e.g. `Reading time ~3m → ~9m · fuller preview`. */
+export function refreshMessage(previous: Update, update: Update): string {
+  const was = formatUpdateTime(previous);
+  const now = formatUpdateTime(update);
+  const label = update.durationSeconds ? 'Video length' : 'Reading time';
+  const parts = [
+    !now ? '' : !was ? `${label} ${now}` : was === now ? `${label} ${now} (unchanged)` : `${label} ${was} → ${now}`,
+    update.content !== previous.content ? 'fuller preview' : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Nothing to correct';
 }
 
 // Fixed line counts for chrome
@@ -216,6 +229,9 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const summarizingRef = useRef(new Set<string>());
   /** The update whose saved summary g just showed: g again on it regenerates the summary. */
   const regenArmed = useRef<{ id: string; at: number } | undefined>();
+  /** Posts being re-read from their page (u). */
+  const [refreshing, setRefreshing] = useState<ReadonlySet<string>>(new Set());
+  const refreshingRef = useRef(new Set<string>());
   const digestRows = useMemo(() => flattenDigest(digestEntries, expanded), [digestEntries, expanded]);
 
   // ── Todos state ─────────────────────────────────────────────────────────────
@@ -720,31 +736,47 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     void loadUpdates(filterRef.current);
   }, [loadUpdates, audit]);
 
-  const doFetchContent = useCallback(async () => {
-    const selected = currentUpdate();
-    if (!selected) return;
-    setLoading(true);
-    showMessage('Fetching content…');
-    try {
-      const updated = await service.fetchContent(selected.id);
-      setUpdates((prev) =>
-        prev.map((u) => (u.id === updated.id ? updated : u)),
-      );
-      setContentCache((prev) => ({ ...prev, [updated.id]: updated.content }));
-      showMessage('✓ Content fetched');
-    } catch (err) {
-      audit.error('fetch-content', `“${selected.title}”: ${errorText(err)}`);
-      showMessage(`Fetch error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [service, currentUpdate, showMessage, audit]);
-
   /** Change one update wherever it is shown (list and digest). */
   const patchUpdate = useCallback((id: string, patch: Partial<Update>) => {
     setUpdates((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
     setDigestEntries((prev) => patchDigest(prev, new Set([id]), patch));
   }, []);
+
+  /** Re-read the selected post's page to correct its reading time, video length and preview. */
+  const doRefresh = useCallback(async () => {
+    const selected = currentUpdate();
+    if (!selected) {
+      showMessage(isGrouped(filterRef.current, groupedViewsRef.current) ? 'Expand the topic to refresh a single update' : 'Nothing selected');
+      return;
+    }
+    setShowDetail(true);
+    const { id } = selected;
+    if (refreshingRef.current.has(id)) { showMessage('⏳ Already refreshing this post'); return; }
+    const track = (on: boolean) => {
+      if (on) refreshingRef.current.add(id); else refreshingRef.current.delete(id);
+      setRefreshing(new Set(refreshingRef.current));
+    };
+    track(true);
+    showMessage('Refreshing from the page…', 30_000);
+    try {
+      const { previous, update } = await service.refreshUpdate(id);
+      const contentChanged = update.content !== previous.content;
+      patchUpdate(id, {
+        ...(update.readingTimeMinutes ? { readingTimeMinutes: update.readingTimeMinutes } : {}),
+        ...(update.durationSeconds ? { durationSeconds: update.durationSeconds } : {}),
+        ...(contentChanged ? { content: update.content } : {}),
+      });
+      if (contentChanged) setContentCache((prev) => ({ ...prev, [id]: update.content }));
+      const message = refreshMessage(previous, update);
+      audit.log('refresh', `“${selected.title}”: ${message}`);
+      showMessage(`✓ ${message}`, 5000);
+    } catch (err) {
+      audit.error('refresh', `“${selected.title}”: ${errorText(err)}`);
+      showMessage(`⚠ Refresh failed: ${errorText(err)}`, 10_000);
+    } finally {
+      track(false);
+    }
+  }, [service, currentUpdate, patchUpdate, showMessage, audit]);
 
   /** Summarise the selected post with Copilot and save it; a saved summary is reused unless `force`. */
   const doSummarize = useCallback(async (force: boolean) => {
@@ -862,6 +894,31 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     });
   }, []);
 
+  /** d: select the duplicate (or the original) of the selected update, when it is in this view. */
+  const jumpToDuplicate = useCallback(() => {
+    const grouped = isGrouped(filterRef.current, groupedViewsRef.current);
+    const current = currentUpdate();
+    if (!current) {
+      showMessage(grouped ? 'Expand the topic to jump to its duplicate' : 'Nothing selected');
+      return;
+    }
+    if (!grouped) {
+      const next = nextDuplicate(updatesRef.current, current);
+      if (!next) { showMessage('No duplicate in this view'); return; }
+      setSelectedIndex(updatesRef.current.findIndex((u) => u.id === next.id));
+      return;
+    }
+    const entries = digestEntriesRef.current;
+    const next = nextDuplicate(entries.flatMap((e) => e.items), current);
+    const target = next && locateUpdate(entries, next.id);
+    if (!target) { showMessage('No duplicate in this view'); return; }
+    // Open the topic that holds it, so that its row is listed.
+    const open = new Set(expandedRef.current);
+    if (target.expand) open.add(target.expand);
+    setExpanded(open);
+    setSelectedIndex(Math.max(0, flattenDigest(entries, open).findIndex((r) => r.key === target.key)));
+  }, [currentUpdate, showMessage]);
+
   const doToggleStatus = useCallback(async () => {
     const selected = updatesRef.current[selectedRef.current];
     if (!selected) return;
@@ -946,6 +1003,15 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       });
     return () => { cancelled = true; };
   }, [service, showDetail, digestSelectedUpdate, contentCache, audit]);
+
+  // The preview lists the other copies of the update it shows, also those that are not in this view
+  const paneUpdate = grouped ? digestSelectedUpdate : updates[selectedIndex];
+  const duplicates = useDuplicates(
+    service,
+    showDetail ? paneUpdate?.id : undefined,
+    (err) => audit.error('duplicates', errorText(err)),
+    stats?.total,
+  );
 
   // ── Settings: save the row being edited ─────────────────────────────────────
   const commitEdit = useCallback((row: SettingsRow, text: string) => {
@@ -1758,6 +1824,9 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       return;
     }
 
+    // d jumps between an update and its duplicate or original, when that is in this view
+    if (input === 'd') { jumpToDuplicate(); return; }
+
     // Navigation
     if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - step));                return; }
     if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.max(0, Math.min(listLength - 1, i + step))); return; }
@@ -1799,11 +1868,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       void doSummarize(!!sel?.gist && showDetail && armed?.id === sel.id && Date.now() - armed.at < REGROUP_CONFIRM_MS);
       return;
     }
-    if (input === 'u' && showDetail) {
-      const sel = currentUpdate();
-      if (sel && !sel.content && !contentCache[sel.id]) void doFetchContent();
-      return;
-    }
+    // u re-reads the post's page: reading time, video length and a fuller preview
+    if (input === 'u') { void doRefresh(); return; }
 
     // s cycles the view's sort; the selected row stays selected
     if (input === 's') {
@@ -2002,6 +2068,12 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     );
 
   const renderDetail = (height: number, width: number, position: 'bottom' | 'right') => {
+    const duplicateProps = {
+      duplicates,
+      listed: new Set((grouped ? digestEntries.flatMap((e) => e.items) : updates).map((u) => u.id)),
+      labelOf: sourceName,
+      colorOf: (id: string) => appSettings.sourceColors?.[id] ?? DEFAULT_SOURCE_COLOR[id] ?? '#58a6ff',
+    };
     if (grouped) {
       const row = digestRows[selectedIndex];
       if (!row) return null;
@@ -2013,9 +2085,11 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
             update={{ ...digestSelectedUpdate, content }}
             loading={loading}
             summarizing={summarizing.has(digestSelectedUpdate.id)}
+            refreshing={refreshing.has(digestSelectedUpdate.id)}
             height={height}
             columns={width}
             position={position}
+            {...duplicateProps}
           />
         );
       }
@@ -2034,9 +2108,11 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       <DetailPane
         update={selectedUpdate}
         summarizing={summarizing.has(selectedUpdate.id)}
+        refreshing={refreshing.has(selectedUpdate.id)}
         height={height}
         columns={width}
         position={position}
+        {...duplicateProps}
       />
     ) : null;
   };

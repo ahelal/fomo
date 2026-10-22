@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSource } from '../scraper/registry.js';
 import { parseFeed } from '../scraper/feed.js';
 import { newUserSource, sourceDraft, sourceDraftPatch, sourceEditInput, sourceInfo, isYoutubeChannelUrl } from '../scraper/specs.js';
-import { parseYoutubeUrl, youtubeUrl } from '../scraper/youtube.js';
+import { isYoutubeVideoUrl, parseYoutubeUrl, youtubeUrl } from '../scraper/youtube.js';
 import { DEFAULT_SETTINGS, type AppSettings, type YoutubeSourceSpec } from '../types.js';
 
 const ID = 'UC7c3Kb6jYCRj4JOHHZTxKsQ';
@@ -68,6 +68,15 @@ describe('YouTube URLs', () => {
     expect(youtubeUrl({ channel: '@GitHub' })).toBe('https://www.youtube.com/@GitHub');
     expect(youtubeUrl({ channel: ID })).toBe(`https://www.youtube.com/channel/${ID}`);
     expect(youtubeUrl({ playlist: 'PL123456789012' })).toBe('https://www.youtube.com/playlist?list=PL123456789012');
+  });
+
+  it('knows video pages from channels and other sites', () => {
+    for (const url of ['https://www.youtube.com/watch?v=ZQ0Qq6LlAmI', 'https://m.youtube.com/watch?v=x', 'https://youtu.be/ZQ0Qq6LlAmI', 'https://www.youtube.com/shorts/abc', 'https://www.youtube.com/live/abc']) {
+      expect(isYoutubeVideoUrl(url), url).toBe(true);
+    }
+    for (const url of ['https://www.youtube.com/watch', 'https://www.youtube.com/@GitHub', 'https://youtu.be/', 'https://example.com/watch?v=x', 'not a url']) {
+      expect(isYoutubeVideoUrl(url), url).toBe(false);
+    }
   });
 });
 
