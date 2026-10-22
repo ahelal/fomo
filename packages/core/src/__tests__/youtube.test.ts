@@ -142,6 +142,15 @@ describe('YouTube fetch', () => {
     expect(items[0]?.durationSeconds).toBe(3723);
   });
 
+  it('finds duration metadata deep in a large watch page', async () => {
+    mockYoutube({
+      [feedUrl('playlist_id=PL123456789012')]: atom(entry('v1', 'Lesson', '2026-10-10T00:00:00Z')),
+      'https://www.youtube.com/watch?v=v1': `${'x'.repeat(900_000)}"lengthSeconds":"849"`,
+    });
+    const items = await createSource(spec({ channel: undefined, playlist: 'PL123456789012' })).fetch();
+    expect(items[0]?.durationSeconds).toBe(849);
+  });
+
   it('copes with a channel that never streamed (no live playlist)', async () => {
     mockYoutube({ [feedUrl(`playlist_id=UULF${ID.slice(2)}`)]: atom(entry('v1', 'Video', '2026-10-10T00:00:00Z')) });
     await expect(createSource(spec()).fetch()).resolves.toHaveLength(1);

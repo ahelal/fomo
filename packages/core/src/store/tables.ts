@@ -204,9 +204,9 @@ export class UpdateStore {
     } catch (err: unknown) {
       // EntityAlreadyExists → URL was already ingested
       if (isTableError(err, 409)) {
-        // Backfill content if the existing entity has none
-        if (content) {
-          await this.backfillContent(update.source, rowKey, content);
+        // Backfill content or duration the existing entity lacks
+        if (content || update.durationSeconds) {
+          await this.backfill(update.source, rowKey, content, update.durationSeconds);
         }
         return false;
       }
@@ -214,17 +214,24 @@ export class UpdateStore {
     }
   }
 
-  /** Update content on an existing entity only if it currently has no content. */
-  private async backfillContent(
+  /** Fill in the content and duration an existing entity lacks, leaving everything else as it is. */
+  private async backfill(
     partitionKey: string,
     rowKey: string,
     content: string,
+    durationSeconds: number | undefined,
   ): Promise<void> {
     try {
       const entity = await this.client.getEntity<UpdateEntity>(partitionKey, rowKey);
-      if (entity.content && entity.content.length > 0) return; // already has content
+      const addContent = !!content && !entity.content;
+      const addDuration = !!durationSeconds && !(typeof entity.durationSeconds === 'number' && entity.durationSeconds > 0);
+      if (!addContent && !addDuration) return;
 
-      const updated: UpdateEntity = { ...entity, content };
+      const updated: UpdateEntity = {
+        ...entity,
+        ...(addContent ? { content } : {}),
+        ...(addDuration ? { durationSeconds } : {}),
+      };
       await this.client.updateEntity(updated, 'Replace', { etag: entity.etag });
     } catch {
       // best-effort — don't fail the whole fetch for a backfill miss

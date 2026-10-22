@@ -41,6 +41,25 @@ describe('UpdateStore.insertUpdate', () => {
     expect(created[0]!.content).toHaveLength(MAX_CONTENT_CHARS);
     expect(created[0]).toMatchObject({ readingTimeMinutes: 4, durationSeconds: 849 });
   });
+
+  it('backfills a missing duration on an existing update, keeping its status', async () => {
+    const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+    const store = new UpdateStore(conn as any);
+    const existing = { partitionKey: 'yt', rowKey: 'r', title: 'V', url: 'https://www.youtube.com/watch?v=v1', status: 'read', content: 'About', etag: 'e' };
+    const replaced: Record<string, unknown>[] = [];
+    (store as any).client = {
+      createEntity: async () => { throw Object.assign(new Error('exists'), { statusCode: 409 }); },
+      getEntity: async () => ({ ...existing }),
+      updateEntity: async (e: Record<string, unknown>) => { replaced.push(e); },
+    };
+    const update = { source: 'yt', title: 'V', url: existing.url, datePublished: '2026-10-18T00:00:00Z', content: 'About' };
+    await expect(store.insertUpdate({ ...update, durationSeconds: 849 })).resolves.toBe(false);
+    expect(replaced).toEqual([expect.objectContaining({ status: 'read', content: 'About', durationSeconds: 849 })]);
+
+    replaced.length = 0;
+    await store.insertUpdate(update);
+    expect(replaced).toEqual([]);
+  });
 });
 
 describe('makeId / parseId', () => {

@@ -52,7 +52,8 @@ const FEED = 'https://www.youtube.com/feeds/videos.xml';
 const CONSENT = 'SOCS=CAI';
 /** Stop reading a channel page after this much without finding its id (the page is ~2.5 MB). */
 const MAX_PAGE_BYTES = 4_000_000;
-const MAX_VIDEO_PAGE_BYTES = 512_000;
+/** Duration metadata sits ~0.8–1 MB into a watch page (~1.6 MB). */
+const MAX_VIDEO_PAGE_BYTES = 2_500_000;
 
 const resolved = new Map<string, string>();
 
@@ -117,8 +118,9 @@ async function videoDuration(url: string): Promise<number | undefined> {
   while (!duration && page.length < MAX_VIDEO_PAGE_BYTES) {
     const { done, value } = await reader.read();
     if (done) break;
+    const from = Math.max(0, page.length - 512);
     page += decoder.decode(value, { stream: true });
-    duration = parseVideoDuration(page);
+    duration = parseVideoDuration(page.slice(from));
   }
   await reader.cancel().catch(() => undefined);
   return duration;
