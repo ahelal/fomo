@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { isGithubRepoUrl, isYoutubeChannelUrl, timeAgo, type SourceDraft, type SourceFetchResult, type SourceInfo, type StatsResponse } from '@fomo/core';
-import { COLOR_PALETTE } from './SettingsPane.js';
+import { colorName, DEFAULT_COLOR, isGithubRepoUrl, isYoutubeChannelUrl, timeAgo, type SourceDraft, type SourceFetchResult, type SourceInfo, type StatsResponse } from '@fomo/core';
+import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
 
 export type DetailsField = 'enabled' | 'label' | 'color' | 'name' | 'url' | 'include' | 'shorts';
 
@@ -66,13 +66,13 @@ export function SourceDetailsPane({ source, state, own, changed, stats, items, l
   const valueW = Math.max(10, columns - 4 - 2 - LABEL_W);
   const history = stats?.sourceStatus?.[source.id];
   const lastError = history ? history.lastError : lastFetch?.error;
-  const color = draft.color || COLOR_PALETTE[0]!;
+  const color = draft.color || DEFAULT_SOURCE_COLOR[source.id] || DEFAULT_COLOR;
 
   const value = (field: DetailsField): { text: string; muted?: boolean; color?: string } => {
     switch (field) {
       case 'enabled': return draft.enabled ? { text: '[x] on', color: '#3fb950' } : { text: '[ ] off', color: '#f85149' };
       case 'label': return draft.label ? { text: draft.label } : { text: `(none — shows “${source.displayName}”)`, muted: true };
-      case 'color': return { text: `■ ${color}`, color };
+      case 'color': return { text: `■■ ${colorName(color)} ${color}${draft.color ? '' : ' (default)'}`, color };
       case 'name': return { text: draft.name };
       case 'url': return { text: draft.url };
       case 'include': return draft.include ? { text: draft.include } : { text: '(none — keeps everything)', muted: true };
@@ -94,7 +94,7 @@ export function SourceDetailsPane({ source, state, own, changed, stats, items, l
     ? 'unsaved changes — s save   Esc again to drop them'
     : removed
     ? `${deleteItems.trim()}   v show its updates${source.builtin ? '   r restore' : ''}   Esc close`
-    : `↑↓ move   ↵ ${fields[focus] === 'enabled' || fields[focus] === 'shorts' ? 'toggle' : fields[focus] === 'color' ? 'next color' : 'edit'}   s save   f fetch now   v show its updates${deleteItems}   x remove   Esc close`;
+    : `↑↓ move   ↵ ${fields[focus] === 'enabled' || fields[focus] === 'shorts' ? 'toggle' : fields[focus] === 'color' ? 'pick color' : 'edit'}   s save   f fetch now   v show its updates${deleteItems}   x remove   Esc close`;
 
   return (
     <Box flexDirection="column" height={height} width={columns} paddingX={2} paddingTop={1}>

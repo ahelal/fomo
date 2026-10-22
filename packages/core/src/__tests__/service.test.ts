@@ -50,6 +50,7 @@ vi.mock('../store/tables.js', () => {
     listTodos: vi.fn().mockResolvedValue({ todos: [] }),
     updateTodo: vi.fn(),
     deleteTodo: vi.fn().mockResolvedValue(undefined),
+    moveFolder: vi.fn().mockResolvedValue(2),
   };
 
   return {
@@ -82,10 +83,24 @@ vi.mock('../store/references.js', () => {
   const referenceStore = {
     init: vi.fn().mockResolvedValue(undefined),
     listReferences: vi.fn().mockResolvedValue([]),
+    moveFolder: vi.fn().mockResolvedValue(3),
   };
   return {
     ReferenceStore: vi.fn().mockImplementation(() => referenceStore),
     __mockReferenceStore: referenceStore,
+  };
+});
+
+vi.mock('../store/folder-colors.js', () => {
+  const colorStore = () => ({
+    get: vi.fn().mockResolvedValue({}),
+    set: vi.fn().mockResolvedValue({}),
+    move: vi.fn().mockResolvedValue({}),
+  });
+  const byTable: Record<string, ReturnType<typeof colorStore>> = { todos: colorStore(), references: colorStore() };
+  return {
+    FolderColorStore: vi.fn().mockImplementation((_conn: unknown, table: string) => byTable[table]),
+    __mockColorStores: byTable,
   };
 });
 
@@ -765,6 +780,57 @@ describe('FomoDirectService', () => {
       await expect(svc.suggestReference({ url: 'https://example.com/x' }, summarizer)).rejects.toThrow(/HTTP 404/);
       expect(summarizer.generateJson).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('folder colors', () => {
+  const svc = () => new FomoDirectService('DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=test;TableEndpoint=http://localhost:10002/devstoreaccount1;');
+  const mocks = async () => {
+    const { __mockTodoStore } = await import('../store/tables.js') as any;
+    const { __mockReferenceStore } = await import('../store/references.js') as any;
+    const { __mockColorStores } = await import('../store/folder-colors.js') as any;
+    return { todos: __mockTodoStore, refs: __mockReferenceStore, colors: __mockColorStores };
+  };
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('lists each tree with the colors of its own table', async () => {
+    const { refs, colors } = await mocks();
+    refs.listReferences.mockResolvedValueOnce([]);
+    colors.todos.get.mockResolvedValueOnce({ work: '#ff0000' });
+    colors.references.get.mockResolvedValueOnce({ ai: '#00ff00' });
+    const s = svc();
+    expect(await s.listTodos()).toEqual({ todos: [], folderColors: { work: '#ff0000' } });
+    expect(await s.listReferences()).toEqual({ references: [], folderColors: { ai: '#00ff00' } });
+  });
+
+  it('moves the colors along with a renamed folder', async () => {
+    const { todos, refs, colors } = await mocks();
+    const s = svc();
+    expect(await s.moveTodoFolder('work', 'job')).toBe(2);
+    expect(todos.moveFolder).toHaveBeenCalledWith('work', 'job');
+    expect(colors.todos.move).toHaveBeenCalledWith('work', 'job');
+    expect(await s.moveReferenceFolder('ai', 'ml')).toBe(3);
+    expect(refs.moveFolder).toHaveBeenCalledWith('ai', 'ml');
+    expect(colors.references.move).toHaveBeenCalledWith('ai', 'ml');
+  });
+
+  it('leaves the colors alone when the items could not move', async () => {
+    const { todos, colors } = await mocks();
+    todos.moveFolder.mockRejectedValueOnce(new Error('A folder cannot move into itself'));
+    await expect(svc().moveTodoFolder('a', 'a/b')).rejects.toThrow(/into itself/);
+    expect(colors.todos.move).not.toHaveBeenCalled();
+  });
+
+  it('sets a folder color in the right table', async () => {
+    const { colors } = await mocks();
+    colors.todos.set.mockResolvedValueOnce({ work: '#123456' });
+    const s = svc();
+    expect(await s.setTodoFolderColor('work', '#123456')).toEqual({ work: '#123456' });
+    expect(colors.todos.set).toHaveBeenCalledWith('work', '#123456');
+    await s.setReferenceFolderColor('ai', '');
+    expect(colors.references.set).toHaveBeenCalledWith('ai', '');
+    expect(colors.todos.set).toHaveBeenCalledTimes(1);
   });
 });
 

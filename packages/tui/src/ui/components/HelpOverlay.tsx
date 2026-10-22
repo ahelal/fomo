@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import { searchTerms } from '@fomo/core';
 import { VERSION } from '../../version.js';
 
-export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references';
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references' | 'todos';
 
 interface Props {
   context: HelpContext;
@@ -88,7 +88,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['c',    'Config: sources, link a device, backup / restore'],
   ['w',    'Switch profile (storage account): ↵ switch, a add, e rename, x remove'],
   ['5',    'Bookmarks: links filed into folders'],
-  ['6',    'Todos'],
+  ['6',    'Todos: tasks filed into folders'],
   ['b',    'File the selected update in Bookmarks (Copilot suggests folder + note)'],
   ['d',    'Jump to the duplicate / original of the update, if it is in this view'],
   ['/',    'Search titles & content in this view (↵ search)'],
@@ -107,6 +107,7 @@ const REFERENCE_KEYS: [string, string][] = [
   ['y',    'Copy link'],
   ['a',    'Add a link (in the selected folder)'],
   ['e',    'Edit link · rename or move folder (with its subfolders)'],
+  ['c',    'Color link or folder (links take their folder’s): ←↑↓→ ↵ pick, # hex, d reset'],
   ['d',    'Delete link (press twice)'],
   ['/',    'Search titles, links, folders & notes'],
   ['s',    'Sort links: title, date added (press again for the next)'],
@@ -119,7 +120,32 @@ const REFERENCE_FORM_KEYS: [string, string][] = [
   ['↑↓',   'In Folder: pick an existing folder'],
   ['^G',   'Ask Copilot for folder, note (and title)'],
   ['^U',   'Clear field'],
-  ['↵',    'Save'],
+  ['↵',    'Save (in Color: pick a color)'],
+  ['Esc',  'Cancel'],
+];
+
+const TODO_KEYS: [string, string][] = [
+  ['↑/k ↓/j', 'Move (⇧↑/⇧↓ jumps 5, or 10 on a tall terminal)'],
+  ['↵',    'Open / close folder · todo status: pending → in progress → done'],
+  ['→/l ←','Open folder · close folder / go to parent'],
+  ['x',    'Mark done / reopen'],
+  ['a',    'Add a todo (in the selected folder)'],
+  ['e',    'Edit todo · rename or move folder (with its subfolders)'],
+  ['c',    'Color todo or folder (todos take their folder’s): ←↑↓→ ↵ pick, # hex, d reset'],
+  ['d',    'Delete todo (press twice)'],
+  ['v',    'Show all, open, in progress or done todos (press again for the next)'],
+  ['/',    'Search subjects, notes & folders'],
+  ['s',    'Sort: status, due date, newest, subject (press again for the next)'],
+  ['Esc',  'Clear the search, then close'],
+  ['6/⌫',  'Close'],
+];
+
+const TODO_FORM_KEYS: [string, string][] = [
+  ['Tab/↑↓','Next field (Shift+Tab: previous)'],
+  ['↑↓',   'In Folder: pick an existing folder'],
+  ['Due',  '2026-03-06, today, tomorrow, mon…sun, +3 (days), 2w (weeks)'],
+  ['^U',   'Clear field'],
+  ['↵',    'Save (in Color: pick a color)'],
   ['Esc',  'Cancel'],
 ];
 
@@ -132,7 +158,7 @@ const SETTINGS_KEYS: [string, string][] = [
   ['space','Turn a source on or off'],
   ['←/→',  'Collapse / expand a section'],
   ['e',    'Edit source label or setting'],
-  ['d',    'Cycle source color'],
+  ['d',    'Pick source color: ←↑↓→ ↵ pick, # hex, d default'],
   ['f',    'Fetch this source now'],
   ['v',    'Show only this source’s updates'],
   ['x',    'Remove this source: x again keeps its items, d deletes them too'],
@@ -150,7 +176,16 @@ function buildSections(context: Props['context']): Section[] {
     return [{ title: 'Config', keys: SETTINGS_KEYS }];
   }
   if (context === 'references') {
-    return [{ title: 'Bookmarks', keys: REFERENCE_KEYS }, { title: 'Add / edit form', keys: REFERENCE_FORM_KEYS }];
+    return [
+      { title: 'Bookmarks', keys: REFERENCE_KEYS },
+      { title: 'Add / edit form', keys: REFERENCE_FORM_KEYS },
+    ];
+  }
+  if (context === 'todos') {
+    return [
+      { title: 'Todos', keys: TODO_KEYS },
+      { title: 'Add / edit form', keys: TODO_FORM_KEYS },
+    ];
   }
   if (context === 'digest') {
     return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
@@ -174,6 +209,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   digest: 'Unread · topics',
   saved: 'Pending · topics',
   references: 'Bookmarks',
+  todos: 'Todos',
 };
 
 const KEY_W = 8;

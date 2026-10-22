@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
-import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, Todo, TodoStatus, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TodoSort, TopicSort, UpdateSort } from '@fomo/core';
-import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, sortTodos, TODO_SORTS, TOPIC_SORTS, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
+import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TopicSort, UpdateSort } from '@fomo/core';
+import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, maskConnectionString, readConfigFile, tildify, type LocalConfig } from '../config.js';
@@ -27,10 +27,14 @@ import { DetailPane } from './components/DetailPane.js';
 import { TopicPane } from './components/TopicPane.js';
 import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { FilterBar } from './components/FilterBar.js';
-import { SettingsPane, PREVIEW_OPTIONS, COLOR_PALETTE } from './components/SettingsPane.js';
-import { TodosView, type TodoFormField } from './components/TodosView.js';
+import { SettingsPane, PREVIEW_OPTIONS } from './components/SettingsPane.js';
+import { TodosView } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
-import { editText, useReferences } from './hooks/useReferences.js';
+import { ColorPicker } from './components/ColorPicker.js';
+import { editText } from './editText.js';
+import { useReferences } from './hooks/useReferences.js';
+import { useTodos } from './hooks/useTodos.js';
+import { useColorPicker } from './hooks/useColorPicker.js';
 import { useProfilePicker, type ProfileControls } from './hooks/useProfilePicker.js';
 import { useDuplicates } from './hooks/useDuplicates.js';
 
@@ -41,12 +45,14 @@ type GroupedViews = Record<GroupableView, boolean>;
 const canGroup = (f: FilterStatus): f is GroupableView => f === 'unread' || f === 'saved';
 const isGrouped = (f: FilterStatus, g: GroupedViews) => canGroup(f) && g[f];
 const VIEW_ORDER = ['all', 'unread', 'read', 'saved', 'refs', 'todos'] as const;
+type View = typeof VIEW_ORDER[number];
+/** The view a number key (1–6) shows. */
+const viewForKey = (input: string): View | undefined => (/^[1-6]$/.test(input) ? VIEW_ORDER[Number(input) - 1] : undefined);
 
 /** Sort of each view (cycled with s); kept for the session only. */
 interface ViewSorts {
   list: Partial<Record<FilterStatus, UpdateSort>>;
   topics: Partial<Record<GroupableView, TopicSort>>;
-  todos?: TodoSort;
 }
 
 export interface DigestRunOptions {
@@ -247,17 +253,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   const refreshingRef = useRef(new Set<string>());
   const digestRows = useMemo(() => flattenDigest(digestEntries, expanded), [digestEntries, expanded]);
 
-  // ── Todos state ─────────────────────────────────────────────────────────────
-  const [showTodos, setShowTodos] = useState(false);
-  const [todosList, setTodosList] = useState<Todo[]>([]);
-  const [todosSelectedIndex, setTodosSelectedIndex] = useState(0);
-  const [todosAddMode, setTodosAddMode] = useState(false);
-  const [todosFormField, setTodosFormField] = useState<TodoFormField>('subject');
-  const [todosFormSubject, setTodosFormSubject] = useState('');
-  const [todosFormDue, setTodosFormDue] = useState('');
-  const [todosFormDesc, setTodosFormDesc] = useState('');
-  const [todosMessage, setTodosMessage] = useState<string | undefined>();
-
   // ── Audit trail view (a) ────────────────────────────────────────────────────
   const [showAudit, setShowAudit] = useState(false);
   const [auditIndex, setAuditIndex] = useState(0);
@@ -323,6 +318,8 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     if (notice) showMessage(notice);
   }, [notice, showMessage]);
 
+  /** The color picker popup, shared by Config, source details, Bookmarks and Todos. */
+  const colorPicker = useColorPicker();
   const refs = useReferences({
     service,
     audit,
@@ -330,8 +327,10 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     notify: showMessage,
     openUrl: async (url) => { const { default: open } = await import('open'); await open(url); },
     copy: copyToClipboard,
+    pickColor: colorPicker.open,
     jump: jumpStep(rows),
   });
+  const todos = useTodos({ service, audit, pickColor: colorPicker.open, notify: showMessage, jump: jumpStep(rows) });
 
   const loadSeq = useRef(0);
   const loadUpdates = useCallback(
@@ -380,22 +379,6 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       audit.error('stats', errorText(err));
     }
   }, [service, audit]);
-
-  const loadTodos = useCallback(async () => {
-    try {
-      const resp = await service.listTodos();
-      setTodosList(sortTodos(resp.todos, sortsRef.current.todos));
-      setTodosSelectedIndex((i) => Math.min(i, Math.max(0, resp.todos.length - 1)));
-    } catch (err) {
-      // non-critical
-      audit.error('todo', `load: ${errorText(err)}`);
-    }
-  }, [service, audit]);
-
-  const showTodosMessage = useCallback((msg: string, ms = 2000) => {
-    setTodosMessage(msg);
-    setTimeout(() => setTodosMessage(undefined), ms);
-  }, []);
 
   const refresh = useCallback(
     async (f?: FilterStatus) => {
@@ -1184,12 +1167,16 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
 
   /** Tab / Shift+Tab: step through the views in tab order (1–6), wrapping around. */
   const cycleView = (dir: 1 | -1) => {
-    const current = refs.active ? 'refs' : showTodos ? 'todos' : filter;
-    const next = VIEW_ORDER[(VIEW_ORDER.indexOf(current) + dir + VIEW_ORDER.length) % VIEW_ORDER.length]!;
+    const current = refs.active ? 'refs' : todos.active ? 'todos' : filter;
+    showView(VIEW_ORDER[(VIEW_ORDER.indexOf(current) + dir + VIEW_ORDER.length) % VIEW_ORDER.length]!);
+  };
+
+  /** Show one of the views 1–6, leaving Bookmarks or Todos first. */
+  const showView = (next: View) => {
     if (refs.active) refs.close();
-    if (next === 'refs') { setShowTodos(false); refs.openView(); return; }
-    if (next === 'todos') { setShowTodos(true); void loadTodos(); return; }
-    setShowTodos(false);
+    if (todos.active) todos.close();
+    if (next === 'refs') { refs.openView(); return; }
+    if (next === 'todos') { todos.openView(); return; }
     setFilter(next);
     setSelectedIndex(0);
     void refresh(next);
@@ -1199,8 +1186,10 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   useInput((raw, key) => {
     // Shortcuts ignore case (Shift+b does what b does); typed text keeps `raw`.
     const input = shortcutKey(raw);
+    // ── Color picker popup: takes every key until a color is picked or Esc ──
+    if (colorPicker.active) { colorPicker.handleInput(raw, key); return; }
     // ── Quit from any screen (but not while typing) ──
-    if (input === 'q' && !editingKey && sourceDetails?.editing === undefined && !todosAddMode && !refs.typing && !profilePicker.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
+    if (input === 'q' && !editingKey && sourceDetails?.editing === undefined && !todos.typing && !refs.typing && !profilePicker.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
 
     // ── Search prompt (opened with /) ──
     if (searchDraft !== undefined) {
@@ -1416,10 +1405,16 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         setSourceDetails({ ...ready, draft: { ...d.draft, [field]: !d.draft[field] } });
         return;
       }
-      if (field === 'color' && (key.return || key.rightArrow || key.leftArrow)) {
-        const current = COLOR_PALETTE.indexOf(d.draft.color || COLOR_PALETTE[0]!);
-        const next = COLOR_PALETTE[(current + (key.leftArrow ? -1 : 1) + COLOR_PALETTE.length) % COLOR_PALETTE.length]!;
-        setSourceDetails({ ...ready, draft: { ...d.draft, color: next } });
+      if (field === 'color' && (key.return || input === ' ' || input === 'e')) {
+        setSourceDetails(ready);
+        colorPicker.open({
+          title: detailsSource.displayName,
+          color: d.draft.color,
+          fallback: DEFAULT_SOURCE_COLOR[d.id] ?? DEFAULT_COLOR,
+          fallbackLabel: 'default',
+          sample: d.draft.label || detailsSource.displayName,
+          onPick: (color) => setSourceDetails((cur) => cur && cur.id === d.id ? { ...cur, draft: { ...cur.draft, color } } : cur),
+        });
         return;
       }
       if ((key.return || input === 'e') && typeof d.draft[field] === 'string') {
@@ -1439,139 +1434,27 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       }
       if (key.tab && !refs.typing) { cycleView(key.shift ? -1 : 1); return; }
       if (input === 'w' && !refs.typing) { profilePicker.open(); return; }
-      if (input === '6' && !refs.typing) {
-        refs.close();
-        setShowTodos(true);
-        void loadTodos();
-        return;
-      }
+      // The other views' numbers switch straight to them (5 itself closes Bookmarks)
+      const view = refs.typing ? undefined : viewForKey(input);
+      if (view && view !== 'refs') { showView(view); return; }
       refs.handleInput(raw, key);
       return;
     }
 
-    // ── Todos view input handling ──
-    if (showTodos) {
-      if (todosAddMode) {
-        // Form input handling
-        if (key.escape) {
-          setTodosAddMode(false);
-          setTodosFormSubject('');
-          setTodosFormDue('');
-          setTodosFormDesc('');
-          setTodosFormField('subject');
-          return;
-        }
-        if (key.tab) {
-          setTodosFormField((f) =>
-            f === 'subject' ? 'due' : f === 'due' ? 'description' : 'subject',
-          );
-          return;
-        }
-        if (key.return) {
-          if (!todosFormSubject.trim()) {
-            showTodosMessage('⚠ Subject is required');
-            return;
-          }
-          const subject = todosFormSubject.trim();
-          void (async () => {
-            try {
-              await service.createTodo({
-                subject: todosFormSubject.trim(),
-                description: todosFormDesc.trim() || undefined,
-                dueDate: todosFormDue || undefined,
-              });
-              setTodosAddMode(false);
-              setTodosFormSubject('');
-              setTodosFormDue('');
-              setTodosFormDesc('');
-              setTodosFormField('subject');
-              await loadTodos();
-              showTodosMessage('✓ Todo added');
-            } catch (err) {
-              audit.error('todo', `add “${subject}”: ${errorText(err)}`);
-              showTodosMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-            }
-          })();
-          return;
-        }
-        if (key.backspace || key.delete) {
-          if (todosFormField === 'subject')      setTodosFormSubject((b) => b.slice(0, -1));
-          else if (todosFormField === 'due')     setTodosFormDue((b) => b.slice(0, -1));
-          else if (todosFormField === 'description') setTodosFormDesc((b) => b.slice(0, -1));
-          return;
-        }
-        if (raw && !key.ctrl && !key.meta) {
-          if (todosFormField === 'subject')      setTodosFormSubject((b) => b + raw);
-          else if (todosFormField === 'due')     setTodosFormDue((b) => b + raw);
-          else if (todosFormField === 'description') setTodosFormDesc((b) => b + raw);
-        }
+    // ── Todos view (6) and its add / edit form ──
+    if (todos.active) {
+      if (input === 'h' && !todos.typing) {
+        setHelpContext('todos');
+        setShowHelp(true);
         return;
       }
-
-      // List mode inside todos view
-      if (key.tab) { cycleView(key.shift ? -1 : 1); return; }
-      if (input === 'w') { profilePicker.open(); return; }
-      if (key.escape || key.backspace || input === '6') {
-        setShowTodos(false);
-        return;
-      }
-      if (input === '5') {
-        setShowTodos(false);
-        refs.openView();
-        return;
-      }
-      if (key.upArrow || input === 'k') {
-        setTodosSelectedIndex((i) => Math.max(0, i - step));
-        return;
-      }
-      if (key.downArrow || input === 'j') {
-        setTodosSelectedIndex((i) => Math.max(0, Math.min(todosList.length - 1, i + step)));
-        return;
-      }
-      if (input === 'a') {
-        setTodosAddMode(true);
-        setTodosFormField('subject');
-        return;
-      }
-      if (input === 's') {
-        const next = nextSort(TODO_SORTS, sortsRef.current.todos);
-        sortsRef.current = { ...sortsRef.current, todos: next };
-        setSorts(sortsRef.current);
-        const keep = todosList[todosSelectedIndex]?.id;
-        const sorted = sortTodos(todosList, next);
-        setTodosList(sorted);
-        setTodosSelectedIndex(Math.max(0, sorted.findIndex((t) => t.id === keep)));
-        showTodosMessage(`Sort: ${next.label}`);
-        return;
-      }
-      if (key.return && todosList[todosSelectedIndex]) {
-        const todo = todosList[todosSelectedIndex];
-        const nextStatus: Record<string, string> = {
-          pending: 'in_progress', in_progress: 'done', done: 'pending',
-        };
-        const next = nextStatus[todo.status] as TodoStatus;
-        setTodosList((prev) => prev.map((t) => (t.id === todo.id ? { ...t, status: next } : t)));
-        void service.updateTodo(todo.id, { status: next })
-          .then(() => loadTodos())
-          .catch((err) => {
-            audit.error('todo', `“${todo.subject}” → ${next}: ${errorText(err)}`);
-            return loadTodos();
-          });
-        return;
-      }
-      if (input === 'd' && todosList[todosSelectedIndex]) {
-        const { id, subject } = todosList[todosSelectedIndex];
-        setTodosList((prev) => prev.filter((t) => t.id !== id));
-        setTodosSelectedIndex((i) => Math.max(0, i - 1));
-        void service.deleteTodo(id)
-          .then(() => loadTodos())
-          .catch((err) => {
-            audit.error('todo', `delete “${subject}”: ${errorText(err)}`);
-            return loadTodos();
-          });
-        return;
-      }
-      return; // consume remaining input while in todos view
+      if (key.tab && !todos.typing) { cycleView(key.shift ? -1 : 1); return; }
+      if (input === 'w' && !todos.typing) { profilePicker.open(); return; }
+      // The other views' numbers switch straight to them (6 itself closes Todos)
+      const view = todos.typing ? undefined : viewForKey(input);
+      if (view && view !== 'todos') { showView(view); return; }
+      todos.handleInput(raw, key);
+      return;
     }
 
     // ── Settings view input handling ──
@@ -1673,9 +1556,23 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           setEditBuffer(appSettings.sourceLabels[sourceId] ?? '');
           setEditingKey(row.key);
         } else if (input === 'd') {
-          const currentColor = appSettings.sourceColors?.[sourceId] || COLOR_PALETTE[0];
-          const nextColor = COLOR_PALETTE[(COLOR_PALETTE.indexOf(currentColor) + 1) % COLOR_PALETTE.length];
-          updateRemoteSettings({ sourceColors: { ...appSettings.sourceColors, [sourceId]: nextColor } }, 'source', `${sourceName(sourceId)} color = ${nextColor}`);
+          const own = appSettings.sourceColors?.[sourceId] ?? '';
+          colorPicker.open({
+            title: sourceName(sourceId),
+            color: own,
+            fallback: DEFAULT_SOURCE_COLOR[sourceId] ?? DEFAULT_COLOR,
+            fallbackLabel: 'default',
+            sample: sourceName(sourceId),
+            onPick: (color) => {
+              if (color === own) return;
+              const { [sourceId]: _old, ...rest } = appSettings.sourceColors ?? {};
+              updateRemoteSettings(
+                { sourceColors: color ? { ...rest, [sourceId]: color } : rest },
+                'source',
+                `${sourceName(sourceId)} color = ${color || 'default'}`,
+              );
+            },
+          });
         } else if (input === 'f') {
           void doFetch([sourceId]);
         } else if (input === 'v') {
@@ -1849,8 +1746,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
 
     // Open todos view
     if (input === '6') {
-      setShowTodos(true);
-      void loadTodos();
+      todos.openView();
       return;
     }
 
@@ -2060,7 +1956,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   /** The active view's sort, when it isn't the default order. */
   const activeSortLabel = (() => {
     if (refs.active) return refs.sortLabel;
-    if (showTodos) return isDefaultSort(TODO_SORTS, sorts.todos) ? undefined : sortLabel(TODO_SORTS, sorts.todos);
+    if (todos.active) return todos.sortLabel;
     if (grouped) {
       const sort = sorts.topics[filter as GroupableView];
       return isDefaultSort(TOPIC_SORTS, sort) ? undefined : sortLabel(TOPIC_SORTS, sort);
@@ -2071,16 +1967,19 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
 
   const filterBar = (
     <FilterBar
-      active={refs.active ? 'refs' : showTodos ? 'todos' : filter}
+      active={refs.active ? 'refs' : todos.active ? 'todos' : filter}
       groupedViews={groupedViews}
       columns={columns}
       sourceLabel={sourceFilterLabel}
-      search={!showTodos && !refs.active && search ? search : undefined}
-      matches={!showTodos && !refs.active && search ? searchMatches : undefined}
+      search={!todos.active && !refs.active && search ? search : undefined}
+      matches={!todos.active && !refs.active && search ? searchMatches : undefined}
       searchDraft={searchDraft}
       sortLabel={activeSortLabel}
     />
   );
+
+  /** Drawn last on the screens that pick colors, so it covers them. */
+  const colorPopup = colorPicker.view ? <ColorPicker state={colorPicker.view} columns={columns} rows={rows} /> : null;
 
   const renderTable = (height: number, width: number) =>
     grouped ? (
@@ -2247,6 +2146,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           height={availableH}
           columns={columns}
         />
+        {colorPopup}
       </Box>
     );
   }
@@ -2286,28 +2186,19 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
         {statusBar}
         {filterBar}
         <ReferencesView {...refs.view} height={availableH} columns={columns} />
+        {colorPopup}
       </Box>
     );
   }
 
-  // Todos overlay — replaces main content area
-  if (showTodos) {
+  // Todos view — replaces main content area
+  if (todos.active) {
     return (
       <Box flexDirection="column" height={rows}>
         {statusBar}
         {filterBar}
-        <TodosView
-          todos={todosList}
-          selectedIndex={todosSelectedIndex}
-          height={availableH}
-          columns={columns}
-          addMode={todosAddMode}
-          formField={todosFormField}
-          formSubject={todosFormSubject}
-          formDue={todosFormDue}
-          formDesc={todosFormDesc}
-          message={todosMessage}
-        />
+        <TodosView {...todos.view} height={availableH} columns={columns} />
+        {colorPopup}
       </Box>
     );
   }
@@ -2335,6 +2226,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           height={availableH}
           columns={columns}
         />
+        {colorPopup}
       </Box>
     );
   }

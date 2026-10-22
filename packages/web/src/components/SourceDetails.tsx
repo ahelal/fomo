@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  DEFAULT_COLOR,
   isGithubRepoUrl,
   isYoutubeChannelUrl,
   sourceDraft,
@@ -11,7 +12,7 @@ import {
   type SourceInfo,
   type StatsResponse,
 } from '@fomo/core';
-import { COLOR_PALETTE } from './SettingsPanel.js';
+import { ColorButton, useColorPicker } from './ColorPicker.js';
 
 interface Props {
   source: SourceInfo;
@@ -43,7 +44,7 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
     return { ...d, url: d.url.split(' ').join('\n') };
   });
   const set = (patch: Partial<SourceDraft>) => { setDraft((d) => ({ ...d, ...patch })); setError(undefined); };
-  const color = draft.color || COLOR_PALETTE[0];
+  const colorPicker = useColorPicker();
   const [error, setError] = useState<string | undefined>();
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -117,19 +118,22 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
             <span>Label</span>
             <input className="settings-panel__add-input" value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={source.displayName} />
           </label>
-          <div className="source-details__colors" role="radiogroup" aria-label="Color">
-            {COLOR_PALETTE.map((c) => (
-              <button
-                key={c}
-                type="button"
-                role="radio"
-                aria-checked={c === color}
-                className={`settings-panel__color-swatch${c === color ? ' settings-panel__color-swatch--active' : ''}`}
-                style={{ backgroundColor: c }}
-                onClick={() => set({ color: c })}
-              />
-            ))}
+          <div className="source-details__color">
+            <span>Color</span>
+            <ColorButton
+              color={draft.color}
+              fallback={DEFAULT_COLOR}
+              onClick={() => colorPicker.open({
+                title: source.displayName,
+                color: draft.color,
+                fallback: DEFAULT_COLOR,
+                fallbackLabel: 'default',
+                sample: draft.label || source.displayName,
+                onPick: (color) => set({ color }),
+              })}
+            />
           </div>
+          {colorPicker.element}
         </div>
 
         <div className="settings-panel__section">

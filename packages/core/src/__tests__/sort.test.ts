@@ -117,7 +117,7 @@ describe('reference sort', () => {
     ({ id, title, url: `https://x/${id}`, folder: '', description: '', createdAt, updatedAt: createdAt });
   const refs = [ref('1', 'beta', '2026-01-01'), ref('2', 'Alpha', '2026-01-03'), ref('3', 'gamma', '2026-01-02')];
   const ids = (sort?: Parameters<typeof buildReferenceRows>[3]) =>
-    buildReferenceRows(refs, new Set(), undefined, sort).map((r) => (r.kind === 'ref' ? r.ref.id : r.key));
+    buildReferenceRows(refs, new Set(), undefined, sort).map((r) => (r.kind === 'item' ? r.item.id : r.key));
 
   it('lists links by title, or by date added', () => {
     expect(ids()).toEqual(['2', '1', '3']);
@@ -129,7 +129,7 @@ describe('reference sort', () => {
 
 describe('sortTodos', () => {
   const todo = (id: string, extra: Partial<Todo>): Todo =>
-    ({ id, subject: id, description: '', status: 'pending', createdAt: '2026-01-01', updatedAt: 't', ...extra });
+    ({ id, subject: id, description: '', status: 'pending', folder: '', createdAt: '2026-01-01', updatedAt: 't', ...extra });
   const todos = [
     todo('done', { status: 'done', dueDate: '2026-02-01', createdAt: '2026-01-03' }),
     todo('noDue', { createdAt: '2026-01-02' }),

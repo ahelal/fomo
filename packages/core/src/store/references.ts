@@ -1,7 +1,9 @@
 import { odata, type TableClient, type TableEntity } from '@azure/data-tables';
 import { createTableClient, isSasConnection } from './connection.js';
 import { isTableError } from './tables.js';
-import { isInFolder, moveFolderPath, normalizeFolder, normalizeReferenceUrl } from '../references.js';
+import { normalizeReferenceUrl } from '../references.js';
+import { folderMove, isInFolder, moveFolderPath, normalizeFolder } from '../folders.js';
+import { cleanColor } from '../colors.js';
 import type {
   CreateReferenceRequest,
   Reference,
@@ -18,6 +20,8 @@ type ReferenceEntity = TableEntity<{
   folder: string;
   description: string;
   updateId: string;
+  /** Missing on links stored before colors. */
+  color?: string;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -33,6 +37,7 @@ function entityToReference(e: ReferenceEntity): Reference {
     updatedAt: e.updatedAt,
   };
   if (e.updateId) ref.updateId = e.updateId;
+  if (e.color) ref.color = e.color;
   return ref;
 }
 
@@ -101,6 +106,7 @@ export class ReferenceStore {
 
   async createReference(req: CreateReferenceRequest): Promise<Reference> {
     const url = normalizeReferenceUrl(req.url);
+    const color = cleanColor(req.color);
     await this.assertUnique(url);
     const now = new Date().toISOString();
     const entity: ReferenceEntity = {
@@ -111,6 +117,7 @@ export class ReferenceStore {
       folder: normalizeFolder(req.folder),
       description: (req.description ?? '').trim(),
       updateId: req.updateId ?? '',
+      color,
       createdAt: now,
       updatedAt: now,
     };
@@ -128,6 +135,7 @@ export class ReferenceStore {
       title: patch.title !== undefined ? cleanTitle(patch.title, url) : entity.title,
       folder: patch.folder !== undefined ? normalizeFolder(patch.folder) : entity.folder,
       description: patch.description !== undefined ? patch.description.trim() : entity.description,
+      color: patch.color !== undefined ? cleanColor(patch.color) : (entity.color ?? ''),
       updatedAt: new Date().toISOString(),
     };
     await this.client.updateEntity(updated, 'Replace', { etag: entity.etag });
@@ -143,18 +151,16 @@ export class ReferenceStore {
     }
   }
 
+  /** Rename a folder: every reference in it (and its subfolders) moves under `to`. Returns how many moved. */
   async moveFolder(from: string, to: string): Promise<number> {
-    const src = normalizeFolder(from);
-    const dest = normalizeFolder(to);
-    if (!src) throw new Error('Pick a folder to rename');
-    if (src === dest) return 0;
-    if (isInFolder(dest, src)) throw new Error('A folder cannot move into itself');
-    const refs = (await this.listReferences()).filter((r) => isInFolder(r.folder, src));
+    const move = folderMove(from, to);
+    if (!move) return 0;
+    const refs = (await this.listReferences()).filter((r) => isInFolder(r.folder, move.from));
     const now = new Date().toISOString();
     await Promise.all(
       refs.map((r) =>
         this.client.updateEntity(
-          { partitionKey: REFERENCE_PK, rowKey: r.id, folder: moveFolderPath(r.folder, src, dest), updatedAt: now },
+          { partitionKey: REFERENCE_PK, rowKey: r.id, folder: moveFolderPath(r.folder, move.from, move.to), updatedAt: now },
           'Merge',
         ),
       ),

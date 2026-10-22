@@ -6,13 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const openMock = vi.hoisted(() => vi.fn(async (_url: string) => {}));
 vi.mock('open', () => ({ default: openMock }));
-import { DEFAULT_SETTINGS, retiredSources, sourceInfos } from '@fomo/core';
+import { COLOR_PALETTE, DEFAULT_COLOR, DEFAULT_SETTINGS, moveInGrid, paletteIndex, retiredSources, sourceInfos } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { App, REGROUP_CONFIRM_MS } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
 import { DEFAULT_BACKUP_DIR, tildify, type LocalConfig } from '../src/config.js';
 import type { GhAccount } from '../src/ghAccounts.js';
+import { DEFAULT_SOURCE_COLOR } from '../src/ui/components/UpdatesTable.js';
 import { buildSettingsRows, configDisplay, editStartValue, findRow, firstFocusable, moveFocus, parseConfigEdit, settingsRowText } from '../src/ui/settings.js';
 
 /** The built-in sources the config screen lists with the default settings. */
@@ -341,6 +342,54 @@ describe('Config → sources', () => {
     expect(frame()).not.toContain('Restore removed');
   });
 
+  it('picks a source color in the popup with d, and d in the popup goes back to the default', async () => {
+    const start = DEFAULT_SOURCE_COLOR.github ?? DEFAULT_COLOR;
+    const next = COLOR_PALETTE[moveInGrid(paletteIndex(start), 'right')]!;
+    const { press, frame } = await renderApp();
+    await focusRow(press, 's-github');
+    await press('d');
+    expect(frame()).toContain('Pick a color · ');
+    await press('q'); // the picker keeps every key, so q doesn't quit
+    await press('\u001B[C');
+    await press('\r');
+    expect(updateSettings).toHaveBeenCalledWith({ sourceColors: { github: next } });
+    expect(frame()).not.toContain('Pick a color');
+    await press('d');
+    expect(frame()).toContain('Was     ■ ');
+    await press('d');
+    expect(updateSettings).toHaveBeenLastCalledWith({ sourceColors: {} });
+  });
+
+  it('Esc closes only the color picker', async () => {
+    const { press, frame } = await renderApp();
+    await focusRow(press, 's-github');
+    await press('d');
+    await press('\u001B[C');
+    await press('\u001B');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(frame()).not.toContain('Pick a color');
+    expect(frame()).toContain('d color'); // still on the config screen
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('picks the color in the source details and saves it with s', async () => {
+    const start = DEFAULT_SOURCE_COLOR.github ?? DEFAULT_COLOR;
+    const next = COLOR_PALETTE[moveInGrid(paletteIndex(start), 'right')]!;
+    const { press, frame } = await renderApp();
+    await focusRow(press, 's-github');
+    await press('\r');
+    await press('j');
+    await press('j');
+    expect(frame()).toContain('pick color');
+    await press('\r');
+    expect(frame()).toContain('Pick a color · ');
+    await press('\u001B[C');
+    await press('\r');
+    expect(frame()).toContain('unsaved');
+    await press('s');
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ sourceColors: { github: next } }));
+  });
+
   it('space toggles a source and ↵ opens its details', async () => {
     const { press, frame } = await renderApp();
     await focusRow(press, 's-github');
@@ -478,7 +527,8 @@ describe('Config → web app', () => {
     expect(frame()).toContain('o open in browser');
 
     await press('\r');
-    expect(frame()).toContain('📱 Web app');
+    // The QR code library is loaded lazily, so give it more than one key tick under load.
+    await vi.waitFor(() => expect(frame()).toContain('📱 Web app'));
     expect(frame()).toContain(webUrl);
 
     await press('o');
@@ -598,10 +648,10 @@ describe('/ search', () => {
     const { press, frame } = await renderApp();
     await press('c');
     await press('h');
-    expect(frame()).toContain('Cycle source color');
+    expect(frame()).toContain('Pick source color');
     await press('/');
     for (const ch of 'color') await press(ch);
-    expect(frame()).toContain('Cycle source color');
+    expect(frame()).toContain('Pick source color');
     expect(frame()).not.toContain('Fetch this source now');
     await press('\u001B'); // clears the search
     await press('\u001B'); // closes help

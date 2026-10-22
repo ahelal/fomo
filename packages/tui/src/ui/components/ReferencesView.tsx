@@ -1,25 +1,45 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { ReferenceRow } from '@fomo/core';
-import { REF_FIELDS, type RefField, type ReferencesViewState } from '../hooks/useReferences.js';
+import { folderColor, normalizeFolder, type Reference, type ReferenceRow } from '@fomo/core';
+import { REF_FIELDS, REF_FOLDER_COLOR, type RefField, type ReferencesViewState } from '../hooks/useReferences.js';
+import {
+  ACCENT,
+  DARK,
+  DETAILS_H,
+  DetailsBox,
+  ERROR,
+  FolderFormBox,
+  FolderLine,
+  HINT,
+  MUTED,
+  RenameLine,
+  SearchLine,
+  TEXT,
+  promptLines,
+  truncate,
+  visibleRows,
+  type FormFieldSpec,
+} from './FolderTree.js';
+
+export { DETAILS_H };
 
 interface Props extends ReferencesViewState {
   height: number;
   columns: number;
 }
 
-const ACCENT = '#58a6ff';
-const MUTED = '#8b949e';
-const TEXT = '#c9d1d9';
-const FOLDER = '#e3b341';
-
 const FIELD_LABEL: Record<RefField, string> = {
   title: 'Title',
   url: 'URL',
   folder: 'Folder',
   description: 'Description',
+  color: 'Color',
 };
-const LABEL_W = 13;
+const FIELDS: FormFieldSpec<RefField>[] = REF_FIELDS.map((field) => ({
+  field,
+  label: FIELD_LABEL[field],
+  placeholder: field === 'folder' ? '(top level)' : undefined,
+}));
 
 function host(url: string): string {
   try {
@@ -29,130 +49,90 @@ function host(url: string): string {
   }
 }
 
-function truncate(text: string, width: number): string {
-  if (width <= 0) return '';
-  return text.length > width ? `${text.slice(0, Math.max(0, width - 1))}…` : text;
-}
-
-const Cursor = () => <Text backgroundColor={ACCENT} color="#0d1117">▋</Text>;
-
-function Form({ form, folderMatches, canSuggest, columns }: Pick<Props, 'form' | 'folderMatches' | 'canSuggest' | 'columns'>) {
+function Form({ form, folderMatches, folderColors, canSuggest, columns }: Pick<Props, 'form' | 'folderMatches' | 'folderColors' | 'canSuggest' | 'columns'>) {
   if (!form) return null;
-  const width = columns - 2;
+  const inherited = folderColor(folderColors, normalizeFolder(form.values.folder));
+  const status = form.suggesting
+    ? <Text color={HINT}>{' ✨ Copilot is suggesting a folder and description…'}</Text>
+    : form.note ? <Text color={HINT}>{` ${form.note}`}</Text> : null;
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="#1c7cd6" paddingX={1} width={width}>
-      <Text color={ACCENT} bold>{form.id ? ' Edit bookmark' : ' File in Bookmarks'}</Text>
-      {REF_FIELDS.map((field) => {
-        const active = form.field === field;
-        return (
-          <React.Fragment key={field}>
-            <Box>
-              <Box width={LABEL_W} flexShrink={0}>
-                <Text color={active ? '#f0f6fc' : MUTED} bold={active}>{`${FIELD_LABEL[field]}:`}</Text>
-              </Box>
-              <Box width={Math.max(10, width - 4 - LABEL_W)}>
-                {/* Value lives in its own <Text>: Ink 5 skips re-measuring when a bare string is inserted before the cursor. */}
-                <Text color="#f0f6fc" wrap="wrap">
-                  <Text>{form.values[field]}</Text>
-                  {!form.values[field] && field === 'folder' && !active ? <Text color={MUTED}>(top level)</Text> : null}
-                  {active ? <Cursor /> : null}
-                </Text>
-              </Box>
-            </Box>
-            {field === 'folder' && active && folderMatches.length > 0 && (
-              <Box paddingLeft={LABEL_W}>
-                <Text wrap="truncate-end">
-                  <Text color={MUTED}>{'↑↓ '}</Text>
-                  {folderMatches.map((f, i) => (
-                    <React.Fragment key={f}>
-                      {i > 0 && <Text color={MUTED}>{'  '}</Text>}
-                      <Text color={i === form.pick ? '#0d1117' : FOLDER} backgroundColor={i === form.pick ? FOLDER : undefined}>
-                        {` ${f} `}
-                      </Text>
-                    </React.Fragment>
-                  ))}
-                </Text>
-              </Box>
-            )}
-          </React.Fragment>
-        );
-      })}
-      {form.suggesting && <Text color="#d2a8ff">{' ✨ Copilot is suggesting a folder and description…'}</Text>}
-      {!form.suggesting && form.note && <Text color="#d2a8ff">{` ${form.note}`}</Text>}
-      {form.error && <Text color="#f85149">{` ⚠ ${form.error}`}</Text>}
-      {form.saving && <Text color={MUTED}>{' Saving…'}</Text>}
-      <Text color={MUTED} wrap="truncate-end">
-        {` [Tab/↑↓] field  [↵] save  [Esc] cancel  [^U] clear field${canSuggest ? '  [^G] ask Copilot' : ''}  · folders nest with /`}
-      </Text>
-    </Box>
+    <FolderFormBox
+      title={form.id ? 'Edit bookmark' : 'File in Bookmarks'}
+      form={form}
+      fields={FIELDS}
+      folderMatches={folderMatches}
+      folderColor={REF_FOLDER_COLOR}
+      colorFallback={inherited}
+      colorFallbackLabel={inherited ? 'folder color' : 'none'}
+      status={status}
+      footer={`[Tab/↑↓] field  [↵] save  [Esc] cancel  [^U] clear field${canSuggest ? '  [^G] ask Copilot' : ''}  · folders nest with /`}
+      columns={columns}
+    />
   );
 }
 
-function Row({ row, selected, columns }: { row: ReferenceRow; selected: boolean; columns: number }) {
-  const bg = selected ? ACCENT : undefined;
+function Row({ row, selected, columns, colorOf, folderColorOf }: {
+  row: ReferenceRow;
+  selected: boolean;
+  columns: number;
+  colorOf(ref: Reference): string | undefined;
+  folderColorOf(path: string): string;
+}) {
+  if (row.kind === 'folder') return <FolderLine row={row} selected={selected} columns={columns} color={folderColorOf(row.path)} />;
   const indent = '  '.repeat(row.depth);
-  if (row.kind === 'folder') {
-    const label = `${indent}${row.open ? '▾' : '▸'} ${row.name}/`;
-    const count = ` ${row.count}`;
-    return (
-      <Box width={columns}>
-        <Text backgroundColor={bg} color={selected ? '#0d1117' : FOLDER} bold wrap="truncate-end">
-          {' '}{truncate(label, columns - count.length - 2)}
-          <Text color={selected ? '#0d1117' : MUTED} bold={false}>{count}</Text>
-        </Text>
-      </Box>
-    );
-  }
-  const site = host(row.ref.url);
+  const ref = row.item;
+  const color = colorOf(ref);
+  const site = host(ref.url);
   const siteText = site ? `  ${site}` : '';
   const titleW = Math.max(10, columns - 2 - indent.length - 2 - siteText.length);
+  const fg = (c: string) => (selected ? DARK : c);
   return (
     <Box width={columns}>
-      <Text backgroundColor={bg} color={selected ? '#0d1117' : TEXT} wrap="truncate-end">
-        {' '}{indent}{'• '}{truncate(row.ref.title, titleW)}
-        <Text color={selected ? '#0d1117' : MUTED}>{siteText}</Text>
+      <Text backgroundColor={selected ? ACCENT : undefined} color={fg(TEXT)} wrap="truncate-end">
+        {' '}{indent}
+        <Text color={fg(color ?? TEXT)}>{color ? '● ' : '• '}</Text>
+        <Text color={fg(color ?? TEXT)}>{truncate(ref.title, titleW)}</Text>
+        <Text color={fg(MUTED)}>{siteText}</Text>
       </Text>
     </Box>
   );
 }
 
-function Details({ row, columns, confirmDelete }: { row?: ReferenceRow; columns: number; confirmDelete?: string }) {
+function Details({ row, columns, confirmDelete, folderColorOf }: { row?: ReferenceRow; columns: number; confirmDelete?: string; folderColorOf(path: string): string }) {
   const lines: React.ReactNode[] = [];
   if (!row) lines.push(<Text key="none" color={MUTED}> </Text>);
   else if (row.kind === 'folder') {
     lines.push(
-      <Text key="f" color={FOLDER} wrap="truncate-end">{` ${row.path}/`}<Text color={MUTED}>{` · ${row.count} link${row.count === 1 ? '' : 's'}`}</Text></Text>,
-      <Text key="h" color={MUTED} wrap="truncate-end">{' [↵/→/←] open · close  [e] rename or move  [a] add a link here'}</Text>,
+      <Text key="f" color={folderColorOf(row.path)} wrap="truncate-end">{` ${row.path}/`}<Text color={MUTED}>{` · ${row.count} link${row.count === 1 ? '' : 's'}`}</Text></Text>,
+      <Text key="h" color={MUTED} wrap="truncate-end">{' [↵/→/←] open · close  [e] rename or move  [c] color  [a] add a link here'}</Text>,
     );
   } else {
-    const { ref } = row;
+    const ref = row.item;
     lines.push(
       <Text key="d" color={TEXT} wrap="truncate-end">{` ${ref.description || '(no description — e to add one)'}`}</Text>,
       <Text key="u" color={ACCENT} wrap="truncate-end">{` ${ref.url}`}</Text>,
-      <Text key="m" color={confirmDelete === ref.id ? '#f85149' : MUTED} wrap="truncate-end">
+      <Text key="m" color={confirmDelete === ref.id ? ERROR : MUTED} wrap="truncate-end">
         {confirmDelete === ref.id
           ? ' d again to delete · any other key cancels'
-          : ` ${ref.folder || 'top level'} · added ${ref.createdAt.slice(0, 10)}  [↵/o] open  [y] copy link  [e] edit  [d] delete`}
+          : ` ${ref.folder || 'top level'} · added ${ref.createdAt.slice(0, 10)}  [↵/o] open  [y] copy link  [e] edit  [c] color  [d] delete`}
       </Text>,
     );
   }
-  return (
-    <Box flexDirection="column" width={columns} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} borderColor="gray">
-      {lines}
-    </Box>
-  );
+  return <DetailsBox columns={columns}>{lines}</DetailsBox>;
 }
 
-export const DETAILS_H = 4;
-
 export function ReferencesView(props: Props) {
-  const { rows, total, selectedIndex, loading, search, searchDraft, form, rename, message, height, columns } = props;
+  const { rows, total, selectedIndex, loading, search, searchDraft, form, rename, folderColors, height, columns } = props;
+  const folderColorOf = (path: string) => folderColor(folderColors, path) ?? REF_FOLDER_COLOR;
+  const colorOf = (ref: Reference) => ref.color || folderColor(folderColors, ref.folder);
 
   const header = (
     <Box width={columns} borderStyle="single" borderBottom borderTop={false} borderLeft={false} borderRight={false} borderColor="gray">
-      <Text color={ACCENT} bold> 🔖 Bookmarks </Text>
-      <Text color={MUTED}>{` · ${total} link${total === 1 ? '' : 's'}${loading ? ' · loading…' : ''} `}</Text>
-      {!form && <Text color={MUTED} wrap="truncate-end">{' [a] add  [e] edit  [d] delete  [o] open  [/] search  [s] sort  [5] close'}</Text>}
+      <Box flexShrink={0}>
+        <Text color={ACCENT} bold>{' 🔖 Bookmarks'}</Text>
+        <Text color={MUTED}>{` · ${total} link${total === 1 ? '' : 's'}${loading ? ' · loading…' : ''}`}</Text>
+      </Box>
+      {!form && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [e] edit  [d] delete  [c] color  [o] open  [/] search  [s] sort  [5] close'}</Text>}
     </Box>
   );
 
@@ -160,47 +140,19 @@ export function ReferencesView(props: Props) {
     return (
       <Box flexDirection="column" width={columns} height={height}>
         {header}
-        <Form form={form} folderMatches={props.folderMatches} canSuggest={props.canSuggest} columns={columns} />
+        <Form form={form} folderMatches={props.folderMatches} folderColors={folderColors} canSuggest={props.canSuggest} columns={columns} />
       </Box>
     );
   }
 
-  const searchLine = searchDraft !== undefined ? (
-    <Text wrap="truncate-start">
-      <Text color={FOLDER} bold>{' / '}</Text>
-      <Text color="#f0f6fc">{searchDraft}</Text>
-      <Cursor />
-      <Text color={MUTED}>{'   ↵ search · Esc cancel · ^U clear'}</Text>
-    </Text>
-  ) : search ? (
-    <Text wrap="truncate-end">
-      <Text color={FOLDER} inverse>{` /${search} `}</Text>
-      <Text color={MUTED}>{` ${rows.filter((r) => r.kind === 'ref').length} match(es) · Esc clears`}</Text>
-    </Text>
-  ) : null;
-  const renameLine = rename ? (
-    <Box flexDirection="column">
-      <Text wrap="truncate-start">
-        <Text color={FOLDER} bold>{` Move ${rename.from}/ to: `}</Text>
-        <Text color="#f0f6fc">{rename.value}</Text>
-        <Cursor />
-        <Text color={MUTED}>{'   ↵ move · Esc cancel · ^U clear'}</Text>
-      </Text>
-      {rename.error && <Text color="#f85149">{` ⚠ ${rename.error}`}</Text>}
-    </Box>
-  ) : null;
-
-  const extra = (searchLine ? 1 : 0) + (rename ? (rename.error ? 2 : 1) : 0) + (message ? 1 : 0);
-  const listH = Math.max(1, height - 2 - DETAILS_H - extra);
-  const start = Math.max(0, Math.min(selectedIndex - Math.floor(listH / 2), rows.length - listH));
-  const visible = rows.slice(start, start + listH);
+  const listH = Math.max(1, height - 2 - DETAILS_H - promptLines(props));
+  const { start, visible } = visibleRows(rows, selectedIndex, listH);
 
   return (
     <Box flexDirection="column" width={columns} height={height}>
       {header}
-      {searchLine}
-      {renameLine}
-      {message && <Text color={FOLDER}>{` ${message}`}</Text>}
+      <SearchLine search={search} searchDraft={searchDraft} matches={rows.filter((r) => r.kind === 'item').length} color={REF_FOLDER_COLOR} />
+      <RenameLine rename={rename} color={REF_FOLDER_COLOR} />
       <Box flexDirection="column" height={listH}>
         {rows.length === 0 ? (
           <Box height={listH} alignItems="center" justifyContent="center">
@@ -209,10 +161,12 @@ export function ReferencesView(props: Props) {
             </Text>
           </Box>
         ) : (
-          visible.map((row, i) => <Row key={row.key} row={row} selected={start + i === selectedIndex} columns={columns} />)
+          visible.map((row, i) => (
+            <Row key={row.key} row={row} selected={start + i === selectedIndex} columns={columns} colorOf={colorOf} folderColorOf={folderColorOf} />
+          ))
         )}
       </Box>
-      <Details row={rows[selectedIndex]} columns={columns} confirmDelete={props.confirmDelete} />
+      <Details row={rows[selectedIndex]} columns={columns} confirmDelete={props.confirmDelete} folderColorOf={folderColorOf} />
     </Box>
   );
 }

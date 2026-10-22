@@ -2,11 +2,11 @@ import React, { act } from 'react';
 import { PassThrough } from 'node:stream';
 import { render } from 'ink';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SETTINGS, isInFolder, moveFolderPath, type Reference, type Update } from '@fomo/core';
+import { COLOR_PALETTE, DEFAULT_SETTINGS, isInFolder, moveFolderPath, moveInGrid, paletteIndex, setFolderColor, type FolderColorMap, type Reference, type Update } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import { App } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
-import { folderMatches } from '../src/ui/hooks/useReferences.js';
+import { folderMatches, REF_FOLDER_COLOR, REF_ITEM_COLOR } from '../src/ui/hooks/useReferences.js';
 
 type FakeStdin = PassThrough & { isTTY: boolean; setRawMode(on: boolean): void; ref(): void; unref(): void };
 
@@ -17,6 +17,11 @@ const DOWN = '\u001B[B';
 const CTRL_G = '\u0007';
 const SHIFT_DOWN = '\u001B[1;2B';
 const SHIFT_UP = '\u001B[1;2A';
+const RIGHT = '\u001B[C';
+const CTRL_U = '\u0015';
+
+/** The color the picker lands on after one → from `start`. */
+const rightOf = (start: string) => COLOR_PALETTE[moveInGrid(paletteIndex(start), 'right')]!;
 
 const update: Update = {
   id: 'github__1',
@@ -37,13 +42,15 @@ function ref(id: string, title: string, folder: string, url = `https://example.c
 
 function fakeService(initial: Reference[], updates: Update[] = [update]) {
   let refs = [...initial];
+  let folderColors: FolderColorMap = {};
   const svc = {
     getSettings: async () => ({ ...DEFAULT_SETTINGS }),
     getSources: async () => [],
     getDigest: async () => ({ entries: [], pending: 0 }),
-    listUpdates: async () => ({ updates, total: updates.length }),
+    listUpdates: vi.fn(async (_query: { status?: string; saved?: boolean }) => ({ updates, total: updates.length })),
     getStats: async () => ({ total: 1, byStatus: { unread: 1, read: 0 }, bySource: {}, saved: 0 }),
-    listReferences: vi.fn(async () => ({ references: refs })),
+    listReferences: vi.fn(async () => ({ references: refs, folderColors })),
+    listTodos: async () => ({ todos: [], folderColors: {} }),
     createReference: vi.fn(async (req: Omit<Reference, 'id' | 'createdAt' | 'updatedAt'>) => {
       const created = { ...req, id: `new${refs.length}`, createdAt: '2026-10-03T00:00:00Z', updatedAt: 'x' } as Reference;
       refs = [...refs, created];
@@ -58,6 +65,10 @@ function fakeService(initial: Reference[], updates: Update[] = [update]) {
       const moved = refs.filter((r) => isInFolder(r.folder, from)).length;
       refs = refs.map((r) => ({ ...r, folder: moveFolderPath(r.folder, from, to) }));
       return moved;
+    }),
+    setReferenceFolderColor: vi.fn(async (folder: string, color: string) => {
+      folderColors = setFolderColor(folderColors, folder, color);
+      return folderColors;
     }),
   };
   return svc;
@@ -156,6 +167,34 @@ describe('5 Bookmarks view', () => {
     expect(frame()).not.toContain('3 links');
   });
 
+  it('shows messages in the status bar, so the tree never moves', async () => {
+    const { press, frame } = await renderApp(library);
+    await press('5');
+    const line = (text: string) => frame().split('\n').findIndex((l) => l.includes(text));
+    const before = line('Bicep docs');
+    await press('c', RIGHT, ENTER);
+    expect(frame()).toContain('✓ Colored ai/');
+    expect(line('✓ Colored ai/')).toBeLessThan(line('Bookmarks'));
+    expect(line('Bicep docs')).toBe(before);
+  });
+
+  it('switches straight to another view with its number, but not while typing', async () => {
+    const { svc, press, frame } = await renderApp(library);
+    await press('5', '3');
+    expect(frame()).not.toContain('3 links');
+    expect(svc.listUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'read' }));
+    await press('5', '6');
+    expect(frame()).toContain('✓ Todos');
+    await press('5');
+    expect(frame()).toContain('3 links');
+    svc.listUpdates.mockClear();
+    await press('/', '2'); // typed into the search prompt
+    expect(svc.listUpdates).not.toHaveBeenCalled();
+    await press(ESC, '1');
+    expect(frame()).not.toContain('3 links');
+    expect(svc.listUpdates).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'all' }));
+  });
+
   it('searches links and renames a folder with its subfolders', async () => {
     const { svc, press, frame } = await renderApp(library);
     await press('5', '/', 'b', 'i', 'c', 'e', 'p', ENTER);
@@ -187,6 +226,28 @@ describe('5 Bookmarks view', () => {
       expect.objectContaining({ url: 'https://q.dev', folder: 'ai', description: 'quick' }),
     );
     expect(frame()).toContain('Filed in ai');
+  });
+
+  it('colors a folder and a link with the color picker (c)', async () => {
+    const { svc, press, frame } = await renderApp(library);
+    await press('5', 'c');
+    expect(frame()).toContain('Pick a color · folder ai/');
+    await press(RIGHT, ENTER);
+    expect(svc.setReferenceFolderColor).toHaveBeenCalledWith('ai', rightOf(REF_FOLDER_COLOR));
+    expect(frame()).toContain('✓ Colored ai/');
+    await press(DOWN, DOWN, 'c'); // ai/ → agents/ → Agents guide
+    expect(frame()).toContain('Pick a color · “Agents guide”');
+    await press('#', CTRL_U, ...'#123456', ENTER);
+    expect(svc.updateReference).toHaveBeenCalledWith('1', { color: '#123456' });
+    expect(frame()).toContain('✓ Colored “Agents guide”');
+  });
+
+  it('picks a color in the add form, then ↵ saves', async () => {
+    const { svc, press, frame } = await renderApp([]);
+    await press('5', 'a', ...'https://c.dev', TAB, TAB, TAB, ENTER); // url → folder → description → color
+    expect(frame()).toContain('Pick a color · this link');
+    await press(RIGHT, ENTER, ENTER);
+    expect(svc.createReference).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://c.dev', color: rightOf(REF_ITEM_COLOR) }));
   });
 
   it('sorts links within a folder with s', async () => {

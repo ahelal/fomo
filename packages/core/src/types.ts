@@ -331,7 +331,16 @@ export interface FomoService {
   deleteReference(id: string): Promise<void>;
   /** Rename a folder: every reference in it (and its subfolders) moves under `to`. Returns how many moved. */
   moveReferenceFolder(from: string, to: string): Promise<number>;
+  /** Color a Bookmarks folder (`''` clears it); returns every folder color. */
+  setReferenceFolderColor(folder: string, color: string): Promise<FolderColorMap>;
+  /** Rename a Todos folder, like `moveReferenceFolder`. Returns how many todos moved. */
+  moveTodoFolder(from: string, to: string): Promise<number>;
+  /** Color a Todos folder (`''` clears it); returns every folder color. */
+  setTodoFolderColor(folder: string, color: string): Promise<FolderColorMap>;
 }
+
+/** Folder path → `#rrggbb`; a folder without a color shows its parent's. */
+export type FolderColorMap = Record<string, string>;
 
 // ─── References (bookmarks filed into folders) ───────────────────────────────
 
@@ -346,6 +355,8 @@ export interface Reference {
   description: string;
   /** The feed update this was filed from, if any. */
   updateId?: string;
+  /** `#rrggbb` tag color, if one was picked. */
+  color?: string;
   /** ISO 8601 datetime */
   createdAt: string;
   /** ISO 8601 datetime */
@@ -358,6 +369,8 @@ export interface CreateReferenceRequest {
   folder?: string;
   description?: string;
   updateId?: string;
+  /** `#rrggbb`; `''` or omitted for none. */
+  color?: string;
 }
 
 export interface UpdateReferenceRequest {
@@ -365,10 +378,13 @@ export interface UpdateReferenceRequest {
   url?: string;
   folder?: string;
   description?: string;
+  /** `#rrggbb`, or `''` to clear it. */
+  color?: string;
 }
 
 export interface ListReferencesResponse {
   references: Reference[];
+  folderColors?: FolderColorMap;
 }
 
 /** Copilot's proposal for filing a link (TUI only). */
@@ -390,6 +406,10 @@ export interface Todo {
   /** ISO 8601 date string, e.g. '2024-12-31'. Optional. */
   dueDate?: string;
   status: TodoStatus;
+  /** Folder path, segments joined with `/` (e.g. `work/fomo`); `''` is the top level. */
+  folder: string;
+  /** `#rrggbb` tag color, if one was picked. */
+  color?: string;
   /** ISO 8601 datetime */
   createdAt: string;
   /** ISO 8601 datetime */
@@ -400,13 +420,20 @@ export interface CreateTodoRequest {
   subject: string;
   description?: string;
   dueDate?: string;
+  folder?: string;
+  /** `#rrggbb`; `''` or omitted for none. */
+  color?: string;
 }
 
 export interface UpdateTodoRequest {
   subject?: string;
   description?: string;
+  /** ISO date, or `''` to clear it. */
   dueDate?: string;
   status?: TodoStatus;
+  folder?: string;
+  /** `#rrggbb`, or `''` to clear it. */
+  color?: string;
 }
 
 export interface ListTodosOptions {
@@ -415,6 +442,7 @@ export interface ListTodosOptions {
 
 export interface ListTodosResponse {
   todos: Todo[];
+  folderColors?: FolderColorMap;
 }
 
 // ─── Centralised settings ────────────────────────────────────────────────────

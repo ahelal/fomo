@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { newUserSource, retiredSources, type AppSettings, type SourceInfo, type PreviewPosition, type StatsResponse, type UserSourceSpec } from '@fomo/core';
+import { DEFAULT_COLOR, newUserSource, retiredSources, type AppSettings, type SourceInfo, type PreviewPosition, type StatsResponse, type UserSourceSpec } from '@fomo/core';
 import { SourceDetails } from './SourceDetails.js';
+import { ColorButton, useColorPicker } from './ColorPicker.js';
 
 interface Props {
   settings: AppSettings;
@@ -25,29 +26,6 @@ interface Props {
 }
 
 const PREVIEW_OPTIONS: PreviewPosition[] = ['right', 'bottom', 'off'];
-
-export const COLOR_PALETTE = [
-  '#58a6ff', // cyan (default)
-  '#3fb950', // green
-  '#e3b341', // yellow
-  '#f85149', // red
-  '#bc8cff', // purple
-  '#f78166', // orange
-  '#79c0ff', // light blue
-  '#d2a8ff', // lavender
-  '#ff7b72', // coral
-  '#7ee787', // mint
-  '#06b6d4', // teal
-  '#f472b6', // pink
-  '#fb923c', // amber
-  '#a3e635', // lime
-  '#34d399', // emerald
-  '#e879f9', // fuchsia
-  '#fbbf24', // gold
-  '#818cf8', // indigo
-  '#f87171', // rose
-  '#94a3b8', // slate
-];
 
 /** Form that adds an RSS/Atom feed, a GitHub repository's releases or a YouTube channel. */
 function AddSourceForm({ settings, onAdd }: { settings: AppSettings; onAdd(spec: UserSourceSpec): void }) {
@@ -101,7 +79,7 @@ export function SettingsPanel({ settings, sources, stats, onToggleSource, onSetP
   const disabledSet = new Set(settings.disabledSources);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBuffer, setEditBuffer] = useState('');
-  const [colorPickerId, setColorPickerId] = useState<string | null>(null);
+  const colorPicker = useColorPicker();
   /** Source waiting for a second click on its remove button. */
   const [removingId, setRemovingId] = useState<string | null>(null);
   const removed = settings.removedSources?.length ?? 0;
@@ -126,9 +104,8 @@ export function SettingsPanel({ settings, sources, stats, onToggleSource, onSetP
             {sources.map((s) => {
               const enabled = !disabledSet.has(s.id);
               const customLabel = settings.sourceLabels[s.id];
-              const sourceColor = settings.sourceColors?.[s.id] || COLOR_PALETTE[0];
+              const sourceColor = settings.sourceColors?.[s.id] ?? '';
               const isEditing = editingId === s.id;
-              const isPickingColor = colorPickerId === s.id;
 
               return (
                 <div key={s.id} className="settings-panel__toggle">
@@ -144,29 +121,19 @@ export function SettingsPanel({ settings, sources, stats, onToggleSource, onSetP
                     {s.displayName}
                     <span className="settings-panel__toggle-id" title={s.location}>{s.builtin ? s.id : `${s.id} · yours`}</span>
                   </span>
-                  <span className="settings-panel__color-area">
-                    <button
-                      className="settings-panel__color-btn"
-                      style={{ backgroundColor: sourceColor }}
-                      onClick={() => setColorPickerId(isPickingColor ? null : s.id)}
-                      title="Pick color"
-                    />
-                    {isPickingColor && (
-                      <div className="settings-panel__color-picker">
-                        {COLOR_PALETTE.map((c) => (
-                          <button
-                            key={c}
-                            className={`settings-panel__color-swatch${c === sourceColor ? ' settings-panel__color-swatch--active' : ''}`}
-                            style={{ backgroundColor: c }}
-                            onClick={() => {
-                              onSetSourceColor(s.id, c);
-                              setColorPickerId(null);
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </span>
+                  <ColorButton
+                    compact
+                    color={sourceColor}
+                    fallback={DEFAULT_COLOR}
+                    onClick={() => colorPicker.open({
+                      title: s.displayName,
+                      color: sourceColor,
+                      fallback: DEFAULT_COLOR,
+                      fallbackLabel: 'default',
+                      sample: customLabel || s.displayName,
+                      onPick: (color) => onSetSourceColor(s.id, color),
+                    })}
+                  />
                   <span className="settings-panel__label-area">
                     {isEditing ? (
                       <input
@@ -249,6 +216,8 @@ export function SettingsPanel({ settings, sources, stats, onToggleSource, onSetP
             onClose={() => setDetailsId(null)}
           />
         )}
+
+        {colorPicker.element}
 
         <div className="settings-panel__section">
           <h3>Preview Position</h3>

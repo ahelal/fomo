@@ -1,7 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { timeAgo, type AppSettings, type PreviewPosition, type SourceFetchResult, type StatsResponse } from '@fomo/core';
+import { DEFAULT_COLOR, timeAgo, type AppSettings, type PreviewPosition, type SourceFetchResult, type StatsResponse } from '@fomo/core';
 import { maskConnectionString, type LocalConfig } from '../../config.js';
+import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
 import { ADD_SOURCE_PROMPTS, configDisplay, rowHint, type AddSourceStep, type SettingsRow } from '../settings.js';
 
 interface Props {
@@ -31,29 +32,6 @@ interface Props {
 }
 
 const PREVIEW_OPTIONS: PreviewPosition[] = ['right', 'bottom', 'off'];
-
-const COLOR_PALETTE = [
-  '#58a6ff', // cyan (default)
-  '#3fb950', // green
-  '#e3b341', // yellow
-  '#f85149', // red
-  '#bc8cff', // purple
-  '#f78166', // orange
-  '#79c0ff', // light blue
-  '#d2a8ff', // lavender
-  '#ff7b72', // coral
-  '#7ee787', // mint
-  '#06b6d4', // teal
-  '#f472b6', // pink
-  '#fb923c', // amber
-  '#a3e635', // lime
-  '#34d399', // emerald
-  '#e879f9', // fuchsia
-  '#fbbf24', // gold
-  '#818cf8', // indigo
-  '#f87171', // rose
-  '#94a3b8', // slate
-];
 
 const BG = '#0d1117';
 const FOCUS_BG = '#1c2d4f';
@@ -191,7 +169,7 @@ export const SettingsPane = React.memo(function SettingsPane({
           <Text color={enabled ? '#3fb950' : '#f85149'} backgroundColor={bg}>{enabled ? '● ' : '○ '}</Text>
           {name(row.source.displayName, enabled ? '#f0f6fc' : '#8b949e')}
           <Text color={enabled ? '#3fb950' : '#f85149'} backgroundColor={bg}>{status}</Text>
-          <Text color={settings.sourceColors?.[id] || COLOR_PALETTE[0]} backgroundColor={bg}>{'■ '}</Text>
+          <Text color={settings.sourceColors?.[id] || DEFAULT_SOURCE_COLOR[id] || DEFAULT_COLOR} backgroundColor={bg}>{'■ '}</Text>
           <Text color="#58a6ff" backgroundColor={bg}>{label}</Text>
           <Text color="#8b949e" backgroundColor={bg}>{count}</Text>
           <Text color="#3fb950" backgroundColor={bg}>{added}</Text>
@@ -299,4 +277,4 @@ export const SettingsPane = React.memo(function SettingsPane({
   );
 });
 
-export { PREVIEW_OPTIONS, COLOR_PALETTE };
+export { PREVIEW_OPTIONS };

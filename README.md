@@ -14,6 +14,8 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
 - [Copilot Digest](#copilot-digest)
   - [Post Summaries](#post-summaries)
   - [Bookmarks](#bookmarks)
+  - [Todos](#todos)
+  - [Colors](#colors)
 - [Installation](#installation)
   - [Azure Deployment](#azure-deployment)
   - [TUI Setup](#tui-setup)
@@ -160,10 +162,32 @@ Press `u` on an update in the TUI to correct its details from the linked page, e
 - **Add any link:** open Bookmarks (`5`) and press `a`. The new link goes in the selected folder.
   - In the TUI form, `^G` asks Copilot to suggest a folder and description, and a title if one is missing. FOMO fetches the page to do this.
 - **Folders** exist only as long as they hold links; they're not stored separately. Type a new path to create one.
-  - `e` on a folder renames or moves it together with its subfolders. `e` on a link edits it.
+  - `e` on a folder renames or moves it together with its subfolders (and their colors). `e` on a link edits it.
+  - `Enter` or `→` opens a folder, `←` closes it or goes to its parent.
   - `d` twice deletes a link.
+- **Colors:** `c` [colors](#colors) the selected link or folder. A link without a color of its own takes its folder's, and a subfolder its parent's.
 - **Search** (`/`) matches titles, URLs, folders and descriptions.
 - Copilot suggestions run only in the TUI. In the web app, you type the folder and description yourself, picking from existing folders.
+
+### Todos
+
+**Todos** (`6`) are filed in a folder tree like `work/fomo`, exactly like [Bookmarks](#bookmarks): the same folders, keys and colors, in the TUI and the web app.
+
+- **Add** with `a`: subject, due date, folder, description and color. The new todo goes in the selected folder.
+  - The due date takes `2026-03-06`, `today`, `tomorrow`, `mon`…`sun`, `+3` (days) or `2w` (weeks), and the form shows the date it read. The web app also has a date picker.
+- **Status:** `Enter` steps a todo from pending to in progress to done; `x` marks it done or reopens it. Overdue dates show in red, and dates due today or tomorrow in yellow.
+- **Folders** exist as long as they hold todos. Each shows a progress bar of how many of its todos are done. `e` on a folder renames or moves it with its subfolders; `e` on a todo edits it.
+- `c` [colors](#colors) a todo or folder. `v` shows all, open, in-progress or done todos; `s` sorts by status, due date, newest or subject; `/` searches subjects, descriptions and folders; `d` twice deletes a todo.
+
+### Colors
+
+Every color in FOMO is picked from the same popup, in both apps: a source's color (config screen, or its details), and the color of a bookmark, todo or folder (`c`).
+
+- `←↑↓→` move over the palette, `Enter` applies, `Esc` cancels. In the web app you can also click a swatch.
+- `#` types any hex color (`#3fb950`).
+- `d` resets: a source goes back to its default color; a link, todo or folder goes back to its folder's color.
+
+The popup shows the current color and, when there is none of its own, the color it falls back to.
 
 ---
 
@@ -259,7 +283,7 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `1` `2` `3` `4` | All / Unread / Read / Pending             |
 | `2` / `4` again | Switch Unread / Pending between topics and a list (or click the active tab) |
 | `5`             | [Bookmarks](#bookmarks) (`5` again returns to the previous view) |
-| `6`             | Todos                                     |
+| `6`             | [Todos](#todos) (`6` again returns to the previous view) |
 | `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
 | `b`             | File the selected update in Bookmarks     |
 | `/`             | Search titles & content in the current view (`Enter` searches, `Esc` clears) |
@@ -277,7 +301,7 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `s`             | Cycle the sort order of the view (or click ↕) |
 | `o`             | Open URL in a new tab                     |
 | `.`             | Toggle preview position (right / bottom)  |
-| `c`             | Config                                    |
+| `c`             | Config (in Bookmarks and Todos: [color](#colors) the selected row) |
 | `h`             | Help (also shows the version)             |
 
 Letter keys work in either case: `B` does the same as `b`.
@@ -320,7 +344,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands. 
 | `c`             | Config: sources, link a device, backup / restore, local settings |
 | `w`             | [Profiles](#profiles-several-storage-accounts): switch, add, rename or remove a storage account (also in Config, Todos and Bookmarks) |
 | `5`             | [Bookmarks](#bookmarks): links filed into folders (`5` again closes) |
-| `6`             | Todos (`a` add, `Enter` cycle status, `d` delete, `6` again closes) |
+| `6`             | [Todos](#todos): tasks filed into folders (`6` again closes) |
 | `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
 | `b`             | File the selected update in Bookmarks (Copilot suggests a folder and note) |
 | `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |
@@ -366,7 +390,7 @@ Press `c`. The bottom line shows the keys for the selected row. Each section hea
 | | Show web app QR | `Enter`: QR code of the plain web app URL (no access token) to open it on your phone · `o` opens it in the browser |
 | | Regroup all topics | `Enter` twice: rerun the Copilot digest on every unread and pending update |
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
-| **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` color · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed, GitHub repo or YouTube channel; **Restore removed** brings back removed built-ins |
+| **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` [color](#colors) · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed, GitHub repo or YouTube channel; **Restore removed** brings back removed built-ins |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
 | **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (minutes), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (Auto-fetch takes 5–1440 minutes or `off`; Group after fetch toggles; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. With several [profiles](#profiles-several-storage-accounts) the section title names the one being edited; every setting here belongs to it. |
 
@@ -490,8 +514,8 @@ All are optional. The TUI config screen (`c` → **This computer**) stores the s
 | `updates`  | Source ID (e.g. `azure`, `github`) | `sha256(url).slice(0, 32)`   | Updates, status, saved, `topicId`, Copilot `summary` and `gist` (post summary, JSON) |
 | `topics`   | `topic`                            | Topic id                     | Copilot title, summary, highlights    |
 | `settings` | —                                  | —                            | Shared UI/source settings             |
-| `todos`    | —                                  | —                            | Personal todos                        |
-| `references` | `ref`                            | UUID                         | Bookmarked links: title, URL, folder path (`ai/agents`), description, source `updateId` |
+| `todos`    | `todo` (`folder` for the colors row) | UUID (`colors`)            | Todos: subject, description, due date, status, folder path (`work/fomo`), color; one `colors` row holds the folder colors (JSON) |
+| `references` | `ref` (`folder` for the colors row) | UUID (`colors`)           | Bookmarked links: title, URL, folder path (`ai/agents`), description, color, source `updateId`; one `colors` row holds the folder colors (JSON) |
 
 Status updates use ETag-based optimistic concurrency.
 

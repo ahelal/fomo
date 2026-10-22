@@ -148,7 +148,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   /** Filing an update in Bookmarks (b). */
   const [refDialog, setRefDialog] = useState<{ update: Update; reference?: Reference; note?: string } | undefined>();
   const refDialogSeq = useRef(0);
-  /** The view to return to when 5 leaves Bookmarks. */
+  /** The view to return to when 5 or 6 leaves Bookmarks or Todos. */
   const backFilter = useRef<FilterStatus>('unread');
 
   const previewPosition = fomo.settings.previewPosition;
@@ -156,7 +156,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const isGrouped = isGroupedView(fomo.filter, fomo.grouped);
   const isSaved = fomo.filter === 'saved';
   const pane = isPaneView(fomo.filter);
-  const viewHelp: HelpContext = fomo.filter === 'refs' ? 'references' : isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
+  const viewHelp: HelpContext = fomo.filter === 'todos'
+    ? 'todos'
+    : fomo.filter === 'refs' ? 'references' : isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
 
   const digestRows = useMemo(() => flattenDigest(fomo.digest, expanded), [fomo.digest, expanded]);
   const digestRow = digestKey ? digestRows.find((r) => r.key === digestKey) : undefined;
@@ -196,7 +198,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   /** Selecting the current Unread or Pending view again switches it between topics and a plain list. */
   const setFilter = useCallback((f: FilterStatus) => {
     clearSelection();
-    if (f === 'refs' && fomo.filter !== 'refs') backFilter.current = fomo.filter;
+    if (isPaneView(f) && !isPaneView(fomo.filter)) backFilter.current = fomo.filter;
     if (f === fomo.filter && canGroup(f)) fomo.toggleGrouped();
     else fomo.setFilter(f);
   }, [fomo, clearSelection]);
@@ -501,8 +503,10 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         setShowHelp(true);
         return;
       }
-      if (key === 'c') { setShowSettings(true); return; }
+      // In Bookmarks and Todos c colors the selected folder or item.
+      if (key === 'c' && !pane) { setShowSettings(true); return; }
       if (key === '5' && fomo.filter === 'refs') { setFilter(backFilter.current); return; }
+      if (key === '6' && fomo.filter === 'todos') { setFilter(backFilter.current); return; }
       if (key in FILTER_KEYS) { setFilter(FILTER_KEYS[key]!); return; }
       // Tab / Shift+Tab step through the views in tab order (1–6), wrapping around.
       if (key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -651,7 +655,10 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   const handleSetSourceColor = useCallback(
     (sourceId: string, color: string) => {
-      void fomo.updateSettings({ sourceColors: { ...fomo.settings.sourceColors, [sourceId]: color } });
+      const sourceColors = { ...fomo.settings.sourceColors };
+      if (color) sourceColors[sourceId] = color;
+      else delete sourceColors[sourceId];
+      void fomo.updateSettings({ sourceColors });
     },
     [fomo],
   );
@@ -880,7 +887,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
       <div className={mainClass}>
         {fomo.filter === 'todos' ? (
-          <TodosPane client={service} />
+          <TodosPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
         ) : fomo.filter === 'refs' ? (
           <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
         ) : isGrouped ? (

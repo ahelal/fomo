@@ -1,271 +1,304 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { TODO_SORTS, isDefaultSort, nextSort, shortcutKey, sortLabel, sortTodos, type FomoService, type TodoSort } from '@fomo/core';
-import type { Todo, TodoStatus, CreateTodoRequest } from '@fomo/core';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  TODO_SORTS,
+  TODO_STATUS_COLOR,
+  TODO_STATUS_ICON,
+  TODO_STATUS_LABEL,
+  buildTodoRows,
+  dueLabel,
+  dueTone,
+  isDefaultSort,
+  matchesTodoFilter,
+  nextSort,
+  nextTodoFilter,
+  nextTodoStatus,
+  rowFolder,
+  sortLabel,
+  todoCounts,
+  todoFilterLabel,
+  type FomoService,
+  type Todo,
+  type TodoFilter,
+  type TodoSort,
+  type TodoStatus,
+} from '@fomo/core';
+import { ColorButton } from './ColorPicker.js';
+import { DeleteButton, FolderDetails, FolderTreeList, Pill, Progress, RenameBar, TreeMessage, TreeSearch } from './FolderTree.js';
+import { TodoDialog, type TodoDraft } from './TodoDialog.js';
+import { plural, useFolderTree, type PaneKeyHandler } from '../hooks/useFolderTree.js';
+import { useWindowKeys } from '../hooks/useKeys.js';
 
 interface Props {
-  client: FomoService;
+  service: FomoService;
+  /** Keyboard shortcuts are on (no overlay is open above the pane). */
+  active: boolean;
 }
 
-const STATUS_LABELS: Record<TodoStatus, string> = {
-  pending: 'Pending',
-  in_progress: 'In Progress',
-  done: 'Done',
-};
-
-const STATUS_NEXT: Record<TodoStatus, TodoStatus> = {
-  pending: 'in_progress',
-  in_progress: 'done',
-  done: 'pending',
-};
-
-function formatDueDate(dueDate?: string): string {
-  if (!dueDate) return '';
-  const d = new Date(dueDate + 'T00:00:00');
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diff = Math.floor((d.getTime() - today.getTime()) / 86_400_000);
-  if (diff < 0) return `Overdue by ${-diff}d`;
-  if (diff === 0) return 'Due today';
-  if (diff === 1) return 'Due tomorrow';
-  return `Due in ${diff}d`;
+interface DialogState {
+  todo?: Todo;
+  initial?: Partial<TodoDraft>;
 }
 
-/** The Todos sort survives closing the pane, but not a reload. */
+const NOUN = ['todo', 'todos'] as const;
+
+/** The Todos sort and filter survive closing the pane, but not a reload. */
 let lastSort: TodoSort | undefined;
+let lastFilter: TodoFilter = 'all';
 
-export function TodosPane({ client }: Props) {
+/** ↵ on a todo: pending → in progress → done → pending; x: done, or reopened when done. */
+const doneOrReopen = (todo: Todo): TodoStatus => (todo.status === 'done' ? 'pending' : 'done');
+
+/** Todos filed into folders, like Bookmarks: browse, search, filter, add, edit, color, move folders and delete. */
+export function TodosPane({ service, active }: Props) {
+  const [dialog, setDialog] = useState<DialogState | undefined>();
   const [sort, setSort] = useState<TodoSort | undefined>(lastSort);
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const [showForm, setShowForm] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<TodoStatus | 'all'>('all');
-  const [expandedId, setExpandedId] = useState<string | undefined>();
+  const [filter, setFilterState] = useState<TodoFilter>(lastFilter);
+  const setFilter = (next: TodoFilter) => setFilterState((lastFilter = next));
+  const buildRows = useCallback(
+    (todos: Todo[], expanded: ReadonlySet<string>, search: string) => buildTodoRows(todos, expanded, { search, sort, filter }),
+    [sort, filter],
+  );
+  const tree = useFolderTree<Todo>({
+    noun: NOUN,
+    itemKey: (todo) => `todo:${todo.id}`,
+    itemName: (todo) => todo.subject,
+    buildRows,
+    fetch: async () => {
+      const { todos, folderColors } = await service.listTodos();
+      return { items: todos, folderColors };
+    },
+    moveFolder: (from, to) => service.moveTodoFolder(from, to),
+    saveFolderColor: (folder, color) => service.setTodoFolderColor(folder, color),
+    saveItemColor: (todo, color) => service.updateTodo(todo.id, { color }),
+    remove: (todo) => service.deleteTodo(todo.id),
+  });
+  const { load, say, row, rows, search, items } = tree;
 
-  // Form state
-  const [formSubject, setFormSubject] = useState('');
-  const [formDue, setFormDue] = useState('');
-  const [formDesc, setFormDesc] = useState('');
-  const [formError, setFormError] = useState<string | undefined>();
-  const subjectRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { void load(); }, [load, service]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      const resp = await client.listTodos({ status: filterStatus });
-      setTodos(resp.todos);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [client, filterStatus]);
+  const addTodo = (folder: string) => setDialog({ initial: { folder } });
+  const editTodo = (todo: Todo) => setDialog({ todo });
 
-  useEffect(() => {
+  const cycleSort = () => {
+    tree.keep(row?.key);
+    const next = nextSort(TODO_SORTS, sort);
+    setSort((lastSort = next));
+    say(`Sort: ${next.label}`);
+  };
+
+  const cycleFilter = () => {
+    tree.keep(row?.key);
+    const next = nextTodoFilter(filter);
+    setFilter(next);
+    say(`Showing: ${todoFilterLabel(next)}`);
+  };
+
+  const setStatus = (todo: Todo, status: TodoStatus) => {
+    const updated = { ...todo, status };
+    tree.setItems((list) => list?.map((t) => (t.id === todo.id ? updated : t)));
+    // It stays selected as it moves, unless the filter hides it now.
+    if (matchesTodoFilter(updated, filter)) tree.keep(`todo:${todo.id}`);
+    say(`${TODO_STATUS_ICON[status]} ${TODO_STATUS_LABEL[status]}: “${todo.subject}”`);
+    service.updateTodo(todo.id, { status }).catch((err) => {
+      tree.fail(err);
+      void load();
+    });
+  };
+
+  const onKey: PaneKeyHandler<Todo> = (k, r) => {
+    if (k === 'a') { addTodo(rowFolder(r)); return true; }
+    if (k === 's') { cycleSort(); return true; }
+    if (k === 'v') { cycleFilter(); return true; }
+    if (r?.kind !== 'item') return false;
+    if (k === 'Enter') { setStatus(r.item, nextTodoStatus(r.item.status)); return true; }
+    if (k === 'x') { setStatus(r.item, doneOrReopen(r.item)); return true; }
+    if (k === 'e') { editTodo(r.item); return true; }
+    return false;
+  };
+  useWindowKeys(active && !dialog, (e) => tree.handleKey(e, onKey));
+
+  const onSaved = (saved: Todo, created: boolean) => {
+    setDialog(undefined);
+    if (!matchesTodoFilter(saved, filter)) setFilter('all');
+    tree.reveal(saved);
     void load();
-  }, [load]);
+    say(`✓ ${created ? 'Added' : 'Updated'} in ${saved.folder || 'the top level'}`);
+  };
 
-  useEffect(() => {
-    if (showForm) subjectRef.current?.focus();
-  }, [showForm]);
-
-  const cycleSort = useCallback(() => {
-    setSort((current) => (lastSort = nextSort(TODO_SORTS, current)));
-  }, []);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (shortcutKey(e.key) === 's') cycleSort();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [cycleSort]);
-
-  const handleCycleStatus = useCallback(
-    async (todo: Todo) => {
-      const next = STATUS_NEXT[todo.status];
-      setTodos((prev) => prev.map((t) => (t.id === todo.id ? { ...t, status: next } : t)));
-      try {
-        await client.updateTodo(todo.id, { status: next });
-        void load();
-      } catch {
-        void load(); // revert on error
-      }
-    },
-    [client, load],
-  );
-
-  const handleDelete = useCallback(
-    async (id: string) => {
-      setTodos((prev) => prev.filter((t) => t.id !== id));
-      try {
-        await client.deleteTodo(id);
-      } catch {
-        void load(); // revert on error
-      }
-    },
-    [client, load],
-  );
-
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!formSubject.trim()) {
-        setFormError('Subject is required');
-        return;
-      }
-      setFormError(undefined);
-      const req: CreateTodoRequest = {
-        subject: formSubject.trim(),
-        description: formDesc.trim() || undefined,
-        dueDate: formDue || undefined,
-      };
-      try {
-        const created = await client.createTodo(req);
-        setTodos((prev) => [created, ...prev]);
-        setFormSubject('');
-        setFormDue('');
-        setFormDesc('');
-        setShowForm(false);
-        void load();
-      } catch (err) {
-        setFormError(err instanceof Error ? err.message : String(err));
-      }
-    },
-    [client, formSubject, formDue, formDesc, load],
-  );
-
-  const filtered = sortTodos(filterStatus === 'all'
-    ? todos
-    : todos.filter((t) => t.status === filterStatus), sort);
-  const sortActive = !isDefaultSort(TODO_SORTS, sort);
+  const counts = items && todoCounts(items);
+  const matches = tree.searching ? rows.filter((r) => r.kind === 'item').length : undefined;
+  const empty = !items
+    ? 'Loading…'
+    : tree.searching
+      ? 'Nothing matches the search.'
+      : items.length > 0
+        ? `No ${todoFilterLabel(filter).toLowerCase()} todos — v shows the others.`
+        : 'No todos yet. Press a to add one.';
 
   return (
-    <div className="todos-pane">
-      <div className="todos-header">
-        <div className="todos-filters">
-          {(['all', 'pending', 'in_progress', 'done'] as const).map((s) => (
-            <button
-              key={s}
-              className={['todos-filter-pill', filterStatus === s ? 'todos-filter-pill--active' : ''].join(' ')}
-              onClick={() => setFilterStatus(s)}
-            >
-              {s === 'all' ? 'All' : STATUS_LABELS[s]}
-            </button>
-          ))}
-        </div>
-        <button
-          className={['todos-filter-pill', sortActive ? 'todos-filter-pill--active' : ''].join(' ')}
-          onClick={cycleSort}
-          title="Change the sort order (s)"
-        >
+    <div className="tree-pane">
+      <div className="tree-header">
+        <span className="tree-title">
+          ✓ Todos{' '}
+          <span className="tree-count">
+            {counts ? (
+              <>
+                · {counts.open} open
+                {counts.overdue > 0 && <> · <span className="todo-due--overdue">{counts.overdue} overdue</span></>}
+                {' '}· {counts.done} done
+              </>
+            ) : '· loading…'}
+          </span>
+        </span>
+        <TreeSearch inputRef={tree.searchRef} value={search} placeholder="/ search todos" matches={matches} onChange={tree.setSearch} />
+        <Pill active={filter !== 'all'} title="Which todos are shown (v)" onClick={cycleFilter}>
+          ◐ {todoFilterLabel(filter)}
+        </Pill>
+        <Pill active={!isDefaultSort(TODO_SORTS, sort)} title="Change the order of the todos (s)" onClick={cycleSort}>
           ↕ {sortLabel(TODO_SORTS, sort)}
-        </button>
-        <button className="todos-add-btn" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? '✕ Cancel' : '+ Add Todo'}
-        </button>
+        </Pill>
+        <button type="button" className="tree-add" onClick={() => addTodo(rowFolder(row))}>+ Add todo</button>
       </div>
 
-      {showForm && (
-        <form className="todos-form" onSubmit={handleSubmit}>
-          <div className="todos-form__row">
-            <input
-              ref={subjectRef}
-              className="todos-form__input todos-form__input--subject"
-              placeholder="Subject *"
-              value={formSubject}
-              onChange={(e) => setFormSubject(e.target.value)}
-              required
-            />
-            <input
-              className="todos-form__input todos-form__input--due"
-              type="date"
-              placeholder="Due date"
-              value={formDue}
-              onChange={(e) => setFormDue(e.target.value)}
-            />
-          </div>
-          <textarea
-            className="todos-form__textarea"
-            placeholder="Description (optional)"
-            value={formDesc}
-            onChange={(e) => setFormDesc(e.target.value)}
-            rows={2}
-          />
-          {formError && <p className="todos-form__error">{formError}</p>}
-          <div className="todos-form__actions">
-            <button type="submit" className="todos-form__submit">Add Todo</button>
-            <button type="button" className="todos-form__cancel" onClick={() => { setShowForm(false); setFormError(undefined); }}>
-              Cancel
-            </button>
-          </div>
-        </form>
+      <TreeMessage status={tree.status} />
+      {tree.error && <p className="tree-error">⚠ {tree.error}</p>}
+
+      {tree.rename && (
+        <RenameBar
+          rename={tree.rename}
+          folders={tree.folders}
+          onChange={tree.editRename}
+          onSubmit={() => void tree.submitRename()}
+          onCancel={tree.cancelRename}
+        />
       )}
 
-      {error && <p className="todos-error">{error}</p>}
-      {loading && !todos.length && <p className="todos-loading">Loading…</p>}
+      <FolderTreeList<Todo>
+        label="Todos"
+        rows={rows}
+        index={tree.index}
+        empty={empty}
+        progress
+        folderColorOf={tree.folderColorOf}
+        rowRef={tree.rowRef}
+        onSelect={tree.select}
+        onToggle={tree.setOpen}
+        onActivate={editTodo}
+        itemTitle={(todo) => todo.description || undefined}
+        renderItem={(todo) => {
+          const next = nextTodoStatus(todo.status);
+          const color = tree.colorOf(todo);
+          return (
+            <>
+              <span className="todo-row__bar" style={{ backgroundColor: color ?? 'transparent' }} aria-hidden="true" />
+              <button
+                type="button"
+                tabIndex={-1}
+                className="todo-row__status"
+                style={{ color: TODO_STATUS_COLOR[todo.status] }}
+                title={`${TODO_STATUS_LABEL[todo.status]} — click for ${TODO_STATUS_LABEL[next]}`}
+                aria-label={`${TODO_STATUS_LABEL[todo.status]}: mark ${TODO_STATUS_LABEL[next].toLowerCase()}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setStatus(todo, next)}
+              >
+                {TODO_STATUS_ICON[todo.status]}
+              </button>
+              <span
+                className={`todo-row__subject${todo.status === 'done' ? ' todo-row__subject--done' : ''}`}
+                style={color && todo.status !== 'done' ? { color } : undefined}
+              >
+                {todo.subject}
+              </span>
+              {todo.dueDate && <span className={`todo-due todo-due--${dueTone(todo)}`}>{dueLabel(todo.dueDate)}</span>}
+            </>
+          );
+        }}
+      />
 
-      {!loading && filtered.length === 0 && (
-        <div className="todos-empty">
-          <p>{filterStatus === 'all' ? 'No todos yet. Add one above!' : `No ${filterStatus.replace('_', ' ')} todos.`}</p>
+      {row && (
+        <div className="tree-details">
+          {row.kind === 'folder' ? (
+            <FolderDetails
+              path={row.path}
+              color={tree.folderColorOf(row.path)}
+              colorButton={tree.folderColorButton(row.path)}
+              meta={(
+                <Progress
+                  done={row.done}
+                  count={row.count}
+                  label={`${row.done} of ${plural(row.count, NOUN)} done${tree.searching || filter !== 'all' ? ' (listed)' : ''}`}
+                />
+              )}
+              onColor={() => tree.pickFolderColor(row.path)}
+            >
+              <button type="button" className="btn" onClick={() => addTodo(row.path)}>a · Add todo here</button>
+              <button type="button" className="btn" onClick={() => tree.startRename(row.path)}>e · Rename / move</button>
+            </FolderDetails>
+          ) : (
+            <TodoDetails
+              todo={row.item}
+              color={tree.colorOf(row.item)}
+              actions={(
+                <>
+                  <button type="button" className="btn btn--primary" onClick={() => setStatus(row.item, nextTodoStatus(row.item.status))}>
+                    ↵ · {row.item.status === 'done' ? 'Reopen' : TODO_STATUS_LABEL[nextTodoStatus(row.item.status)]}
+                  </button>
+                  {doneOrReopen(row.item) !== nextTodoStatus(row.item.status) && (
+                    <button type="button" className="btn" onClick={() => setStatus(row.item, doneOrReopen(row.item))}>
+                      x · {row.item.status === 'done' ? 'Reopen' : 'Done'}
+                    </button>
+                  )}
+                  <button type="button" className="btn" onClick={() => editTodo(row.item)}>e · Edit</button>
+                  <ColorButton
+                    {...tree.itemColorButton(row.item.folder, row.item.color)}
+                    title="c · Color the todo"
+                    onClick={() => tree.pickItemColor(row.item)}
+                  />
+                  <DeleteButton armed={tree.confirmDelete === row.item.id} onClick={() => tree.askDelete(row.item)} />
+                </>
+              )}
+            />
+          )}
         </div>
       )}
 
-      <ul className="todos-list">
-        {filtered.map((todo) => {
-          const overdue = todo.dueDate && todo.status !== 'done' && new Date(todo.dueDate + 'T23:59:59') < new Date();
-          const expanded = expandedId === todo.id;
-          return (
-            <li
-              key={todo.id}
-              className={[
-                'todo-item',
-                `todo-item--${todo.status}`,
-                overdue ? 'todo-item--overdue' : '',
-              ].join(' ')}
-            >
-              <div className="todo-item__main">
-                <button
-                  className={`todo-item__status-badge todo-item__status-badge--${todo.status}`}
-                  onClick={() => void handleCycleStatus(todo)}
-                  title={`Status: ${STATUS_LABELS[todo.status]} — click to advance`}
-                >
-                  {todo.status === 'pending' ? '○' : todo.status === 'in_progress' ? '◑' : '●'}
-                </button>
-                <button
-                  className="todo-item__subject"
-                  onClick={() => setExpandedId(expanded ? undefined : todo.id)}
-                >
-                  {todo.subject}
-                </button>
-                <span className={['todo-item__due', overdue ? 'todo-item__due--overdue' : ''].join(' ')}>
-                  {formatDueDate(todo.dueDate)}
-                </span>
-                <button
-                  className="todo-item__delete"
-                  onClick={() => void handleDelete(todo.id)}
-                  title="Delete"
-                >
-                  ✕
-                </button>
-              </div>
-              {expanded && (
-                <div className="todo-item__detail">
-                  {todo.description && <p className="todo-item__description">{todo.description}</p>}
-                  <p className="todo-item__meta">
-                    Status: <strong>{STATUS_LABELS[todo.status]}</strong>
-                    {todo.dueDate && <> · Due: <strong>{todo.dueDate}</strong></>}
-                    · Created: {todo.createdAt.slice(0, 10)}
-                  </p>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {dialog && (
+        <TodoDialog
+          service={service}
+          todo={dialog.todo}
+          initial={dialog.initial}
+          folders={tree.folders}
+          folderColors={tree.folderColors}
+          onSaved={onSaved}
+          onClose={() => setDialog(undefined)}
+        />
+      )}
+      {tree.picker.element}
     </div>
+  );
+}
+
+/** The selected todo: subject, description, status, due date and folder, then what can be done with it. */
+export function TodoDetails({ todo, color, actions }: { todo: Todo; color?: string; actions?: React.ReactNode }) {
+  const statusColor = TODO_STATUS_COLOR[todo.status];
+  return (
+    <>
+      <p className="tree-details__title" style={color ? { color } : undefined}>{todo.subject}</p>
+      {todo.description
+        ? <p className="tree-details__desc">{todo.description}</p>
+        : <p className="tree-details__desc tree-details__desc--none">No description — e to add one.</p>}
+      <p className="tree-details__meta">
+        <span className="todo-chip" style={{ color: statusColor, borderColor: statusColor }}>
+          {TODO_STATUS_ICON[todo.status]} {TODO_STATUS_LABEL[todo.status]}
+        </span>
+        {' · '}
+        {todo.dueDate
+          ? <span className={`todo-due--${dueTone(todo)}`}>due {todo.dueDate} ({dueLabel(todo.dueDate)})</span>
+          : 'no due date'}
+        {' · '}
+        {todo.folder ? `${todo.folder}/` : 'top level'}
+      </p>
+      {actions && <div className="tree-details__actions">{actions}</div>}
+    </>
   );
 }

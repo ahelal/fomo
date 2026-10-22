@@ -130,15 +130,15 @@ export function compareReferences(sort: ReferenceSort = REFERENCE_SORTS[0]!): (a
 
 const TODO_STATUS_ORDER: Record<TodoStatus, number> = { pending: 0, in_progress: 1, done: 2 };
 
-/** Todos in `sort` order (a new array). The default is pending → in progress → done, then due date. */
-export function sortTodos(todos: Todo[], sort: TodoSort = TODO_SORTS[0]!): Todo[] {
+/** Comparator for todos. The default is pending → in progress → done, then due date. */
+export function compareTodos(sort: TodoSort = TODO_SORTS[0]!): (a: Todo, b: Todo) => number {
   const byDue = (a: Todo, b: Todo, dir: SortDir) => {
     if (a.dueDate && b.dueDate) return flip(dir, a.dueDate.localeCompare(b.dueDate));
     if (a.dueDate) return -1;
     if (b.dueDate) return 1;
     return 0;
   };
-  const compare = (a: Todo, b: Todo): number => {
+  return (a: Todo, b: Todo): number => {
     switch (sort.key) {
       case 'status':
         return flip(sort.dir, TODO_STATUS_ORDER[a.status] - TODO_STATUS_ORDER[b.status])
@@ -151,5 +151,9 @@ export function sortTodos(todos: Todo[], sort: TodoSort = TODO_SORTS[0]!): Todo[
         return flip(sort.dir, compareText(a.subject, b.subject)) || a.createdAt.localeCompare(b.createdAt);
     }
   };
-  return [...todos].sort(compare);
+}
+
+/** Todos in `sort` order (a new array). */
+export function sortTodos(todos: Todo[], sort: TodoSort = TODO_SORTS[0]!): Todo[] {
+  return [...todos].sort(compareTodos(sort));
 }

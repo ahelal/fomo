@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import type { Key } from 'ink';
 import { shortcutKey } from '@fomo/core';
 import { connectionStringProblem, profileNameProblem, type ProfileInfo } from '../../config.js';
-import { editText } from './useReferences.js';
+import { editText } from '../editText.js';
 
 /** What the profile picker can do. Root owns the config and implements it. */
 export interface ProfileControls {

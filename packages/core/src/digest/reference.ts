@@ -1,5 +1,5 @@
 import type { ReferenceSuggestion } from '../types.js';
-import { normalizeFolder } from '../references.js';
+import { normalizeFolder } from '../folders.js';
 import { excerpt, type ModelRequest } from './prompt.js';
 import type { Summarizer } from './run.js';
 

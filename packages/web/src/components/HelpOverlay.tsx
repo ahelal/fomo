@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references';
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references' | 'todos';
 
 interface Props {
   context: HelpContext;
@@ -70,10 +70,27 @@ const REFERENCE_KEYS: [string, string][] = [
   ['d d',   'Delete link (press twice)'],
   ['o',     'Open link in browser'],
   ['y',     'Copy link'],
+  ['c',     'Color the link or folder (←↑↓→ ↵ pick, # hex, d reset)'],
   ['s',     'Cycle sort order (title, date added)'],
   ['/',     'Search titles, links, folders & descriptions'],
   ['Esc',   'Clear the search'],
   ['5',     'Back to the previous view'],
+];
+
+const TODO_KEYS: [string, string][] = [
+  ['a',     'Add a todo (in the selected folder)'],
+  ['↵',     'Next status (pending → in progress → done) / open folder'],
+  ['x',     'Done, or reopen a done todo'],
+  ['e',     'Edit todo / rename or move folder'],
+  ['c',     'Color the todo or folder (←↑↓→ ↵ pick, # hex, d reset)'],
+  ['d d',   'Delete todo (press twice)'],
+  ['→/l',   'Open folder'],
+  ['←',     'Close folder, or go to its parent'],
+  ['v',     'Show all / open / in progress / done'],
+  ['s',     'Cycle sort order (status, due, created, subject)'],
+  ['/',     'Search subjects, descriptions & folders'],
+  ['Esc',   'Clear the search'],
+  ['6',     'Back to the previous view'],
 ];
 
 const GLOBAL_KEYS: [string, string][] = [
@@ -84,12 +101,12 @@ const GLOBAL_KEYS: [string, string][] = [
   ['⇥/⇧⇥', 'Next / previous view (1–6)'],
   ['2 / 4','Again: switch Unread / Pending between topics and a list'],
   ['5',    'Bookmarks: links filed into folders'],
-  ['6',    'Todos'],
+  ['6',    'Todos: tasks filed into folders'],
   ['b',    'File the selected update in Bookmarks'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],
   ['Esc',  'Clear the search, then the source filter'],
-  ['c',    'Open config'],
+  ['c',    'Open config (Bookmarks / Todos: color)'],
   ['.',    'Toggle preview position'],
   ['h',    'Show this help'],
 ];
@@ -108,6 +125,9 @@ function buildSections(context: Props['context']): Section[] {
   }
   if (context === 'references') {
     return [{ title: 'Bookmarks', keys: REFERENCE_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+  }
+  if (context === 'todos') {
+    return [{ title: 'Todos', keys: TODO_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   if (context === 'saved') {
     return [{ title: 'Pending topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
@@ -128,6 +148,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   digest: 'Unread · topics',
   saved: 'Saved · topics',
   references: 'Bookmarks',
+  todos: 'Todos',
 };
 
 export function HelpOverlay({ context, onClose }: Props) {

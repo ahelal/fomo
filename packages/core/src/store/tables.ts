@@ -3,6 +3,8 @@ import { createTableClient, isSasConnection } from './connection.js';
 import { mapLimit } from '../util.js';
 import { matchesSearch, searchTerms } from '../search.js';
 import { compareUpdates, sortTodos } from '../sort.js';
+import { folderMove, isInFolder, moveFolderPath, normalizeFolder } from '../folders.js';
+import { cleanColor } from '../colors.js';
 import type {
   StoreConnection,
   Update,
@@ -624,20 +626,26 @@ type TodoEntity = TableEntity<{
   description: string;
   dueDate: string;
   status: string;
+  /** Missing on todos stored before folders. */
+  folder?: string;
+  color?: string;
   createdAt: string;
   updatedAt: string;
 }>;
 
 function entityToTodo(e: TodoEntity): Todo {
-  return {
+  const todo: Todo = {
     id: e.rowKey,
     subject: e.subject,
     description: e.description ?? '',
     dueDate: e.dueDate || undefined,
     status: e.status as TodoStatus,
+    folder: e.folder ?? '',
     createdAt: e.createdAt,
     updatedAt: e.updatedAt,
   };
+  if (e.color) todo.color = e.color;
+  return todo;
 }
 
 export class TodoStore {
@@ -664,6 +672,8 @@ export class TodoStore {
       description: req.description ?? '',
       dueDate: req.dueDate ?? '',
       status: 'pending',
+      folder: normalizeFolder(req.folder),
+      color: cleanColor(req.color),
       createdAt: now,
       updatedAt: now,
     };
@@ -706,10 +716,30 @@ export class TodoStore {
       description: patch.description !== undefined ? patch.description : entity.description,
       dueDate: patch.dueDate !== undefined ? (patch.dueDate ?? '') : entity.dueDate,
       status: patch.status ?? entity.status,
+      folder: patch.folder !== undefined ? normalizeFolder(patch.folder) : (entity.folder ?? ''),
+      color: patch.color !== undefined ? cleanColor(patch.color) : (entity.color ?? ''),
       updatedAt: new Date().toISOString(),
     };
     await this.client.updateEntity(updated, 'Replace', { etag: entity.etag });
     return entityToTodo(updated);
+  }
+
+  /** Rename a folder: every todo in it (and its subfolders) moves under `to`. Returns how many moved. */
+  async moveFolder(from: string, to: string): Promise<number> {
+    const move = folderMove(from, to);
+    if (!move) return 0;
+    const { todos } = await this.listTodos();
+    const inside = todos.filter((t) => isInFolder(t.folder, move.from));
+    const now = new Date().toISOString();
+    await Promise.all(
+      inside.map((t) =>
+        this.client.updateEntity(
+          { partitionKey: TODO_PK, rowKey: t.id, folder: moveFolderPath(t.folder, move.from, move.to), updatedAt: now },
+          'Merge',
+        ),
+      ),
+    );
+    return inside.length;
   }
 
   async deleteTodo(id: string): Promise<void> {

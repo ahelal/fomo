@@ -1,15 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import {
-  buildReferenceRows,
-  isInFolder,
-  matchesReference,
-  moveFolderPath,
-  normalizeFolder,
-  normalizeReferenceUrl,
-  parentRowIndex,
-  referenceFolders,
-  rowFolder,
-} from '../references.js';
+import { buildReferenceRows, matchesReference, normalizeReferenceUrl, referenceFolders } from '../references.js';
+import { parentRowIndex, rowFolder } from '../folders.js';
 import { ReferenceStore } from '../store/references.js';
 import { buildReferencePrompt, parseReferenceSuggestion } from '../digest/reference.js';
 import type { Reference } from '../types.js';
@@ -18,28 +9,7 @@ function ref(id: string, title: string, folder: string, extra: Partial<Reference
   return { id, title, url: `https://example.com/${id}`, folder, description: '', createdAt: 't', updatedAt: 't', ...extra };
 }
 
-describe('folder paths', () => {
-  it('normalizes separators and whitespace', () => {
-    expect(normalizeFolder(' AI /  agents//tools ')).toBe('AI/agents/tools');
-    expect(normalizeFolder('/')).toBe('');
-    expect(normalizeFolder(undefined)).toBe('');
-    expect(normalizeFolder('a/b/c/d/e/f/g/h')).toBe('a/b/c/d/e/f g h');
-  });
-
-  it('knows which folders contain which', () => {
-    expect(isInFolder('ai/agents', 'ai')).toBe(true);
-    expect(isInFolder('ai', 'ai')).toBe(true);
-    expect(isInFolder('aids', 'ai')).toBe(false);
-    expect(isInFolder('anything', '')).toBe(true);
-  });
-
-  it('moves subfolders along with a renamed folder', () => {
-    expect(moveFolderPath('ai/agents/tools', 'ai/agents', 'agents')).toBe('agents/tools');
-    expect(moveFolderPath('ai/agents', 'ai', 'ml')).toBe('ml/agents');
-    expect(moveFolderPath('aids', 'ai', 'ml')).toBe('aids');
-    expect(moveFolderPath('ai', 'ai', '')).toBe('');
-  });
-
+describe('referenceFolders', () => {
   it('lists every folder in use with its ancestors', () => {
     expect(referenceFolders([{ folder: 'b/x' }, { folder: '' }, { folder: 'a' }, { folder: 'b/x' }])).toEqual(['a', 'b', 'b/x']);
   });
@@ -63,7 +33,7 @@ describe('buildReferenceRows', () => {
 
   it('lists folders before links and only opens expanded folders', () => {
     const rows = buildReferenceRows(refs, new Set(['ai']));
-    expect(rows.map((r) => (r.kind === 'folder' ? `${r.depth}:${r.name}/${r.count}${r.open ? '+' : ''}` : `${r.depth}:${r.ref.title}`))).toEqual([
+    expect(rows.map((r) => (r.kind === 'folder' ? `${r.depth}:${r.name}/${r.count}${r.open ? '+' : ''}` : `${r.depth}:${r.item.title}`))).toEqual([
       '0:ai/2+',
       '1:agents/1',
       '1:Prompting',
@@ -134,6 +104,16 @@ describe('ReferenceStore', () => {
   it('refuses a URL that is already filed', async () => {
     const { store } = storeWith([row('a', 'ai', 'https://example.com/dup')]);
     await expect(store.createReference({ title: 'x', url: 'https://example.com/dup' })).rejects.toThrow('Already in Bookmarks (ai): a');
+  });
+
+  it('keeps a clean color, or none', async () => {
+    const { store, calls } = storeWith([]);
+    const created = await store.createReference({ title: 'T', url: 'https://example.com/c', color: '#ABC' });
+    expect(created.color).toBe('#aabbcc');
+    expect(calls.created[0].color).toBe('#aabbcc');
+    const plain = await store.createReference({ title: 'P', url: 'https://example.com/p' });
+    expect(plain).not.toHaveProperty('color');
+    await expect(store.createReference({ title: 'B', url: 'https://example.com/b', color: 'blue' })).rejects.toThrow(/Not a color/);
   });
 
   it('moves a folder with its subfolders', async () => {
