@@ -41,7 +41,7 @@ function Form({ form, folderMatches, canSuggest, columns }: Pick<Props, 'form' |
   const width = columns - 2;
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#1c7cd6" paddingX={1} width={width}>
-      <Text color={ACCENT} bold>{form.id ? ' Edit reference' : ' File in References'}</Text>
+      <Text color={ACCENT} bold>{form.id ? ' Edit bookmark' : ' File in Bookmarks'}</Text>
       {REF_FIELDS.map((field) => {
         const active = form.field === field;
         return (
@@ -150,7 +150,7 @@ export function ReferencesView(props: Props) {
 
   const header = (
     <Box width={columns} borderStyle="single" borderBottom borderTop={false} borderLeft={false} borderRight={false} borderColor="gray">
-      <Text color={ACCENT} bold> 🔖 References </Text>
+      <Text color={ACCENT} bold> 🔖 Bookmarks </Text>
       <Text color={MUTED}>{` · ${total} link${total === 1 ? '' : 's'}${loading ? ' · loading…' : ''} `}</Text>
       {!form && <Text color={MUTED} wrap="truncate-end">{' [a] add  [e] edit  [d] delete  [o] open  [/] search  [s] sort  [5] close'}</Text>}
     </Box>
@@ -205,7 +205,7 @@ export function ReferencesView(props: Props) {
         {rows.length === 0 ? (
           <Box height={listH} alignItems="center" justifyContent="center">
             <Text color={MUTED}>
-              {loading ? 'Loading…' : search ? 'Nothing matches the search.' : 'No references yet. Press B on any update to file it, or a to add a link.'}
+              {loading ? 'Loading…' : search ? 'Nothing matches the search.' : 'No bookmarks yet. Press B on any update to file it, or a to add a link.'}
             </Text>
           </Box>
         ) : (

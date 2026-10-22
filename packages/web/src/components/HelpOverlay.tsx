@@ -83,9 +83,9 @@ const GLOBAL_KEYS: [string, string][] = [
   ['1–4',  'All / unread / read / pending'],
   ['⇥/⇧⇥', 'Next / previous view (1–6)'],
   ['2 / 4','Again: switch Unread / Pending between topics and a list'],
-  ['5',    'References: links filed into folders'],
+  ['5',    'Bookmarks: links filed into folders'],
   ['6',    'Todos'],
-  ['m',    'File the selected update in References'],
+  ['b',    'File the selected update in Bookmarks'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],
   ['Esc',  'Clear the search, then the source filter'],
@@ -107,7 +107,7 @@ function buildSections(context: Props['context']): Section[] {
     return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   if (context === 'references') {
-    return [{ title: 'References', keys: REFERENCE_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+    return [{ title: 'Bookmarks', keys: REFERENCE_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
   if (context === 'saved') {
     return [{ title: 'Pending topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
@@ -127,7 +127,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   settings: 'Config',
   digest: 'Unread · topics',
   saved: 'Saved · topics',
-  references: 'References',
+  references: 'Bookmarks',
 };
 
 export function HelpOverlay({ context, onClose }: Props) {

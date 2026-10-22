@@ -62,7 +62,7 @@ interface Props {
   digest?(onProgress: (message: string) => void, options?: DigestRunOptions): Promise<DigestResult>;
   /** Summarise a post with Copilot and save it (`g`); `force` regenerates a saved one (`g` again). */
   summarize?(id: string, force?: boolean): Promise<PostGistResult>;
-  /** Ask Copilot where to file a link in References and how to describe it. */
+  /** Ask Copilot where to file a link in Bookmarks and how to describe it. */
   suggestReference?(req: SuggestReferenceRequest): Promise<ReferenceSuggestion>;
   /** Audit trail of actions and errors (viewed with `a`); in-memory when omitted. */
   audit?: AuditLog;
@@ -1398,7 +1398,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       return;
     }
 
-    // ── References view (5) and the file-a-link form (m) ──
+    // ── Bookmarks view (5) and the file-a-link form (b) ──
     if (refs.active) {
       if (input === 'h' && !refs.typing) {
         setHelpContext('references');
@@ -1812,12 +1812,12 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       return;
     }
 
-    // References: 5 opens them, m files the selected update
+    // Bookmarks: 5 opens them, b files the selected update
     if (input === '5') {
       refs.openView();
       return;
     }
-    if (input === 'm') {
+    if (input === 'b') {
       const sel = currentUpdate();
       if (sel) refs.fileUpdate(sel);
       else showMessage(grouped ? 'Expand the topic to file a single update' : 'Nothing selected');

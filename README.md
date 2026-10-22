@@ -13,7 +13,7 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
 - [Architecture](#architecture)
 - [Copilot Digest](#copilot-digest)
   - [Post Summaries](#post-summaries)
-  - [References](#references)
+  - [Bookmarks](#bookmarks)
 - [Installation](#installation)
   - [Azure Deployment](#azure-deployment)
   - [TUI Setup](#tui-setup)
@@ -148,14 +148,14 @@ Press `u` on an update in the TUI to correct its details from the linked page, e
 - The status line says what changed. The detail pane shows the reading time or the video length next to the published date.
 - The web app can't fetch pages, so it has no `u`. It shows the corrected details after a refresh in the TUI.
 
-### References
+### Bookmarks
 
-**References** is a bookmark library. It keeps links you want to come back to, filed in a folder tree like `ai/agents` or `azure/iac` (up to 6 levels deep). **Pending** is still for reading later; References is for links worth keeping.
+**Bookmarks** is a link library. It keeps links you want to come back to, filed in a folder tree like `ai/agents` or `azure/iac` (up to 6 levels deep). **Pending** is still for reading later; Bookmarks is for links worth keeping.
 
-- **File a feed update:** press `m` on an update in the TUI or the web app, or use the 🔖 button in the detail pane. The title, URL and any summary are filled in.
+- **File a feed update:** press `b` on an update in the TUI or the web app, or use the 🔖 button in the detail pane. The title, URL and any summary are filled in.
   - In the TUI, Copilot also suggests a folder (reusing your existing folders where they fit) and a one-line description. Edit either before saving.
-  - If the link is already filed, `m` opens it for editing instead of adding a duplicate.
-- **Add any link:** open References (`5`) and press `a`. The new link goes in the selected folder.
+  - If the link is already filed, `b` opens it for editing instead of adding a duplicate.
+- **Add any link:** open Bookmarks (`5`) and press `a`. The new link goes in the selected folder.
   - In the TUI form, `^G` asks Copilot to suggest a folder and description, and a title if one is missing. FOMO fetches the page to do this.
 - **Folders** exist only as long as they hold links; they're not stored separately. Type a new path to create one.
   - `e` on a folder renames or moves it together with its subfolders. `e` on a link edits it.
@@ -255,10 +255,10 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 |-----------------|-------------------------------------------|
 | `1` `2` `3` `4` | All / Unread / Read / Pending             |
 | `2` / `4` again | Switch Unread / Pending between topics and a list (or click the active tab) |
-| `5`             | [References](#references) (`5` again returns to the previous view) |
+| `5`             | [Bookmarks](#bookmarks) (`5` again returns to the previous view) |
 | `6`             | Todos                                     |
 | `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
-| `m`             | File the selected update in References    |
+| `b`             | File the selected update in Bookmarks     |
 | `/`             | Search titles & content in the current view (`Enter` searches, `Esc` clears) |
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply); `Esc` clears it after the search |
 | `j` / `↓`       | Next row                                  |
@@ -277,14 +277,14 @@ The web app mirrors the TUI: the same dark text UI and the same keys. On a phone
 | `c`             | Config                                    |
 | `h`             | Help (also shows the version)             |
 
-Letter keys work in either case: `M` does the same as `m`.
+Letter keys work in either case: `B` does the same as `b`.
 
 Fetching isn't done in the browser. Run `fomo` on your computer and press `f`, then pull to refresh.
 Post summaries made in the TUI (`g`) show at the top of the detail pane.
 
 **Search** only looks inside the view you're in: searching under Unread only finds unread updates (or unread topics when grouped), and under Pending only pending updates. Every word must appear in the title, summary, [post summary](#post-summaries) or content (case-insensitive). The query stays applied when you switch views until you clear it with `Esc` or ✕. On a phone, tap the search box in the filter bar.
 
-**Sorting.** `s` cycles through the sort orders of the current view, the same in the web app and the TUI: lists by date, source, title (each ascending / descending) and unread first; topics by importance, date, title and size; References by title and date added; Todos by status, due date, created and subject. Each view keeps its own order until you reload or restart.
+**Sorting.** `s` cycles through the sort orders of the current view, the same in the web app and the TUI: lists by date, source, title (each ascending / descending) and unread first; topics by importance, date, title and size; Bookmarks by title and date added; Todos by status, due date, created and subject. Each view keeps its own order until you reload or restart.
 
 **Duplicates.** When two sources carry the same post (same title within 60 days), the later copy is kept but flagged `dup`. In both apps, the detail pane lists the rest of the group at the bottom: the original on a copy, the copies on the original. Each entry shows its source, an **other source** tag when it comes from a different feed, and **not in this view** when the current view or filters hide it, so you can always find the counterpart. `d` jumps to the next one that is in the view (press it again to cycle through a group of three or more), expanding its topic when the view is grouped. The web app's **Jump** button in the pane does the same.
 
@@ -315,10 +315,10 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `f`             | Fetch latest updates + Copilot digest     |
 | `z` twice       | Regroup all topics with Copilot (`Esc` after the first `z` cancels) |
 | `c`             | Config: sources, link a device, backup / restore, local settings |
-| `5`             | [References](#references): links filed into folders (`5` again closes) |
+| `5`             | [Bookmarks](#bookmarks): links filed into folders (`5` again closes) |
 | `6`             | Todos (`a` add, `Enter` cycle status, `d` delete, `6` again closes) |
 | `Tab` / `Shift+Tab` | Next / previous view (1–6)            |
-| `m`             | File the selected update in References (Copilot suggests a folder and note) |
+| `b`             | File the selected update in Bookmarks (Copilot suggests a folder and note) |
 | `/`             | Search titles & content in the current view (`Enter` searches, `^U` clears the prompt) |
 | `v`             | Pick which sources to show (`space` toggle, `a` all, `n` none, `Enter` apply) |
 | `Esc`           | Clear the search, then the source filter  |
@@ -327,7 +327,7 @@ Run `fomo`. It opens on **Unread**, grouped by topic. There are no subcommands: 
 | `h`             | Help (also shows the version)             |
 | `q`             | Quit                                      |
 
-Letter keys work in either case: `M` does the same as `m`, so `Shift`+`j`/`k` still moves one row. macOS Terminal.app has no default mapping for `Shift`+`↑`/`↓`: add one under Settings → Profiles → Keyboard that sends `\033[1;2A` / `\033[1;2B` (press `Esc` to type `\033`).
+Letter keys work in either case: `B` does the same as `b`, so `Shift`+`j`/`k` still moves one row. macOS Terminal.app has no default mapping for `Shift`+`↑`/`↓`: add one under Settings → Profiles → Keyboard that sends `\033[1;2A` / `\033[1;2B` (press `Esc` to type `\033`).
 
 The status bar shows counts by status; the config screen shows counts per source.
 Search (`/`) works like the web app: it's scoped to the current view, matches every word against the title, summary and content, and shows the query and match count in the filter bar until `Esc` clears it.

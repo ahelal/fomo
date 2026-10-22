@@ -139,13 +139,13 @@ describe('folderMatches', () => {
   });
 });
 
-describe('5 References view', () => {
+describe('5 Bookmarks view', () => {
   const library = [ref('1', 'Agents guide', 'ai/agents'), ref('2', 'Prompting', 'ai'), ref('3', 'Bicep docs', 'azure')];
 
   it('shows the folder tree and closes with 5', async () => {
     const { press, frame } = await renderApp(library);
     await press('5');
-    expect(frame()).toContain('References');
+    expect(frame()).toContain('Bookmarks');
     expect(frame()).toContain('3 links');
     expect(frame()).toMatch(/▾ ai\/ 2/);
     expect(frame()).toContain('Agents guide');
@@ -176,7 +176,7 @@ describe('5 References view', () => {
     expect(frame()).toContain('d again to delete');
     await press('d');
     expect(svc.deleteReference).toHaveBeenCalledWith('1');
-    expect(frame()).toContain('No references yet');
+    expect(frame()).toContain('No bookmarks yet');
   });
 
   it('adds a link in the selected folder; q is typed, not quit', async () => {
@@ -200,13 +200,13 @@ describe('5 References view', () => {
   });
 });
 
-describe('m files the selected update', () => {
+describe('b files the selected update', () => {
   it('prefills the form, lets Copilot pick the folder and saves it', async () => {
     const suggestion = { title: 'Agentic review', folder: 'ai/code-review', description: 'Copilot review calls tools.' };
     const { svc, suggestReference, press, frame } = await renderApp([ref('1', 'Agents guide', 'ai/agents')], async () => suggestion);
-    await press('1', 'm');
+    await press('1', 'b');
     expect(suggestReference).toHaveBeenCalledWith({ updateId: 'github__1' });
-    expect(frame()).toContain('File in References');
+    expect(frame()).toContain('File in Bookmarks');
     expect(frame()).toContain('Copilot code review gets agentic tools'); // feed title kept
     expect(frame()).toContain('ai/code-review');
     expect(frame()).toContain('Copilot suggested the folder, description');
@@ -218,30 +218,30 @@ describe('m files the selected update', () => {
       description: 'Copilot review calls tools.',
       updateId: 'github__1',
     });
-    expect(frame()).toContain('Filed in References → ai/code-review');
-    expect(frame()).not.toContain('File in References');
+    expect(frame()).toContain('Filed in Bookmarks → ai/code-review');
+    expect(frame()).not.toContain('File in Bookmarks');
   });
 
   it('keeps what you typed and lets ^G replace it', async () => {
     let calls = 0;
     const { press, frame } = await renderApp([], async () => ({ title: '', folder: `pick${++calls}`, description: 'd' }));
-    await press('1', 'm');
+    await press('1', 'b');
     expect(frame()).toContain('pick1');
     await press('\u0015', ...'mine');
     expect(frame()).toContain('mine');
     await press(CTRL_G);
     expect(frame()).toContain('pick2');
     await press(ESC);
-    expect(frame()).not.toContain('File in References');
+    expect(frame()).not.toContain('File in Bookmarks');
   });
 
   it('edits the existing reference when the link is already filed', async () => {
     const { svc, press, frame } = await renderApp([ref('9', 'Saved before', 'tools', update.url)], async () => {
       throw new Error('should not be asked');
     });
-    await press('1', 'm');
-    expect(frame()).toContain('Edit reference');
-    expect(frame()).toContain('Already in References → tools');
+    await press('1', 'b');
+    expect(frame()).toContain('Edit bookmark');
+    expect(frame()).toContain('Already in Bookmarks → tools');
     await press(ENTER);
     expect(svc.updateReference).toHaveBeenCalledWith('9', expect.objectContaining({ folder: 'tools' }));
     expect(svc.createReference).not.toHaveBeenCalled();
@@ -249,14 +249,14 @@ describe('m files the selected update', () => {
 });
 
 describe('shortcuts ignore case', () => {
-  it('5 opens References; A adds and M files the update like m; typed text keeps its case', async () => {
+  it('5 opens Bookmarks; A adds and B files the update like b; typed text keeps its case', async () => {
     const { svc, press, frame } = await renderApp([ref('1', 'Agents guide', 'ai')]);
     await press('5');
     expect(frame()).toContain('1 link');
     await press('A', ...'https://x.dev', TAB, TAB, ...'Big NOTE', ENTER);
     expect(svc.createReference).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://x.dev', description: 'Big NOTE' }));
-    await press('5', '1', 'M');
-    expect(frame()).toContain('File in References');
+    await press('5', '1', 'B');
+    expect(frame()).toContain('File in Bookmarks');
   });
 });
 
@@ -288,7 +288,7 @@ describe('Shift+↑/↓ jumps', () => {
       return { ...update, id: `github__${n}`, title: `Update ${n}`, url: `https://example.com/u${n}`, datePublished: `2026-10-${28 - i}T00:00:00Z` };
     });
     const { press, frame } = await renderApp([], undefined, undefined, feed);
-    await press('1', SHIFT_DOWN, 'm'); // m files the selected update, so the form shows its link
+    await press('1', SHIFT_DOWN, 'b'); // b files the selected update, so the form shows its link
     expect(frame()).toContain('https://example.com/u06');
   });
 });

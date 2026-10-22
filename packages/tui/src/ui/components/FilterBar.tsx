@@ -10,7 +10,7 @@ const FILTERS = [
 
 /** Views opened over the feed, shown after the tabs. */
 const PANES = [
-  { key: '5', label: 'Refs',  value: 'refs' },
+  { key: '5', label: 'B.Marks', value: 'refs' },
   { key: '6', label: 'Todos', value: 'todos' },
 ] as const;
 

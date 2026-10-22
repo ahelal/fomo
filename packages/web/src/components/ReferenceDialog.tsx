@@ -99,7 +99,7 @@ export function ReferenceDialog({ service, reference, initial, updateId, folders
     <div className="help-overlay" onClick={onClose}>
       <form ref={formRef} className="help-panel ref-dialog" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <div className="help-panel__header">
-          <h2>🔖 {reference ? 'Edit reference' : 'File in References'}</h2>
+          <h2>🔖 {reference ? 'Edit bookmark' : 'File in Bookmarks'}</h2>
           <button type="button" className="btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         {note && <p className="ref-dialog__note">{note}</p>}

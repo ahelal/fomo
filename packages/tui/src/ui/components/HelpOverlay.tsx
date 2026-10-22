@@ -86,9 +86,9 @@ const GLOBAL_KEYS: [string, string][] = [
   ['f',    'Fetch latest updates + group with Copilot'],
   ['z',    'Regroup all topics with Copilot (press twice)'],
   ['c',    'Config: sources, link a device, backup / restore'],
-  ['5',    'References: links filed into folders'],
+  ['5',    'Bookmarks: links filed into folders'],
   ['6',    'Todos'],
-  ['m',    'File the selected update in References (Copilot suggests folder + note)'],
+  ['b',    'File the selected update in Bookmarks (Copilot suggests folder + note)'],
   ['d',    'Jump to the duplicate / original of the update, if it is in this view'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],
@@ -149,7 +149,7 @@ function buildSections(context: Props['context']): Section[] {
     return [{ title: 'Config', keys: SETTINGS_KEYS }];
   }
   if (context === 'references') {
-    return [{ title: 'References', keys: REFERENCE_KEYS }, { title: 'Add / edit form', keys: REFERENCE_FORM_KEYS }];
+    return [{ title: 'Bookmarks', keys: REFERENCE_KEYS }, { title: 'Add / edit form', keys: REFERENCE_FORM_KEYS }];
   }
   if (context === 'digest') {
     return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
@@ -172,7 +172,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   settings: 'Config',
   digest: 'Unread · topics',
   saved: 'Pending · topics',
-  references: 'References',
+  references: 'Bookmarks',
 };
 
 const KEY_W = 8;

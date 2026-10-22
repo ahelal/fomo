@@ -44,7 +44,7 @@ export interface RefForm {
   saving: boolean;
   note?: string;
   error?: string;
-  /** Opened from the feed (m): closing it returns there instead of to the References view. */
+  /** Opened from the feed (b): closing it returns there instead of to the Bookmarks view. */
   fromFeed: boolean;
 }
 
@@ -123,7 +123,7 @@ function applySuggestion(form: RefForm, s: ReferenceSuggestion, explicit: boolea
   };
 }
 
-/** State and keys of the References view (b) and the file-a-link form (m, a, e). */
+/** State and keys of the Bookmarks view (5) and the file-a-link form (b, a, e). */
 export function useReferences({ service, audit, suggest, notify, openUrl, copy, jump }: Options) {
   const [open, setOpen] = useState(false);
   const [refs, setRefs] = useState<Reference[]>([]);
@@ -238,7 +238,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
       if (formSeq.current !== seq) return;
       const existing = list.find((r) => r.url === update.url || r.updateId === update.id);
       if (existing) {
-        setForm(editForm(existing, { fromFeed: true, note: `Already in References${existing.folder ? ` → ${existing.folder}` : ''} — editing it` }));
+        setForm(editForm(existing, { fromFeed: true, note: `Already in Bookmarks${existing.folder ? ` → ${existing.folder}` : ''} — editing it` }));
         return;
       }
       if (suggest) runSuggest(draft, false);
@@ -263,7 +263,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
       const where = saved.folder || 'top level';
       closeForm(current);
       if (current.fromFeed) {
-        notify(`🔖 ${current.id ? 'Updated' : 'Filed'} in References → ${where}`, 4000);
+        notify(`🔖 ${current.id ? 'Updated' : 'Filed'} in Bookmarks → ${where}`, 4000);
         void load();
       } else {
         reveal(saved);
@@ -338,7 +338,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
       });
   };
 
-  /** Handle a key while References (or its form) is shown; `raw` keeps its case for typing. */
+  /** Handle a key while Bookmarks (or its form) is shown; `raw` keeps its case for typing. */
   const handleInput = (raw: string, key: Key) => {
     if (form) { formInput(form, raw, key); return; }
 
@@ -424,7 +424,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
   };
 
   return {
-    /** The References view or the file-a-link form is shown. */
+    /** The Bookmarks view or the file-a-link form is shown. */
     active: open || form !== undefined,
     /** Keys are text (form, rename or search prompt), so global keys like q must not fire. */
     typing: form !== undefined || rename !== undefined || searchDraft !== undefined,

@@ -52,7 +52,7 @@ const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: '2 Unread', value: 'unread' },
   { label: '3 Read', value: 'read' },
   { label: '4 Pending', value: 'saved' },
-  { label: '5 Refs', value: 'refs' },
+  { label: '5 B.Marks', value: 'refs' },
   { label: '6 Todos', value: 'todos' },
 ];
 
@@ -145,10 +145,10 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   /** Open source picker; options are undefined while the counts load. */
   const [sourcePicker, setSourcePicker] = useState<{ options?: SourceOption[] } | undefined>();
   const sourcePickerSeq = useRef(0);
-  /** Filing an update in References (m). */
+  /** Filing an update in Bookmarks (b). */
   const [refDialog, setRefDialog] = useState<{ update: Update; reference?: Reference; note?: string } | undefined>();
   const refDialogSeq = useRef(0);
-  /** The view to return to when b leaves References. */
+  /** The view to return to when 5 leaves Bookmarks. */
   const backFilter = useRef<FilterStatus>('unread');
 
   const previewPosition = fomo.settings.previewPosition;
@@ -234,7 +234,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
     setSourcePicker(undefined);
   }, []);
 
-  /** m: file an update in References, or edit it when its link is already there. */
+  /** b: file an update in Bookmarks, or edit it when its link is already there. */
   const fileReference = useCallback(async (update: Update) => {
     const seq = ++refDialogSeq.current;
     let existing: Reference | undefined;
@@ -245,7 +245,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       // saving reports any storage problem
     }
     if (seq !== refDialogSeq.current) return;
-    const note = existing ? `Already in References${existing.folder ? ` → ${existing.folder}` : ''} — editing it` : undefined;
+    const note = existing ? `Already in Bookmarks${existing.folder ? ` → ${existing.folder}` : ''} — editing it` : undefined;
     setRefDialog({ update, reference: existing, note });
   }, [service]);
 
@@ -520,10 +520,10 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
       if (pane) return;
 
-      if (key === 'm') {
+      if (key === 'b') {
         const update = isGrouped ? rowUpdate(digestRow) : selected;
         if (update) void fileReference(update);
-        else fomo.notify(isGrouped && digestRow ? 'Expand the topic to file a single update' : 'Select an update to file it in References');
+        else fomo.notify(isGrouped && digestRow ? 'Expand the topic to file a single update' : 'Select an update to file it in Bookmarks');
         return;
       }
 
@@ -942,7 +942,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           note={refDialog.note}
           onSaved={(saved, created) => {
             setRefDialog(undefined);
-            fomo.notify(`🔖 ${created ? 'Filed' : 'Updated'} in References → ${saved.folder || 'top level'}`, 4000);
+            fomo.notify(`🔖 ${created ? 'Filed' : 'Updated'} in Bookmarks → ${saved.folder || 'top level'}`, 4000);
           }}
           onClose={() => setRefDialog(undefined)}
         />

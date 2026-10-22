@@ -133,7 +133,7 @@ describe('ReferenceStore', () => {
 
   it('refuses a URL that is already filed', async () => {
     const { store } = storeWith([row('a', 'ai', 'https://example.com/dup')]);
-    await expect(store.createReference({ title: 'x', url: 'https://example.com/dup' })).rejects.toThrow('Already in References (ai): a');
+    await expect(store.createReference({ title: 'x', url: 'https://example.com/dup' })).rejects.toThrow('Already in Bookmarks (ai): a');
   });
 
   it('moves a folder with its subfolders', async () => {

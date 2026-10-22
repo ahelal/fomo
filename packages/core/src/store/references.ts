@@ -95,7 +95,7 @@ export class ReferenceStore {
   private async assertUnique(url: string, exceptId?: string): Promise<void> {
     const existing = await this.findByUrl(url);
     if (existing && existing.id !== exceptId) {
-      throw new Error(`Already in References${existing.folder ? ` (${existing.folder})` : ''}: ${existing.title}`);
+      throw new Error(`Already in Bookmarks${existing.folder ? ` (${existing.folder})` : ''}: ${existing.title}`);
     }
   }
 

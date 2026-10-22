@@ -189,7 +189,7 @@ export function ReferencesPane({ service, active }: Props) {
     else openUrl(r.ref.url);
   }, [setOpen]);
 
-  // ── Keyboard (aligned with the TUI's References view) ──
+  // ── Keyboard (aligned with the TUI's Bookmarks view) ──
   useEffect(() => {
     if (!active || dialog) return;
     function onKey(e: KeyboardEvent) {
@@ -246,7 +246,7 @@ export function ReferencesPane({ service, active }: Props) {
     <div className="refs-pane">
       <div className="refs-header">
         <span className="refs-title">
-          🔖 References <span className="refs-count">· {refs ? plural(total, 'link') : 'loading…'}</span>
+          🔖 Bookmarks <span className="refs-count">· {refs ? plural(total, 'link') : 'loading…'}</span>
         </span>
         <input
           ref={searchRef}
@@ -295,7 +295,7 @@ export function ReferencesPane({ service, active }: Props) {
       <ul className="refs-tree" role="tree">
         {refs && rows.length === 0 && (
           <li className="todos-empty">
-            {search ? `No links match “${search}”.` : 'No references yet. Press B on any update to file it, or a to add a link.'}
+            {search ? `No links match “${search}”.` : 'No bookmarks yet. Press B on any update to file it, or a to add a link.'}
           </li>
         )}
         {rows.map((r, i) => {

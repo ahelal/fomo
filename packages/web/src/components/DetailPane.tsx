@@ -11,7 +11,7 @@ interface Props {
   onReadAndNext?(): void;
   onNextUnread?(): void;
   onOpen?(): void;
-  /** File the update in References (m). */
+  /** File the update in Bookmarks (b). */
   onFileReference?(): void;
   onClose?(): void;
   /** The other updates of this update's duplicate group, original first; they are listed at the bottom. */
@@ -112,8 +112,8 @@ export function DetailPane({
           p · {update.saved ? '★ Not pending' : '☆ Pending'}
         </button>
         {onFileReference && (
-          <button className="btn" onClick={onFileReference} title="File in References (m)">
-            m · 🔖 Reference
+          <button className="btn" onClick={onFileReference} title="File in Bookmarks (b)">
+            b · 🔖 Bookmark
           </button>
         )}
       </div>
