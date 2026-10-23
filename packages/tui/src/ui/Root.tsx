@@ -18,6 +18,7 @@ import {
 } from '../config.js';
 import type { SummarizerCache } from '../copilot.js';
 import type { AuditLog } from '../audit.js';
+import { experimentalProviders } from '../experimental/index.js';
 import { App, type DigestRunOptions } from './App.js';
 import { SetupScreen } from './components/SetupScreen.js';
 import type { ProfileControls } from './hooks/useProfilePicker.js';
@@ -92,18 +93,22 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
 
   // Before the children's effects, so that nothing they log goes untagged.
   useLayoutEffect(() => stampAudit(audit, profile, profiles), [audit, profile, profiles]);
+  // Also before the children's effects, so that their first fetch runs the profile's experimental sources.
+  useLayoutEffect(() => service?.setExperimentalProviders(experimentalProviders(config.experimentalSources)), [service, config.experimentalSources]);
 
   /** Save a change to the profile in use; returns an error message when the file can't be written. */
   const updateConfig = useCallback((patch: Partial<LocalConfig>): string | undefined => {
     try {
       const next = saveConfig(profile, patch);
+      // Right away, so a fetch started in the same handler (turning a source on) runs it.
+      if ('experimentalSources' in patch) service?.setExperimentalProviders(experimentalProviders(next.experimentalSources));
       const list = readProfiles();
       setSession((s) => ({ ...s, config: next, profiles: list ?? s.profiles, notice: undefined }));
       return undefined;
     } catch (err) {
       return errorText(err);
     }
-  }, [profile]);
+  }, [profile, service]);
 
   const switchTo = useCallback((name: string): string | undefined => {
     if (name === profile) return undefined;

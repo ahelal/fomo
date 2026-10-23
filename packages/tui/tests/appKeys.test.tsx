@@ -13,6 +13,7 @@ import { App, REGROUP_CONFIRM_MS } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
 import { DEFAULT_BACKUP_DIR, tildify, type LocalConfig } from '../src/config.js';
 import type { GhAccount } from '../src/ghAccounts.js';
+import type { ExperimentalSetups } from '../src/experimental/index.js';
 import { DEFAULT_SOURCE_COLOR } from '../src/ui/components/UpdatesTable.js';
 import { buildSettingsRows, configDisplay, editStartValue, findRow, firstFocusable, moveFocus, parseConfigEdit, settingsRowText } from '../src/ui/settings.js';
 
@@ -52,6 +53,8 @@ afterEach(() => {
 interface RenderOptions {
   config?: LocalConfig;
   listAccounts?: () => Promise<GhAccount[]>;
+  experimental?: ExperimentalSetups;
+  service?: FomoDirectService;
 }
 
 async function renderApp(digestRun: () => Promise<DigestResult> = async () => result, options: RenderOptions = {}) {
@@ -66,13 +69,14 @@ async function renderApp(digestRun: () => Promise<DigestResult> = async () => re
   await act(async () => {
     const instance = render(
       <App
-        service={service}
+        service={options.service ?? service}
         config={options.config ?? {}}
         onConfigChange={onConfigChange}
         digest={digest}
         audit={audit}
         auditFile="/tmp/audit.log"
         listAccounts={options.listAccounts}
+        experimental={options.experimental}
       />,
       {
         stdout: stdout as unknown as NodeJS.WriteStream,
@@ -614,6 +618,91 @@ describe('Config sections', () => {
   });
 });
 
+describe('experimental source row', () => {
+  const ID = 'teams-meetings';
+  function setup(signIn: ExperimentalSetups[string]['signIn'] = async () => ({ ok: true, output: 'Signed in' })) {
+    const setups: ExperimentalSetups = {
+      [ID]: {
+        consent: 'agree to the test terms',
+        signIn: vi.fn(signIn),
+        provider: () => ({ id: ID, fetch: async () => [] }),
+      },
+    };
+    const svc = {
+      ...service,
+      getStats: async () => ({ total: 3, byStatus: { unread: 3, read: 0 }, bySource: { [ID]: 3 }, saved: 0 }),
+      fetch: vi.fn(async () => ({ added: 2, results: { [ID]: { added: 2 } } })),
+      deleteSourceUpdates: vi.fn(async () => 3),
+    } as unknown as FomoDirectService & { fetch: ReturnType<typeof vi.fn>; deleteSourceUpdates: ReturnType<typeof vi.fn> };
+    return { setups, signIn: setups[ID]!.signIn as ReturnType<typeof vi.fn>, svc };
+  }
+  async function openRow(options: RenderOptions) {
+    const app = await renderApp(undefined, options);
+    await app.press('c');
+    const rows = buildSettingsRows(SOURCES);
+    for (let i = firstFocusable(rows); i < findRow(rows, `x-${ID}`); i = moveFocus(rows, i, 1)) await app.press('j');
+    expect(app.frame()).toContain('Experimental sources');
+    expect(app.frame()).toContain('l sign in again');
+    return app;
+  }
+
+  it('asks first, then signs in, turns it on and fetches it', async () => {
+    const { setups, signIn, svc } = setup();
+    const { press, frame, onConfigChange } = await openRow({ experimental: setups, service: svc });
+    await press('\r');
+    expect(frame()).toContain('↵ again to agree to the test terms');
+    expect(signIn).not.toHaveBeenCalled();
+    await press('\r');
+    await vi.waitFor(() => expect(svc.fetch).toHaveBeenCalledWith({ sources: [ID] }));
+    expect(signIn).toHaveBeenCalledTimes(1);
+    expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [ID] });
+  });
+
+  it('stays off when signing in fails', async () => {
+    const { setups, svc } = setup(async () => ({ ok: false, output: 'WorkIQ sign-in failed: cancelled' }));
+    const { press, frame, onConfigChange, audit } = await openRow({ experimental: setups, service: svc });
+    await press('\r');
+    await press('\r');
+    await vi.waitFor(() => expect(frame()).toContain('cancelled · Teams meetings stays off'));
+    expect(onConfigChange).not.toHaveBeenCalled();
+    expect(svc.fetch).not.toHaveBeenCalled();
+    expect(audit.recent().some((e) => e.level === 'error' && e.detail?.includes('sign-in failed'))).toBe(true);
+  });
+
+  it('only fetches it when it is on', async () => {
+    const { setups, svc } = setup();
+    const { press, frame } = await openRow({ experimental: setups, service: svc });
+    await press('f');
+    expect(frame()).toContain('Teams meetings is off · ↵ turns it on');
+    expect(svc.fetch).not.toHaveBeenCalled();
+  });
+
+  it('when on: f fetches it, l signs in again, ↵ turns it off without asking', async () => {
+    const { setups, signIn, svc } = setup();
+    const { press, frame, onConfigChange } = await openRow({ experimental: setups, service: svc, config: { experimentalSources: [ID] } });
+    await press('f');
+    await vi.waitFor(() => expect(svc.fetch).toHaveBeenCalledWith({ sources: [ID] }));
+    await press('l');
+    await vi.waitFor(() => expect(frame()).toContain('✓ Signed in for Teams meetings'));
+    expect(signIn).toHaveBeenCalledTimes(1);
+    expect(onConfigChange).not.toHaveBeenCalled();
+    await press('\r');
+    expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [] });
+    expect(frame()).toContain('its 3 items stay (x deletes them)');
+  });
+
+  it('x twice deletes its items', async () => {
+    const { setups, svc } = setup();
+    const { press, frame } = await openRow({ experimental: setups, service: svc });
+    await press('x');
+    expect(frame()).toContain('press x again to delete its 3 items');
+    expect(svc.deleteSourceUpdates).not.toHaveBeenCalled();
+    await press('x');
+    await vi.waitFor(() => expect(svc.deleteSourceUpdates).toHaveBeenCalledWith(ID));
+    await vi.waitFor(() => expect(frame()).toContain('✓ Deleted 3 items of Teams meetings · f fetches them again'));
+  });
+});
+
 describe('/ search', () => {
   it('filters the config rows per section and Esc clears it', async () => {
     const { press, frame } = await renderApp();
@@ -668,9 +757,9 @@ describe('settings rows', () => {
 
   it('leaves out the rows of collapsed sections', () => {
     const rows = buildSettingsRows([], new Set(['h-local', 'h-actions']));
-    expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'add-source', 'h-display', 'preview', 'h-local']);
+    expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'add-source', 'h-experimental', 'x-teams-meetings', 'h-display', 'preview', 'h-local']);
     expect(rows[0]).toMatchObject({ collapsed: true, count: 6 });
-    expect(moveFocus(rows, 5, 10)).toBe(5);
+    expect(moveFocus(rows, 7, 10)).toBe(7);
     expect(moveFocus(rows, 1, -10)).toBe(0);
   });
 

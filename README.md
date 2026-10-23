@@ -29,6 +29,7 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
   - [Backup & Restore](#backup--restore)
   - [Profiles (several storage accounts)](#profiles-several-storage-accounts)
 - [Sources](#sources)
+  - [Experimental Sources](#experimental-sources)
 - [Security](#security)
 - [Environment Variables](#environment-variables)
 - [Storage](#storage)
@@ -396,6 +397,7 @@ Press `c`. The bottom line shows the keys for the selected row. Each section hea
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
 | **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` [color](#colors) · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed, GitHub repo or YouTube channel; **Restore removed** brings back removed built-ins |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
+| **Experimental sources · this computer** | One row per [experimental source](#experimental-sources), off by default, per profile | `Enter` twice: sign in and turn it on (then it is fetched) · `Enter` turns it off (its items stay) · `l` sign in again · `f` fetch it · `v` list its updates · `x` twice deletes its items |
 | **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (minutes), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (Auto-fetch takes 5–1440 minutes or `off`; Group after fetch toggles; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. With several [profiles](#profiles-several-storage-accounts) the section title names the one being edited; every setting here belongs to it. |
 
 ### Backup & Restore
@@ -474,6 +476,27 @@ Most sources need no code:
 
 See [EXTENDING.md](EXTENDING.md) for the spec fields and the shared helpers for custom sources.
 
+### Experimental Sources
+
+Experimental sources read your own data with a sign-in on this computer, so only the TUI fetches them, and only in
+the profiles where you turned them on (**Config → Experimental sources**). Their items show up in the web app like any other update.
+
+| Source | ID | What it tracks |
+|--------|----|----------------|
+| Teams meetings | `teams-meetings` | Teams meetings of the last 7 days that you missed, or that have a recording or a transcript; one item per occurrence, linking directly to the meeting recap when recorded or transcribed, otherwise to the meeting chat |
+
+**Teams meetings** reads Microsoft 365 through [WorkIQ](https://www.npmjs.com/package/@microsoft/workiq), which is
+installed with the TUI. Turning it on accepts the WorkIQ EULA and runs `workiq auth login` (a browser window or the
+system account picker may open); WorkIQ keeps the sign-in, FOMO never sees a token. Recap links are built like the
+links Teams shares: the meeting chat, the occurrence ID and the recording file, which FOMO takes from the meeting chat
+or, when the chat is closed to you, finds with a file search (this takes a few seconds per meeting on the first
+fetch). Without the file, a recurring meeting's link also has the series ID, so it opens that day's recap with a list
+of the other days. A few meetings only open with the file; if it can't be found, their link shows "You don't have
+permissions to view recap".
+If the occurrence ID is missing, the item links to the meeting chat instead; the chat link is also kept in every item's
+preview. The next fetch refreshes links for meetings in the 7-day window and adds recordings or transcripts that
+appeared later, without creating duplicate items or changing their read/saved status.
+
 ---
 
 ## Security
@@ -515,7 +538,7 @@ All are optional. The TUI config screen (`c` → **This computer**) stores the s
 
 | Table      | PartitionKey                       | RowKey                       | Contents                              |
 |------------|------------------------------------|------------------------------|---------------------------------------|
-| `updates`  | Source ID (e.g. `azure`, `github`) | `sha256(url).slice(0, 32)`   | Updates, status, saved, `topicId`, Copilot `summary` and `gist` (post summary, JSON) |
+| `updates`  | Source ID (e.g. `azure`, `github`) | `sha256(url).slice(0, 32)` (an experimental source's item: `sha256(key)`, e.g. one per meeting occurrence) | Updates, status, saved, `topicId`, Copilot `summary` and `gist` (post summary, JSON) |
 | `topics`   | `topic`                            | Topic id                     | Copilot title, summary, highlights    |
 | `settings` | —                                  | —                            | Shared UI/source settings             |
 | `todos`    | `todo` (`folder` for the colors row) | UUID (`colors`)            | Todos: subject, multiline notes (`description`), URL/path attachments (JSON), due date, status, folder path (`work/fomo`), color; one `colors` row holds the folder colors (JSON) |

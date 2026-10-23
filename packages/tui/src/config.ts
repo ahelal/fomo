@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { isExperimentalSource } from '@fomo/core';
 
 /** Config, logs and backups live here. FOMO_CONFIG_DIR moves them off ~/.fomo (tests, a second setup). */
 export const CONFIG_DIR = process.env.FOMO_CONFIG_DIR ? resolve(process.env.FOMO_CONFIG_DIR) : join(homedir(), '.fomo');
@@ -51,6 +52,8 @@ export interface LocalConfig {
   linkDays?: number;
   /** Folder for backups. Default ~/.fomo/backups, or ~/.fomo/backups/<profile> for profiles other than `default`. */
   backupDir?: string;
+  /** Experimental sources turned on for this profile (ids from EXPERIMENTAL_SOURCE_INFOS), e.g. Teams meetings. Default none. */
+  experimentalSources?: string[];
 }
 
 /**
@@ -105,6 +108,10 @@ function sanitizeProfile(raw: Record<string, unknown>): LocalConfig {
     if (typeof raw[key] === 'number' && (raw[key] as number) > 0) out[key] = raw[key] as number;
   }
   if (typeof raw.autoFetchMinutes === 'number' && isAutoFetchMinutes(raw.autoFetchMinutes)) out.autoFetchMinutes = raw.autoFetchMinutes;
+  if (Array.isArray(raw.experimentalSources)) {
+    const ids = [...new Set(raw.experimentalSources.filter((id): id is string => typeof id === 'string' && isExperimentalSource(id)))];
+    if (ids.length) out.experimentalSources = ids;
+  }
   return out;
 }
 
@@ -147,11 +154,11 @@ function writeDoc(doc: ConfigDoc): void {
   writeFileSync(CONFIG_FILE, JSON.stringify(out, null, 2), { mode: 0o600 });
 }
 
-/** Drop undefined and empty values; they mean "unset". */
+/** Drop undefined, empty and empty-list values; they mean "unset". */
 function compact(config: Partial<LocalConfig>): LocalConfig {
   const out: Record<string, unknown> = { ...config };
   for (const [key, value] of Object.entries(out)) {
-    if (value === undefined || value === '') delete out[key];
+    if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) delete out[key];
   }
   return out as LocalConfig;
 }

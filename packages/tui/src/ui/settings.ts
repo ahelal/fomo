@@ -1,4 +1,4 @@
-import type { SourceInfo } from '@fomo/core';
+import { EXPERIMENTAL_SOURCE_INFOS, type SourceInfo } from '@fomo/core';
 import { copilotTokenEnv, DEFAULT_COPILOT_MODEL } from '../copilot.js';
 import {
   autoFetchInterval,
@@ -28,6 +28,7 @@ export type SettingsRow =
   | { kind: 'source'; key: string; source: SourceInfo }
   | { kind: 'add-source'; key: string }
   | { kind: 'restore-sources'; key: string; count: number }
+  | { kind: 'experimental'; key: string; source: SourceInfo }
   | { kind: 'preview'; key: string }
   | { kind: 'config'; key: string; field: ConfigField; label: string };
 
@@ -57,7 +58,10 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
 export const ADD_SOURCE_KEY = 'add-source';
 
 /** Section header keys, used to collapse a section. */
-export const SECTION_KEYS = ['h-actions', 'h-sources', 'h-display', 'h-local'] as const;
+export const SECTION_KEYS = ['h-actions', 'h-sources', 'h-experimental', 'h-display', 'h-local'] as const;
+
+/** Whether this profile turned an experimental source on. */
+export const experimentalOn = (config: LocalConfig, id: string): boolean => !!config.experimentalSources?.includes(id);
 
 /**
  * Config screen rows; rows of the sections in `collapsed` (header keys) are left out.
@@ -93,6 +97,7 @@ export function buildSettingsRows(
   return [
     ...section('h-actions', 'Actions', ACTIONS.map((a) => ({ kind: 'action' as const, key: `a-${a.action}`, ...a }))),
     ...section('h-sources', 'Sources · shared with the web app', sourceRows),
+    ...section('h-experimental', 'Experimental sources · this computer', EXPERIMENTAL_SOURCE_INFOS.map((source) => ({ kind: 'experimental' as const, key: `x-${source.id}`, source }))),
     ...section('h-display', 'Display · shared with the web app', [{ kind: 'preview', key: 'preview' }]),
     ...section('h-local', `This computer${profile ? ` · profile ${profile}` : ''} · ${tildify(CONFIG_FILE)}`, CONFIG_FIELDS.map((f) => ({ kind: 'config' as const, key: `c-${f.field}`, ...f }))),
   ];
@@ -168,6 +173,8 @@ export function configDisplay(
       return config.linkDays ? { value: String(config.linkDays), muted: false } : muted(`${DEFAULT_LINK_DAYS} (default)`);
     case 'backupDir':
       return config.backupDir ? { value: tildify(config.backupDir), muted: false } : muted(`${tildify(defaultBackupDir(profile))} (default)`);
+    case 'experimentalSources':
+      return config.experimentalSources?.length ? { value: config.experimentalSources.join(', '), muted: false } : muted('(none)');
   }
 }
 
@@ -257,6 +264,7 @@ export function settingsRowText(
     case 'source': return `${row.source.displayName} ${row.source.id} ${sourceLabel(row.source.id)} ${row.source.kind} ${row.source.location ?? ''}`;
     case 'add-source': return 'Add source feed rss atom github releases youtube';
     case 'restore-sources': return 'Restore removed sources';
+    case 'experimental': return `${row.source.displayName} ${row.source.id} experimental ${row.source.location ?? ''} ${experimentalOn(config, row.source.id) ? 'on' : 'off'}`;
     case 'preview': return 'Preview position right bottom off';
     case 'config': return `${row.label} ${row.field} ${configDisplay(config, row.field, file, profile).value}`;
   }
@@ -274,6 +282,7 @@ export function rowHint(row: SettingsRow | undefined): string {
       : '↵ details & edit   space on/off   e label   d color   f fetch now   v show its updates   x remove';
     case 'add-source': return '↵ add an RSS/Atom feed, a GitHub repository or a YouTube channel';
     case 'restore-sources': return '↵ bring back the removed built-in sources';
+    case 'experimental': return '↵ on/off (on asks to sign in)   l sign in again   f fetch now   v show its updates   x delete its items';
     case 'preview': return '↵ cycle';
     case 'config':
       if (isToggleField(row.field)) return '↵ toggle';

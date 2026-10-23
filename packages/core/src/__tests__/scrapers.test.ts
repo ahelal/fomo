@@ -710,7 +710,7 @@ describe('source specs', () => {
     expect(kept.sourceLabels).toEqual({ mine: 'Mine' });
     const removed = settings({ ...kept, ...removeSourcePatch(kept, 'github') });
     const active = sourceInfos(removed)[0]!.id;
-    const retired = retiredSources(removed, { mine: 3, github: 2, orphan: 1, [active]: 4, gone: 0 });
+    const retired = retiredSources(removed, { mine: 3, github: 2, orphan: 1, [active]: 4, gone: 0, 'teams-meetings': 5 });
     expect(retired.map((s) => [s.id, s.displayName, s.builtin, s.removed])).toEqual([
       ['github', sourceInfos().find((s) => s.id === 'github')!.displayName, true, true],
       ['mine', 'Mine', false, true],
@@ -718,6 +718,12 @@ describe('source specs', () => {
     ]);
     expect(forgetSourcePatch({ ...kept, sourceColors: { mine: '#fff' } }, 'mine')).toEqual({ sourceLabels: {}, sourceColors: {} });
     expect(removeSourcePatch(base, 'mine').sourceLabels).toBeUndefined();
+  });
+
+  it('keeps the ids of experimental sources out of the source list and away from new sources', () => {
+    expect(sourceInfos().some((s) => s.id === 'teams-meetings')).toBe(false);
+    const added = newUserSource({ url: 'https://example.com/feed.xml', name: 'Teams meetings' });
+    expect('spec' in added && added.spec.id).toBe('teams-meetings-2');
   });
 });
 

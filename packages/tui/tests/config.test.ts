@@ -101,6 +101,15 @@ describe('profiles', () => {
     expect(selectProfile()).toBe('a');
   });
 
+  it('keeps the known experimental sources a profile turned on, once each', () => {
+    write({ profiles: { default: { experimentalSources: ['teams-meetings', 'nope', 7, 'teams-meetings'] }, other: { experimentalSources: ['nope'] } } });
+    expect(loadConfig('default').experimentalSources).toEqual(['teams-meetings']);
+    expect(loadConfig('other').experimentalSources).toBeUndefined();
+    // Turning the last one off leaves no empty list behind
+    saveConfig('default', { experimentalSources: [] });
+    expect(stored().profiles.default).toEqual({});
+  });
+
   it('says which profiles exist when the requested one does not', () => {
     addProfile('work');
     expect(() => selectProfile('nope')).toThrow('Unknown profile “nope” (have: default, work)');

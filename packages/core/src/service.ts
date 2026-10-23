@@ -1,6 +1,7 @@
 import type { BackupPayload, PageInfo } from './store/tables.js';
 import { makeId } from './store/tables.js';
-import { DuplicateIndex } from './duplicates.js';
+import { DuplicateIndex, type DuplicateCheck } from './duplicates.js';
+import { isExperimentalSource, type ExperimentalProvider } from './experimental.js';
 import { mapLimit } from './util.js';
 import { getAllSources, getSource, getSourceIds } from './scraper/registry.js';
 import { estimateReadingTimeMinutes } from './scraper/feed.js';
@@ -18,7 +19,15 @@ import type {
   FetchResponse,
   SourceFetchResult,
   ReferenceSuggestion,
+  ScrapedItem,
 } from './types.js';
+
+/** A source as `fetch` runs it: a scraper, or an experimental provider. */
+interface Fetcher {
+  id: string;
+  fetch(): Promise<ScrapedItem[]>;
+  provider?: ExperimentalProvider;
+}
 
 /** What to file: a feed update (`updateId`) or any link (`url`, optional `title`). */
 export interface SuggestReferenceRequest {
@@ -51,8 +60,16 @@ const REFRESH_PREVIEW_CHARS = 5000;
  * Requires a connection string (or a SAS) with network access to the sources.
  */
 export class FomoDirectService extends FomoStorageService {
-  constructor(conn: StoreConnection) {
+  private experimentalProviders: readonly ExperimentalProvider[] = [];
+
+  constructor(conn: StoreConnection, options: { experimental?: readonly ExperimentalProvider[] } = {}) {
     super(conn);
+    this.setExperimentalProviders(options.experimental ?? []);
+  }
+
+  /** The experimental sources `fetch` runs (the ones the user turned on), replacing the previous ones. */
+  setExperimentalProviders(providers: readonly ExperimentalProvider[]): void {
+    this.experimentalProviders = providers.filter((p) => isExperimentalSource(p.id));
   }
 
   /**
@@ -155,15 +172,18 @@ export class FomoDirectService extends FomoStorageService {
     await this.ensureInit();
 
     const settings = await this.store.getSettings();
-    let sources = getAllSources(settings);
+    let sources: Fetcher[] = getAllSources(settings);
+    let providers = this.experimentalProviders;
 
     if (req.sources && req.sources.length > 0) {
       // Explicit source list — ignore disabledSources
+      const requested = new Set(req.sources);
       sources = req.sources
         .map((id) => getSource(id, settings))
         .filter((s): s is NonNullable<typeof s> => s !== undefined);
+      providers = providers.filter((p) => requested.has(p.id));
 
-      if (sources.length === 0) {
+      if (sources.length === 0 && providers.length === 0) {
         throw new Error(`None of the requested sources are registered. Available: ${getSourceIds(settings).join(', ')}`);
       }
     } else {
@@ -171,14 +191,18 @@ export class FomoDirectService extends FomoStorageService {
       const disabled = new Set(settings.disabledSources);
       if (disabled.size > 0) {
         sources = sources.filter((s) => !disabled.has(s.id));
+        providers = providers.filter((p) => !disabled.has(p.id));
       }
     }
+    sources = [...sources, ...providers.map((p): Fetcher => ({ id: p.id, fetch: () => p.fetch(), provider: p }))];
 
     let totalAdded = 0;
     const results: Record<string, SourceFetchResult> = {};
 
     // Every stored update, so a page already stored (under another URL or source) is not added again.
-    const dups = new DuplicateIndex(await this.store.listDuplicateRows());
+    // Experimental items (meetings and the like) are personal records, not pages: they take no part.
+    const rows = await this.store.listDuplicateRows();
+    const dups = new DuplicateIndex(rows.filter((r) => !isExperimentalSource(r.id.slice(0, r.id.indexOf('__')))));
     await mapLimit(dups.corrections(), 8, async ({ id, duplicateOf }) => {
       try {
         await this.store.setDuplicateOf(id, duplicateOf);
@@ -190,6 +214,7 @@ export class FomoDirectService extends FomoStorageService {
     await Promise.all(
       sources.map(async (source) => {
         const result: SourceFetchResult = { fetched: 0, added: 0 };
+        const provider = source.provider;
 
         try {
           const items = await source.fetch();
@@ -197,12 +222,14 @@ export class FomoDirectService extends FomoStorageService {
 
           for (const item of items) {
             const datePublished = item.datePublished.toISOString();
-            const check = dups.check(await makeId(source.id, item.url), item.url, item.title, datePublished);
+            const check: DuplicateCheck = provider
+              ? { kind: 'new' }
+              : dups.check(await makeId(source.id, item.key ?? item.url), item.url, item.title, datePublished);
             if (check.kind === 'skip') {
               result.duplicates = (result.duplicates ?? 0) + 1;
               continue;
             }
-            const inserted = await this.store.insertUpdate({
+            const update = {
               source: source.id,
               title: item.title,
               url: item.url,
@@ -211,7 +238,15 @@ export class FomoDirectService extends FomoStorageService {
               ...(item.readingTimeMinutes ? { readingTimeMinutes: item.readingTimeMinutes } : {}),
               ...(item.durationSeconds ? { durationSeconds: item.durationSeconds } : {}),
               ...(check.kind === 'new' && check.duplicateOf ? { duplicateOf: check.duplicateOf } : {}),
-            });
+            };
+            const key = item.key;
+            const merge = provider?.merge;
+            const inserted = key
+              ? await this.store.insertUpdate(update, {
+                  key,
+                  ...(merge ? { merge: (existing: Update) => merge.call(provider, existing, item) } : {}),
+                })
+              : await this.store.insertUpdate(update);
             if (inserted) result.added++;
           }
         } catch (err) {

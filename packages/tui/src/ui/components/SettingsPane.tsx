@@ -2,8 +2,9 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { DEFAULT_COLOR, timeAgo, type AppSettings, type PreviewPosition, type SourceFetchResult, type StatsResponse } from '@fomo/core';
 import { maskConnectionString, type LocalConfig } from '../../config.js';
+import { EXPERIMENTAL_SETUPS, type ExperimentalSetups } from '../../experimental/index.js';
 import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
-import { ADD_SOURCE_PROMPTS, configDisplay, rowHint, type AddSourceStep, type SettingsRow } from '../settings.js';
+import { ADD_SOURCE_PROMPTS, configDisplay, experimentalOn, rowHint, type AddSourceStep, type SettingsRow } from '../settings.js';
 
 interface Props {
   rows: SettingsRow[];
@@ -27,6 +28,8 @@ interface Props {
   confirmKey?: string;
   /** Step of adding a source being typed. */
   addStep?: AddSourceStep;
+  /** Setup of the experimental sources (what turning one on agrees to). */
+  experimental?: ExperimentalSetups;
   height: number;
   columns: number;
 }
@@ -55,6 +58,7 @@ export const SettingsPane = React.memo(function SettingsPane({
   editBuffer,
   confirmKey,
   addStep,
+  experimental = EXPERIMENTAL_SETUPS,
   height,
   columns,
 }: Props) {
@@ -93,6 +97,64 @@ export const SettingsPane = React.memo(function SettingsPane({
       <Text color={color} backgroundColor={bg}>{clip(label, NAME_W - 1).padEnd(NAME_W)}</Text>
     );
     const fill = (used: number) => <Text backgroundColor={bg}>{' '.repeat(Math.max(0, restW - used))}</Text>;
+    const dot = (on: boolean) => <Text color={on ? '#3fb950' : '#f85149'} backgroundColor={bg}>{on ? '● ' : '○ '}</Text>;
+    /** A question about the row, in place of its status. */
+    const asking = (key: string, on: boolean, label: string, text: string) => {
+      const ask = clip(text, restW);
+      return (
+        <Text key={key} wrap="truncate">
+          {cursor}
+          {dot(on)}
+          {name(label)}
+          <Text color="#e3b341" backgroundColor={bg}>{ask}</Text>
+          {fill(ask.length)}
+        </Text>
+      );
+    };
+    /** A source's state, label, item count and last fetch. */
+    const sourceLine = (row: { key: string; source: { id: string; displayName: string } }, on: boolean, state: string, tag: string, tagColor: string) => {
+      const id = row.source.id;
+      const status = state.padEnd(10);
+      const label = clip(tag, 12).padEnd(14);
+      const count = `${stats?.bySource[id] ?? 0} items`.padEnd(11);
+      const result = lastFetch[id];
+      const history = stats?.sourceStatus?.[id];
+      const error = history ? history.lastError : result?.error;
+      const added = (result && !result.error ? `+${result.added} new` : '').padEnd(9);
+      const newest = (history?.lastAddedAt ? `last new ${timeAgo(history.lastAddedAt)}` : '').padEnd(17);
+      const fetchedAt = history?.lastFetchAt ? timeAgo(history.lastFetchAt) : '';
+      const fetched = error ? `⚠ ${fetchedAt ? `${fetchedAt}: ` : ''}${error}` : fetchedAt ? `✓ fetched ${fetchedAt}` : '';
+      const used = 37 + added.length + newest.length;
+      const last = clip(fetched, Math.max(0, restW - used));
+      return (
+        <Text key={row.key} wrap="truncate">
+          {cursor}
+          {dot(on)}
+          {name(row.source.displayName, on ? '#f0f6fc' : '#8b949e')}
+          <Text color={on ? '#3fb950' : '#f85149'} backgroundColor={bg}>{status}</Text>
+          <Text color={settings.sourceColors?.[id] || DEFAULT_SOURCE_COLOR[id] || DEFAULT_COLOR} backgroundColor={bg}>{'■ '}</Text>
+          <Text color={tagColor} backgroundColor={bg}>{label}</Text>
+          <Text color="#8b949e" backgroundColor={bg}>{count}</Text>
+          <Text color="#3fb950" backgroundColor={bg}>{added}</Text>
+          <Text color="#c9d1d9" backgroundColor={bg}>{newest}</Text>
+          <Text color={error ? '#f85149' : '#8b949e'} backgroundColor={bg}>{last}</Text>
+          {fill(used + last.length)}
+        </Text>
+      );
+    };
+
+    if (row.kind === 'experimental') {
+      const id = row.source.id;
+      const on = experimentalOn(config, id);
+      const items = stats?.bySource[id] ?? 0;
+      if (confirmKey === row.key) {
+        return asking(row.key, on, row.source.displayName, `↵ again to ${experimental[id]?.consent ?? 'turn it on'} · Esc cancel`);
+      }
+      if (confirmKey === `${row.key}:x`) {
+        return asking(row.key, on, row.source.displayName, `press x again to delete its ${items} items · Esc cancel`);
+      }
+      return sourceLine(row, on, on ? 'on' : 'off', 'experimental', '#d2a8ff');
+    }
 
     if (row.kind === 'action') {
       const confirming = confirmKey === row.key;
@@ -151,33 +213,7 @@ export const SettingsPane = React.memo(function SettingsPane({
           </Text>
         );
       }
-      const status = (enabled ? 'enabled' : 'disabled').padEnd(10);
-      const label = clip(settings.sourceLabels[id] ?? '', 12).padEnd(14);
-      const count = `${stats?.bySource[id] ?? 0} items`.padEnd(11);
-      const result = lastFetch[id];
-      const history = stats?.sourceStatus?.[id];
-      const error = history ? history.lastError : result?.error;
-      const added = (result && !result.error ? `+${result.added} new` : '').padEnd(9);
-      const newest = (history?.lastAddedAt ? `last new ${timeAgo(history.lastAddedAt)}` : '').padEnd(17);
-      const fetchedAt = history?.lastFetchAt ? timeAgo(history.lastFetchAt) : '';
-      const fetched = error ? `⚠ ${fetchedAt ? `${fetchedAt}: ` : ''}${error}` : fetchedAt ? `✓ fetched ${fetchedAt}` : '';
-      const used = 37 + added.length + newest.length;
-      const last = clip(fetched, Math.max(0, restW - used));
-      return (
-        <Text key={row.key} wrap="truncate">
-          {cursor}
-          <Text color={enabled ? '#3fb950' : '#f85149'} backgroundColor={bg}>{enabled ? '● ' : '○ '}</Text>
-          {name(row.source.displayName, enabled ? '#f0f6fc' : '#8b949e')}
-          <Text color={enabled ? '#3fb950' : '#f85149'} backgroundColor={bg}>{status}</Text>
-          <Text color={settings.sourceColors?.[id] || DEFAULT_SOURCE_COLOR[id] || DEFAULT_COLOR} backgroundColor={bg}>{'■ '}</Text>
-          <Text color="#58a6ff" backgroundColor={bg}>{label}</Text>
-          <Text color="#8b949e" backgroundColor={bg}>{count}</Text>
-          <Text color="#3fb950" backgroundColor={bg}>{added}</Text>
-          <Text color="#c9d1d9" backgroundColor={bg}>{newest}</Text>
-          <Text color={error ? '#f85149' : '#8b949e'} backgroundColor={bg}>{last}</Text>
-          {fill(used + last.length)}
-        </Text>
-      );
+      return sourceLine(row, enabled, enabled ? 'enabled' : 'disabled', settings.sourceLabels[id] ?? '', '#58a6ff');
     }
 
     if (row.kind === 'add-source' || row.kind === 'restore-sources') {

@@ -5,6 +5,7 @@ import { AUDIT_FILE, CONFIG_FILE, LOG_FILE, loadConfig, selectProfile } from './
 import { parseArgs } from './args.js';
 import { createAuditLog } from './audit.js';
 import { SummarizerCache } from './copilot.js';
+import { closeAllWorkIQ } from './experimental/workiq.js';
 import { Root } from './ui/Root.js';
 import { enterFullScreen } from './ui/screen.js';
 import { VERSION } from './version.js';
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
     throw err;
   } finally {
     restoreScreen?.();
-    await summarizers.close();
+    await Promise.all([summarizers.close(), closeAllWorkIQ()]);
   }
 }
 

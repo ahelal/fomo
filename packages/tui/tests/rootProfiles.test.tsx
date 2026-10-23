@@ -17,6 +17,7 @@ vi.mock('@fomo/core/service', async () => {
       fake.created.push(this.account);
     }
     getSettings = async () => ({ ...DEFAULT_SETTINGS });
+    setExperimentalProviders = () => {};
     getSources = async () => [];
     getDigest = async () => ({ entries: [], pending: 0 });
     listUpdates = async () => ({ updates: [], total: 0 });

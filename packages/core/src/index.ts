@@ -141,6 +141,14 @@ export {
 export { timeAgo, formatUpdateTime } from './time.js';
 export { canonicalUrl, titleKey, nextDuplicate, DuplicateIndex, TITLE_MATCH_DAYS, type DuplicateRow, type DuplicateCheck } from './duplicates.js';
 export {
+  TEAMS_MEETINGS_SOURCE,
+  EXPERIMENTAL_SOURCE_INFOS,
+  experimentalSourceInfo,
+  isExperimentalSource,
+  type ExperimentalProvider,
+  type KeyedChange,
+} from './experimental.js';
+export {
   UPDATE_SORTS,
   TOPIC_SORTS,
   REFERENCE_SORTS,

@@ -159,6 +159,19 @@ export interface BackupPayload {
 /** What re-reading a post's page corrects (`UpdateStore.setPageInfo`). */
 export type PageInfo = Partial<Pick<Update, 'content' | 'readingTimeMinutes' | 'durationSeconds'>>;
 
+/** What a keyed item changes on its stored row when it is fetched again. */
+export type KeyedChange = Partial<Pick<Update, 'title' | 'url' | 'content' | 'datePublished' | 'durationSeconds'>>;
+
+export interface InsertOptions {
+  /** Identity of the row instead of the URL (`ScrapedItem.key`). */
+  key?: string;
+  /**
+   * For a keyed row that already exists: the fields to change, given what is stored, or undefined to
+   * leave it as it is. Default: the fetched title, URL, content and date. Status, saved flag and topic stay.
+   */
+  merge?: (existing: Update) => KeyedChange | undefined;
+}
+
 // ─── Store ─────────────────────────────────────────────────────────────────
 export class UpdateStore {
   private readonly client: TableClient;
@@ -181,14 +194,16 @@ export class UpdateStore {
   }
 
   /**
-   * Insert a new update.  Returns true if inserted, false if the URL already exists.
+   * Insert a new update.  Returns true if inserted, false if the URL (or `options.key`) already exists.
    * If the URL already exists and new content is provided, backfills content
-   * on the existing entity (preserving status and other fields).
+   * on the existing entity (preserving status and other fields). An existing keyed row is merged
+   * instead (see `InsertOptions.merge`).
    */
   async insertUpdate(
     update: Omit<Update, 'id' | 'dateAdded' | 'status' | 'saved'>,
+    options: InsertOptions = {},
   ): Promise<boolean> {
-    const rowKey = await hashUrl(update.url);
+    const rowKey = await hashUrl(options.key ?? update.url);
     const content = clampContent(update.content ?? '');
 
     try {
@@ -210,6 +225,17 @@ export class UpdateStore {
     } catch (err: unknown) {
       // EntityAlreadyExists → URL was already ingested
       if (isTableError(err, 409)) {
+        if (options.key) {
+          const fetched: KeyedChange = {
+            title: update.title,
+            url: update.url,
+            content,
+            datePublished: update.datePublished,
+            ...(update.durationSeconds ? { durationSeconds: update.durationSeconds } : {}),
+          };
+          await this.mergeKeyed(update.source, rowKey, options.merge ?? (() => fetched));
+          return false;
+        }
         // Backfill content or duration the existing entity lacks
         if (content || update.durationSeconds) {
           await this.backfill(update.source, rowKey, content, update.durationSeconds);
@@ -217,6 +243,32 @@ export class UpdateStore {
         return false;
       }
       throw err;
+    }
+  }
+
+  /** Apply what `merge` changes to an existing keyed row. */
+  private async mergeKeyed(
+    partitionKey: string,
+    rowKey: string,
+    merge: (existing: Update) => KeyedChange | undefined,
+  ): Promise<void> {
+    try {
+      const entity = await this.client.getEntity<UpdateEntity>(partitionKey, rowKey);
+      const change = merge(entityToUpdate(entity));
+      if (!change) return;
+      const patch: KeyedChange = {};
+      if (change.title && change.title !== entity.title) patch.title = change.title;
+      if (change.url && change.url !== entity.url) patch.url = change.url;
+      if (change.datePublished && change.datePublished !== entity.datePublished) patch.datePublished = change.datePublished;
+      if (change.durationSeconds && change.durationSeconds !== entity.durationSeconds) patch.durationSeconds = change.durationSeconds;
+      if (change.content !== undefined) {
+        const next = clampContent(change.content);
+        if (next !== (entity.content ?? '')) patch.content = next;
+      }
+      if (Object.keys(patch).length === 0) return;
+      await this.client.updateEntity({ partitionKey, rowKey, ...patch }, 'Merge', { etag: entity.etag });
+    } catch {
+      // best-effort — the next fetch merges again
     }
   }
 

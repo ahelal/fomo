@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampContent, makeId, MAX_CONTENT_CHARS, parseId, UpdateStore } from '../store/tables.js';
+import { clampContent, hashUrl, makeId, MAX_CONTENT_CHARS, parseId, UpdateStore } from '../store/tables.js';
 
 describe('clampContent', () => {
   it('keeps content within the limit unchanged', () => {
@@ -59,6 +59,56 @@ describe('UpdateStore.insertUpdate', () => {
     replaced.length = 0;
     await store.insertUpdate(update);
     expect(replaced).toEqual([]);
+  });
+
+  describe('with a key', () => {
+    const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+    const meeting = { source: 'teams-meetings', title: 'Planning', url: 'https://teams.microsoft.com/l/meetingrecap?x', datePublished: '2026-10-18T10:00:00.000Z', content: 'Missed · 1 recording' };
+    const keyedStore = (stored?: Record<string, unknown>) => {
+      const store = new UpdateStore(conn as any);
+      const created: Record<string, unknown>[] = [];
+      const merged: { entity: Record<string, unknown>; mode: string; etag?: string }[] = [];
+      (store as any).client = {
+        createEntity: async (e: Record<string, unknown>) => {
+          if (stored) throw Object.assign(new Error('exists'), { statusCode: 409 });
+          created.push(e);
+        },
+        getEntity: async () => ({ ...stored }),
+        updateEntity: async (entity: Record<string, unknown>, mode: string, opts?: { etag?: string }) => { merged.push({ entity, mode, etag: opts?.etag }); },
+      };
+      return { store, created, merged };
+    };
+
+    it('uses the key, not the URL, as the identity of the row', async () => {
+      const { store, created } = keyedStore();
+      await expect(store.insertUpdate(meeting, { key: 'teams:t:2026-10-18T10:00:00.000Z' })).resolves.toBe(true);
+      expect(created[0]!.rowKey).toBe(await hashUrl('teams:t:2026-10-18T10:00:00.000Z'));
+    });
+
+    it('merges what changed into a stored row, keeping its status and saved flag', async () => {
+      const stored = { partitionKey: 'teams-meetings', rowKey: 'r', ...meeting, url: 'https://teams.microsoft.com/l/chat/t/conversations', content: 'Missed', status: 'read', saved: true, etag: 'e1' };
+      const { store, merged } = keyedStore(stored);
+
+      await expect(store.insertUpdate(meeting, { key: 'k' })).resolves.toBe(false);
+
+      expect(merged).toEqual([{
+        entity: { partitionKey: 'teams-meetings', rowKey: await hashUrl('k'), url: meeting.url, content: 'Missed · 1 recording' },
+        mode: 'Merge',
+        etag: 'e1',
+      }]);
+    });
+
+    it('lets the caller decide what changes, and writes nothing when nothing does', async () => {
+      const stored = { partitionKey: 'teams-meetings', rowKey: 'r', ...meeting, etag: 'e1' };
+      const { store, merged } = keyedStore(stored);
+
+      await store.insertUpdate({ ...meeting, content: 'Missed' }, { key: 'k', merge: () => undefined });
+      await store.insertUpdate({ ...meeting, content: 'Missed' }, { key: 'k', merge: (existing) => ({ content: existing.content, title: 'Planning' }) });
+      expect(merged).toEqual([]);
+
+      await store.insertUpdate(meeting, { key: 'k', merge: () => ({ title: 'Planning (moved)' }) });
+      expect(merged.map((m) => m.entity)).toEqual([{ partitionKey: 'teams-meetings', rowKey: await hashUrl('k'), title: 'Planning (moved)' }]);
+    });
   });
 });
 

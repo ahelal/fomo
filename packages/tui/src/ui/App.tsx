@@ -3,15 +3,16 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TopicSort, UpdateSort } from '@fomo/core';
-import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
+import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, isExperimentalSource } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, maskConnectionString, readConfigFile, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
 import { openTodoAttachment } from '../attachments.js';
+import { EXPERIMENTAL_SETUPS, type ExperimentalSetups } from '../experimental/index.js';
 import { AuditView } from './components/AuditView.js';
-import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
+import { automaticAccount, buildSettingsRows, editStartValue, experimentalOn, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
 import { ProfilePicker } from './components/ProfilePicker.js';
@@ -79,6 +80,8 @@ interface Props {
   auditFile?: string;
   /** gh CLI accounts offered for Config → Copilot account. */
   listAccounts?(): Promise<GhAccount[]>;
+  /** Sign-in and providers of the experimental sources (config → Experimental sources). */
+  experimental?: ExperimentalSetups;
   /** Storage-account profiles (`w`); without it the app has the single `default` profile and no switcher. */
   profiles?: ProfileControls;
   /** Shown once on opening: what the profile switch that replaced the previous app did. */
@@ -121,7 +124,7 @@ export function refreshMessage(previous: Update, update: Update): string {
 const STATUSBAR_H = 2; // content + border line
 const FILTERBAR_H = 1;
 
-export function App({ service, config, onConfigChange, digest, summarize, suggestReference, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts, profiles, notice }: Props) {
+export function App({ service, config, onConfigChange, digest, summarize, suggestReference, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts, experimental = EXPERIMENTAL_SETUPS, profiles, notice }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const audit = useMemo(() => auditProp ?? createMemoryAuditLog(), [auditProp]);
@@ -400,7 +403,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   }, []);
 
   const sourceName = useCallback(
-    (id: string) => appSettings.sourceLabels[id] || sources.find((s) => s.id === id)?.displayName || id,
+    (id: string) => appSettings.sourceLabels[id] || sources.find((s) => s.id === id)?.displayName || experimentalSourceInfo(id)?.displayName || id,
     [appSettings.sourceLabels, sources],
   );
 
@@ -1141,7 +1144,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   /** Delete every stored update of a source; one that is gone for good also loses its label and color. */
   const deleteSourceItems = useCallback(async (id: string) => {
     const name = sourceName(id);
-    const active = sources.some((s) => s.id === id);
+    const active = sources.some((s) => s.id === id) || isExperimentalSource(id);
     showMessage(`Deleting the items of ${name}…`, 60_000);
     try {
       const n = await service.deleteSourceUpdates(id);
@@ -1165,6 +1168,59 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     if (deleteItems && items > 0) void deleteSourceItems(id);
     else showMessage(`Removed ${name}${items > 0 ? ` · its ${items} items stay until you delete them` : builtin ? ' · restore it at the end of the list' : ''}`, 5000);
   }, [sourceName, stats, appSettings, updateRemoteSettings, deleteSourceItems, showMessage]);
+
+  /**
+   * Sign in for an experimental source (`l`); with `turnOn`, also turn it on for this profile and
+   * fetch it. It stays off when signing in fails.
+   */
+  const signInExperimental = useCallback(async (id: string, turnOn: boolean) => {
+    const setup = experimental[id];
+    if (!setup) return;
+    const name = sourceName(id);
+    if (!claimBusy(`${name}: signing in (a browser window or the account picker may open)…`)) return;
+    let fetchNow = false;
+    try {
+      const run = await setup.signIn((line) => updatePhase(`${name}: ${line.slice(0, 200)}`));
+      if (!run.ok) {
+        audit.error('source', `${id}: sign-in failed: ${run.output}`);
+        showMessage(`⚠ ${run.output}${turnOn ? ` · ${name} stays off` : ''}`, 10_000);
+        return;
+      }
+      audit.log('source', `${id}: signed in`);
+      if (!turnOn) {
+        showMessage(`✓ Signed in for ${name}`, 4000);
+        return;
+      }
+      const err = onConfigChange({ experimentalSources: [...(config.experimentalSources ?? []).filter((s) => s !== id), id] });
+      if (err) {
+        audit.error('config', `turn on ${id}: ${err}`);
+        showMessage(`⚠ Could not save: ${err}`, 6000);
+        return;
+      }
+      audit.log('source', `${id}: turned on`);
+      fetchNow = true;
+    } catch (err) {
+      audit.error('source', `${id}: sign-in: ${errorText(err)}`);
+      showMessage(`⚠ Sign-in failed: ${errorText(err)}`, 8000);
+    } finally {
+      releaseBusy();
+    }
+    if (fetchNow) await doFetch([id]);
+  }, [experimental, sourceName, claimBusy, updatePhase, releaseBusy, onConfigChange, config.experimentalSources, doFetch, audit, showMessage]);
+
+  /** Turn an experimental source off for this profile; its stored items stay. */
+  const turnOffExperimental = useCallback((id: string) => {
+    const name = sourceName(id);
+    const err = onConfigChange({ experimentalSources: (config.experimentalSources ?? []).filter((s) => s !== id) });
+    if (err) {
+      audit.error('config', `turn off ${id}: ${err}`);
+      showMessage(`⚠ Could not save: ${err}`, 6000);
+      return;
+    }
+    audit.log('source', `${id}: turned off`);
+    const items = stats?.bySource[id] ?? 0;
+    showMessage(`${name} off${items ? ` · its ${items} items stay (x deletes them)` : ''}`, 5000);
+  }, [sourceName, onConfigChange, config.experimentalSources, stats, audit, showMessage]);
 
   /** Tab / Shift+Tab: step through the views in tab order (1–6), wrapping around. */
   const cycleView = (dir: 1 | -1) => {
@@ -1592,6 +1648,39 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           return;
         }
         setConfirmKey(undefined);
+        return;
+      }
+
+      if (row.kind === 'experimental') {
+        const id = row.source.id;
+        if (key.return || input === ' ') {
+          if (experimentalOn(config, id)) {
+            setConfirmKey(undefined);
+            turnOffExperimental(id);
+            return;
+          }
+          // ↵ again confirms: turning it on signs in and agrees to the source's terms
+          if (confirmKey !== row.key) { setConfirmKey(row.key); return; }
+          setConfirmKey(undefined);
+          void signInExperimental(id, true);
+          return;
+        }
+        if (input === 'x') {
+          if (!stats?.bySource[id]) { setConfirmKey(undefined); showMessage(`${sourceName(id)} has no stored items`, 3000); return; }
+          if (confirmKey !== `${row.key}:x`) { setConfirmKey(`${row.key}:x`); return; }
+          setConfirmKey(undefined);
+          void deleteSourceItems(id);
+          return;
+        }
+        setConfirmKey(undefined);
+        if (input === 'l') void signInExperimental(id, false);
+        else if (input === 'f') {
+          if (experimentalOn(config, id)) void doFetch([id]);
+          else showMessage(`${sourceName(id)} is off · ↵ turns it on`, 4000);
+        } else if (input === 'v') {
+          setShowSettings(false);
+          applySourceFilter([id]);
+        }
         return;
       }
 
@@ -2228,6 +2317,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
           editBuffer={editingKey ? editBuffer : undefined}
           confirmKey={confirmKey}
           addStep={editingKey && addDraft ? addDraft.step : undefined}
+          experimental={experimental}
           height={availableH}
           columns={columns}
         />

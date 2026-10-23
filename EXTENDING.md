@@ -126,3 +126,51 @@ In the TUI press `c`, move to your source under **Sources**, then:
 | `url`           | `string` | Required — used as dedup key (`sha256(url)`)      |
 | `datePublished` | `Date`   | Required                                          |
 | `content`       | `string` | Optional — body text shown in the preview         |
+| `key`           | `string` | Optional — row identity instead of `url` (`sha256(key)`); a keyed item fetched again updates its row |
+
+## 5. Experimental sources (terminal app only)
+
+Some sources read **your own** data with a local sign-in, so they can't be specs: the web app and other machines
+must never run them. These are *experimental sources*:
+
+- **Registry:** `EXPERIMENTAL_SOURCE_INFOS` in `packages/core/src/experimental.ts` (id, name, where the data comes
+  from; browser-safe, so the web app can name and color their items). Their items are stored like any other update.
+- **Provider:** an `ExperimentalProvider` (`id`, `fetch(signal)`, optional `merge`) written in the TUI under
+  `packages/tui/src/experimental/`, and registered with its sign-in and the consent text shown before turning it on
+  in `EXPERIMENTAL_SETUPS` (`packages/tui/src/experimental/index.ts`).
+- **Turning it on:** per profile, in `~/.fomo/config.json` (`experimentalSources: ["teams-meetings"]`), from
+  **Config → Experimental sources · this computer** (`↵` twice signs in and turns it on, `↵` turns it off, `l` signs in again,
+  `f`/`v`/`x` as for other sources). Only the profiles that turned one on fetch it; `FomoDirectService.setExperimentalProviders` gets the list.
+- **Keyed items:** give each item a stable `key` when its URL is shared or changes (a recurring meeting has one
+  chat), and a `merge(existing, fetched)` that says what a fetch changes on the stored row (status, saved and topic
+  are always kept). Experimental items are left out of duplicate detection.
+
+The first one is **Teams meetings** (`teams-meetings`, `src/experimental/teams.ts`): the meetings of the last 7 days
+you missed, or that have a recording or a transcript, one item per occurrence, linking to the Teams recap (or the
+meeting chat). It reads Microsoft Graph through [WorkIQ](https://www.npmjs.com/package/@microsoft/workiq)
+(`@microsoft/workiq`, pinned in the TUI), which keeps the Microsoft 365 sign-in itself: FOMO starts `workiq mcp` for a
+fetch and never sees a token.
+
+For recorded or transcribed meetings, build the Recap URL the way Teams' own "share recap" links do, encoding each
+query value separately. These formats were verified in Teams but are not a documented Microsoft deep-link contract:
+- With the recording file: `https://teams.microsoft.com/l/meetingrecap?driveId=<…>&driveItemId=<…>&iCalUid=<occurrence iCalUId>&threadId=<threadId>`.
+- Without it: `…?iCalUid=<occurrence iCalUId>&masterICalUid=<series iCalUId>&threadId=<threadId>`.
+  `masterICalUid` (lower case, recurring meetings only) is the series id: the same id with its date (bytes 16–19, hex
+  characters 32–39) zeroed (`seriesICalUId`). It opens that occurrence, with a list of the others; leave it out when
+  the file is known (the file picks the occurrence). The series id alone opens the latest recap or says you lack
+  permission.
+- Some meetings (often large ones whose chat is closed to you) only open with the file. `driveId`/`driveItemId` come
+  from the meeting chat's recording event (`callRecordingUrl`) via `/shares/u!<base64url>/driveItem`. When the chat
+  is closed (403) or has no link, search the file with WorkIQ's `retrieve` tool (Microsoft Search,
+  `OneDriveAndSharePoint`): query `"<subject>" <yyyymmdd>`, then take the hit named
+  `<subject>-<yyyyMMdd>_<HHmmss>[UTC]-<kind>` whose stamp, in the organizer's local time (a quarter-hour offset) or
+  UTC, is within 45 s of one of the occurrence's recordings (else transcripts). Teams drops `|` and `:` and turns `&`
+  into `_` in the name and writes the kind in the organizer's language, so compare only letters and digits. A failed
+  search answers like an empty one with `stoppedReason: "error"`: don't take it for "not found". Searches take ~10 s:
+  run a few at once, remember found files, search a miss again after an hour, and pause after failures. Some
+  recordings are not in the search index; their links go without the file.
+
+Without an artifact or `iCalUId`, link to the meeting chat; keep the chat link in the item preview as well. On
+refresh, replace older links with the new Recap link, but never downgrade a Recap link to a chat link, or one with a
+recording file to the same link without it (it is rebuilt in the current format; a link of an older format is
+replaced).

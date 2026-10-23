@@ -18,6 +18,8 @@
   "dependencies": {
     "@fomo/core": "workspace:*",
     "@github/copilot-sdk": "^1.0.15",
+    "@microsoft/workiq": "1.0.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "ink": "^5.1.0",
     "open": "^10.1.0",
     "qrcode-terminal": "^0.12.0",

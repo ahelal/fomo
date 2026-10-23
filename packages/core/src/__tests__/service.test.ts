@@ -326,6 +326,84 @@ describe('FomoDirectService', () => {
     );
   });
 
+  describe('experimental providers', () => {
+    const meeting = {
+      key: 'teams:19:meeting_x@thread.v2:2025-01-02T10:00:00.000Z',
+      title: 'Planning',
+      url: 'https://teams.microsoft.com/l/meetingrecap?eventId=x',
+      datePublished: new Date('2025-01-02T10:00:00Z'),
+      content: 'Missed',
+    };
+    const provider = () => ({
+      id: 'teams-meetings',
+      fetch: vi.fn().mockResolvedValue([meeting]),
+      merge: vi.fn().mockReturnValue({ content: 'Missed · 1 recording' }),
+    });
+    const withProvider = (p: ReturnType<typeof provider>) =>
+      new FomoDirectService('UseDevelopmentStorage=true', { experimental: [p] });
+
+    it('stores items under their key, merged by the provider, outside duplicate detection', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      // A stored page with the same URL and title, and a stored meeting matching the mock source's page.
+      __mockStore.listDuplicateRows.mockResolvedValueOnce([
+        { id: 'azure__a', url: 'https://teams.microsoft.com/l/meetingrecap?eventId=x', title: 'Planning', datePublished: '2025-01-01', dateAdded: '2025-01-01' },
+        { id: 'teams-meetings__b', url: 'https://example.com/item', title: 'Test Item', datePublished: '2025-01-01', dateAdded: '2025-01-01' },
+      ]);
+      __mockStore.insertUpdate.mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+      const p = provider();
+
+      const result = await withProvider(p).fetch();
+
+      expect(result.results['teams-meetings']).toEqual({ fetched: 1, added: 1 });
+      expect(result.results['mock-source']).toEqual({ fetched: 1, added: 1 });
+      const call = __mockStore.insertUpdate.mock.calls.find((c: any[]) => c[0].source === 'teams-meetings');
+      expect(call[0]).toEqual(expect.objectContaining({ title: 'Planning', content: 'Missed', datePublished: '2025-01-02T10:00:00.000Z' }));
+      expect(call[0].duplicateOf).toBeUndefined();
+      expect(call[1].key).toBe(meeting.key);
+      const existing = { id: 'teams-meetings__k', content: 'Missed' };
+      expect(call[1].merge(existing)).toEqual({ content: 'Missed · 1 recording' });
+      expect(p.merge).toHaveBeenCalledWith(existing, meeting);
+      // The ordinary page is still checked, against pages only.
+      const page = __mockStore.insertUpdate.mock.calls.find((c: any[]) => c[0].source === 'mock-source');
+      expect(page).toHaveLength(1);
+      expect(page[0].duplicateOf).toBeUndefined();
+    });
+
+    it('runs only the experimental source when it is the one requested', async () => {
+      const { __mockSource } = await import('../scraper/registry.js') as any;
+      const p = provider();
+
+      const result = await withProvider(p).fetch({ sources: ['teams-meetings'] });
+
+      expect(Object.keys(result.results)).toEqual(['teams-meetings']);
+      expect(p.fetch).toHaveBeenCalledOnce();
+      expect(__mockSource.fetch).not.toHaveBeenCalled();
+    });
+
+    it('is not run when disabled, when another source is requested, or when it is not experimental', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      const p = provider();
+      const s = withProvider(p);
+
+      expect(Object.keys((await s.fetch({ sources: ['mock-source'] })).results)).toEqual(['mock-source']);
+      __mockStore.getSettings.mockResolvedValueOnce({ disabledSources: ['teams-meetings'], previewPosition: 'right', pageSize: 50 });
+      expect(Object.keys((await s.fetch()).results)).toEqual(['mock-source']);
+      s.setExperimentalProviders([{ ...p, id: 'mock-source' }]);
+      expect(Object.keys((await s.fetch()).results)).toEqual(['mock-source']);
+      expect(p.fetch).not.toHaveBeenCalled();
+    });
+
+    it('reports a provider failure as that source\'s error', async () => {
+      const p = provider();
+      p.fetch.mockRejectedValueOnce(new Error('Sign in to WorkIQ again'));
+
+      const result = await withProvider(p).fetch();
+
+      expect(result.results['teams-meetings']).toEqual({ fetched: 0, added: 0, error: 'Sign in to WorkIQ again' });
+      expect(result.results['mock-source'].added).toBe(1);
+    });
+  });
+
   it('getUpdate throws on missing update', async () => {
     const { __mockStore } = await import('../store/tables.js') as any;
     __mockStore.getUpdate.mockResolvedValue(null);

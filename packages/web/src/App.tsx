@@ -8,6 +8,7 @@ import {
   userSource,
   restoreSourcesPatch,
   sourceInfos,
+  experimentalSourceInfo,
   nextRowKey,
   removeAndAdvance,
   soloUpdate,
@@ -208,7 +209,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   }, [fomo, clearSelection]);
 
   const sourceName = useCallback(
-    (id: string) => fomo.settings.sourceLabels[id] ?? sources.find((s) => s.id === id)?.displayName ?? id,
+    (id: string) => fomo.settings.sourceLabels[id] ?? sources.find((s) => s.id === id)?.displayName ?? experimentalSourceInfo(id)?.displayName ?? id,
     [fomo.settings.sourceLabels, sources],
   );
 

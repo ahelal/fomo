@@ -67,6 +67,12 @@ export interface ScrapedItem {
   readingTimeMinutes?: number;
   /** Exact video length in seconds, when available from the video page. */
   durationSeconds?: number;
+  /**
+   * Stable identity used instead of `url` for the stored row, for items whose link changes or is
+   * shared by several items (e.g. one Teams meeting chat for every occurrence of a recurring meeting).
+   * A keyed item that is fetched again updates its stored row (see `ExperimentalProvider.merge`).
+   */
+  key?: string;
 }
 
 /**
@@ -152,6 +158,8 @@ export interface SourceInfo {
   filter?: string;
   /** Removed, but some of its updates are still stored (see `retiredSources`). */
   removed?: boolean;
+  /** An experimental source fetched by the terminal app only, when turned on there (see `experimental.ts`). */
+  experimental?: boolean;
 }
 
 // ─── Request / Response shapes ───────────────────────────────────────────────

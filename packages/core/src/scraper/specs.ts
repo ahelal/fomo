@@ -1,4 +1,5 @@
 import type { AppSettings, SourceId, SourceInfo, SourceSpec, UserSourceSpec } from '../types.js';
+import { EXPERIMENTAL_SOURCE_INFOS, isExperimentalSource } from '../experimental.js';
 import { parseYoutubeUrl, youtubeName, youtubeUrl } from './youtube.js';
 
 const AZURE_UPDATES_FEED = 'https://www.microsoft.com/releasecommunications/api/v2/azure/rss';
@@ -91,7 +92,7 @@ export function newUserSource(input: NewSourceInput, settings: Partial<SourceSet
   const repo = urls.length === 1 ? urls[0].match(GITHUB_REPO_URL)?.[1] : undefined;
   const defaultName = target ? youtubeName(target) : repo ? `${repo} releases` : new URL(urls[0]).hostname.replace(/^www\./, '');
   const displayName = input.name?.trim() || defaultName;
-  const taken = new Set([...BUILTIN_IDS, ...(settings.userSources ?? []).map((s) => s.id)]);
+  const taken = new Set([...BUILTIN_IDS, ...EXPERIMENTAL_SOURCE_INFOS.map((s) => s.id), ...(settings.userSources ?? []).map((s) => s.id)]);
   const id = uniqueId(slugify(displayName) || 'source', taken);
 
   if (repo) {
@@ -225,7 +226,7 @@ export function retiredSources(
 ): SourceInfo[] {
   const active = new Set(activeSourceSpecs(settings).map((s) => s.id));
   return Object.keys(bySource)
-    .filter((id) => (bySource[id] ?? 0) > 0 && !active.has(id))
+    .filter((id) => (bySource[id] ?? 0) > 0 && !active.has(id) && !isExperimentalSource(id))
     .sort()
     .map((id) => {
       const builtin = BUILTIN_SOURCES.find((s) => s.id === id);

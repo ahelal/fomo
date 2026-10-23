@@ -20,6 +20,7 @@ export const DEFAULT_SOURCE_COLOR: Record<string, string> = {
   theregister:            '#f85149', // red
   'anthropic-news':       '#fb923c', // amber
   'anthropic-engineering':'#06b6d4', // teal
+  'teams-meetings':       '#7b83eb', // Teams purple
 };
 
 /** Read/unread/saved styling for one update, shared by the list and the topic tree. */
