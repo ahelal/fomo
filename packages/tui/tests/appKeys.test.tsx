@@ -214,6 +214,26 @@ describe('Config → Copilot account', () => {
     for (let i = firstFocusable(rows); i < target; i = moveFocus(rows, i, 1)) await press('j');
   }
 
+  it('masks the YouTube API key while it is typed and in the audit log', async () => {
+    const key = 'fake-youtube-key-0123456789-abcdefghi-rstu';
+    const { onConfigChange, audit, press, frame } = await renderApp();
+    await press('c');
+    const rows = buildSettingsRows(SOURCES);
+    const target = findRow(rows, 'c-youtubeApiKey');
+    for (let i = firstFocusable(rows); i < target; i = moveFocus(rows, i, 1)) await press('j');
+    expect(frame()).toContain('public feeds, no video lengths');
+
+    await press('\r');
+    await press(key);
+    expect(frame()).toContain('••••rstu');
+    expect(frame()).not.toContain(key.slice(0, 12));
+
+    await press('\r');
+    expect(onConfigChange).toHaveBeenCalledWith({ youtubeApiKey: key });
+    expect(audit.entries).toContainEqual(expect.objectContaining({ action: 'config', detail: 'youtubeApiKey = ••••rstu' }));
+    expect(JSON.stringify(audit.entries)).not.toContain(key.slice(0, 12));
+  });
+
   it('lists the gh accounts and saves the chosen one', async () => {
     const listAccounts = vi.fn(async () => accounts);
     const { onConfigChange, audit, press, frame } = await renderApp(undefined, { listAccounts });
@@ -791,6 +811,16 @@ describe('config values per profile', () => {
     expect(editStartValue('connectionString', { connectionString: 'AccountKey=secret' })).toBe('');
     expect(editStartValue('autoFetch', { autoFetch: false })).toBe('off');
     expect(editStartValue('autoFetch', { autoFetchMinutes: 30 })).toBe('30');
+  });
+
+  it('never shows the YouTube API key in full', () => {
+    const key = 'fake-youtube-key-0123456789-abcdefghi-rstu';
+    expect(configDisplay({ youtubeApiKey: key }, 'youtubeApiKey', { youtubeApiKey: key }).value).toBe('••••rstu');
+    expect(configDisplay({}, 'youtubeApiKey', {})).toMatchObject({ value: expect.stringContaining('no video lengths'), muted: true });
+    expect(editStartValue('youtubeApiKey', { youtubeApiKey: key })).toBe('');
+    expect(parseConfigEdit('youtubeApiKey', ` ${key} `)).toEqual({ patch: { youtubeApiKey: key } });
+    expect(parseConfigEdit('youtubeApiKey', '')).toEqual({ patch: { youtubeApiKey: undefined } });
+    expect(parseConfigEdit('youtubeApiKey', 'oops')).toHaveProperty('error');
   });
 
   it('searches the values of the profile in use', () => {

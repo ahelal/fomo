@@ -29,6 +29,7 @@ One storage account · No servers · Two interfaces (terminal UI + installable w
   - [Backup & Restore](#backup--restore)
   - [Profiles (several storage accounts)](#profiles-several-storage-accounts)
 - [Sources](#sources)
+  - [YouTube](#youtube)
   - [Experimental Sources](#experimental-sources)
 - [Security](#security)
 - [Environment Variables](#environment-variables)
@@ -148,7 +149,7 @@ Press `g` on an update in the TUI to have Copilot summarise it: one sentence wit
 
 Press `u` on an update in the TUI to correct its details from the linked page, e.g. when the reading time is wrong because the feed only had a teaser.
 
-- For YouTube videos it reads the video length again.
+- For YouTube videos it reads the video length again: from the YouTube Data API when a [YouTube API key](#youtube) is set, otherwise from the video page. Fetches don't read video lengths without a key, so press `u` to get one.
 - For other posts it works out the reading time from the whole page, and replaces the preview when the page has more text. The page is only used if it mentions the post's title, so a sign-in wall or a JavaScript-only page leaves the update unchanged.
 - The status line says what changed. The detail pane shows the reading time or the video length next to the published date.
 - The web app can't fetch pages, so it has no `u`. It shows the corrected details after a refresh in the TUI.
@@ -398,7 +399,7 @@ Press `c`. The bottom line shows the keys for the selected row. Each section hea
 | **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` [color](#colors) · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed, GitHub repo or YouTube channel; **Restore removed** brings back removed built-ins |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
 | **Experimental sources · this computer** | One row per [experimental source](#experimental-sources), off by default, per profile | `Enter` twice: sign in and turn it on (then it is fetched) · `Enter` turns it off (its items stay) · `l` sign in again · `f` fetch it · `v` list its updates · `x` twice deletes its items |
-| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, Auto-fetch (minutes), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (Auto-fetch takes 5–1440 minutes or `off`; Group after fetch toggles; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. With several [profiles](#profiles-several-storage-accounts) the section title names the one being edited; every setting here belongs to it. |
+| **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, YouTube API key, Auto-fetch (minutes), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (Auto-fetch takes 5–1440 minutes or `off`; Group after fetch toggles; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. The connection string and YouTube API key are masked, also while you type them and in the audit trail. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. With several [profiles](#profiles-several-storage-accounts) the section title names the one being edited; every setting here belongs to it. |
 
 ### Backup & Restore
 
@@ -431,7 +432,7 @@ Press `w` (in the main list, Config, Todos or Bookmarks, or **Config → Switch 
 - **Removing** only forgets the profile in `config.json`. The storage account, its data and its backup files are not touched. You can't remove the profile in use or the last one.
 - **Web app:** one account per install. Each storage account has its own web app URL, so set **Web app URL** in every profile, use **Link a device** in the profile you want on that device, and install one PWA per account.
 - **Config file:** `~/.fomo/config.json` becomes `{ "activeProfile": …, "profiles": { … } }` the first time you save in a version with profiles; an existing file becomes the `default` profile. An older `fomo` doesn't know this format and would overwrite it, so keep a copy before going back to one.
-- **Environment variables:** `FOMO_WEB_URL`, `FOMO_COPILOT_MODEL`, `FOMO_INTERESTS` and `FOMO_GROUPING_HINTS` override every profile. `AZURE_STORAGE_CONNECTION_STRING` is only a fallback for a profile whose config has no connection string.
+- **Environment variables:** `FOMO_WEB_URL`, `FOMO_COPILOT_MODEL`, `FOMO_INTERESTS`, `FOMO_GROUPING_HINTS` and `FOMO_YOUTUBE_API_KEY` override every profile. `AZURE_STORAGE_CONNECTION_STRING` is only a fallback for a profile whose config has no connection string.
 
 ---
 
@@ -476,6 +477,24 @@ Most sources need no code:
 
 See [EXTENDING.md](EXTENDING.md) for the spec fields and the shared helpers for custom sources.
 
+### YouTube
+
+Only the TUI fetches YouTube sources. How depends on whether the profile has a **YouTube API key**:
+
+- **With a key** (recommended), FOMO uses the official [YouTube Data API v3](https://developers.google.com/youtube/v3): the 15 newest videos and live streams of a channel (and Shorts when the source has them turned on) or playlist, with their full description and length. Each fetch costs 2 quota units per channel (3 when it has new videos, 1 more with Shorts), so a dozen channels fetched every 15 minutes all day use about 2,500 of the free 10,000 units a day. Live streams get their length once they end.
+- **Without a key**, FOMO reads YouTube's public feeds (also the 15 newest videos), which have no video lengths. It doesn't open each video's page while fetching, since YouTube throttles that; press `u` on a video to read its length.
+- When the daily quota is used up, fetches fall back to the public feeds until it resets (midnight Pacific time). A wrong or restricted key shows up as the source's fetch error under **Config → Sources**.
+
+**Create a YouTube API key** (free; no billing needed):
+
+1. Open the [Google Cloud console](https://console.cloud.google.com/) and create a project (or pick one).
+2. Under **APIs & Services → Library**, find **YouTube Data API v3** and click **Enable**.
+3. Under **APIs & Services → Credentials**, click **Create credentials → API key**.
+4. Edit the key: under **API restrictions** pick **Restrict key** and select only **YouTube Data API v3**. Leave **Application restrictions** at *None*, because the TUI runs on your computer and not in a browser.
+5. In the TUI press `c` → **YouTube API key**, paste it and press `Enter` (or set `FOMO_YOUTUBE_API_KEY`).
+
+The key is a local setting of the profile: it stays in `~/.fomo/config.json` (or the environment) and is never written to Azure, backups or the audit trail. FOMO sends it in the `X-Goog-Api-Key` header, never in a URL.
+
 ### Experimental Sources
 
 Experimental sources read your own data with a sign-in on this computer, so only the TUI fetches them, and only in
@@ -501,7 +520,7 @@ appeared later, without creating duplicate items or changing their read/saved st
 
 ## Security
 
-- **TUI:** uses the storage connection string (account key). Keep `~/.fomo/config.json` private (it is created with mode `600`); with several [profiles](#profiles-several-storage-accounts) it holds the key of each account.
+- **TUI:** uses the storage connection string (account key). Keep `~/.fomo/config.json` private (it is created with mode `600`); with several [profiles](#profiles-several-storage-accounts) it holds the key of each account, and the [YouTube API key](#youtube) if you set one. Restrict that key to the YouTube Data API v3 only.
 - **Web app:** uses an **account SAS token** limited to the Table service and entity operations (`ss=t`, `srt=o`, `sp=raud`), HTTPS only, and valid for **Link valid (days)** (default 365).
   - It can read and update your FOMO tables, but it cannot create or delete tables or touch blobs.
   - It is delivered in the URL fragment, so it never reaches a web server or logs, and it is stored in the browser's `localStorage`.
@@ -528,6 +547,7 @@ All are optional. The TUI config screen (`c` → **This computer**) stores the s
 | `FOMO_COPILOT_MODEL`              | Copilot model for the digest (overrides config, every profile) |
 | `FOMO_INTERESTS`                  | Interests note for digest importance (overrides config, every profile) |
 | `FOMO_GROUPING_HINTS`             | Grouping hints for the digest (overrides config, every profile) |
+| `FOMO_YOUTUBE_API_KEY`            | [YouTube Data API key](#youtube) for YouTube sources (overrides config, every profile) |
 | `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` | Token for the Copilot SDK when **Copilot account** is Automatic (default: logged-in Copilot CLI user or gh's active account) |
 
 ---

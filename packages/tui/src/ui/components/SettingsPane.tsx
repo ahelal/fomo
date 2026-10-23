@@ -1,10 +1,10 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { DEFAULT_COLOR, timeAgo, type AppSettings, type PreviewPosition, type SourceFetchResult, type StatsResponse } from '@fomo/core';
-import { maskConnectionString, type LocalConfig } from '../../config.js';
+import type { LocalConfig } from '../../config.js';
 import { EXPERIMENTAL_SETUPS, type ExperimentalSetups } from '../../experimental/index.js';
 import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
-import { ADD_SOURCE_PROMPTS, configDisplay, experimentalOn, rowHint, type AddSourceStep, type SettingsRow } from '../settings.js';
+import { ADD_SOURCE_PROMPTS, configDisplay, experimentalOn, isSecretField, maskSetting, rowHint, type AddSourceStep, type SettingsRow } from '../settings.js';
 
 interface Props {
   rows: SettingsRow[];
@@ -260,7 +260,7 @@ export const SettingsPane = React.memo(function SettingsPane({
           {cursor}
           <Text color="#58a6ff" backgroundColor={bg}>{'◆ '}</Text>
           {name(row.label)}
-          {editBox(row.field === 'connectionString' ? maskConnectionString(editBuffer) : editBuffer)}
+          {editBox(isSecretField(row.field) ? maskSetting(row.field, editBuffer) : editBuffer)}
         </Text>
       );
     }

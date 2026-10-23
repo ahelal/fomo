@@ -1,4 +1,5 @@
 import type { UpdateSort } from './sort.js';
+import type { YoutubeApi } from './scraper/youtube-api.js';
 
 // ─── Domain types ────────────────────────────────────────────────────────────
 
@@ -91,6 +92,12 @@ export interface SourcePlugin {
   fetch(): Promise<ScrapedItem[]>;
 }
 
+/** Shared clients sources fetch with. All optional: without them sources use public pages and feeds. */
+export interface SourceDeps {
+  /** YouTube Data API client (the TUI makes one when a key is set). */
+  youtube?: YoutubeApi;
+}
+
 interface SourceSpecBase {
   /** Unique slug; the PartitionKey of the source's updates, so it never changes. */
   id: SourceId;
@@ -115,8 +122,9 @@ export interface GithubReleasesSourceSpec extends SourceSpecBase {
 }
 
 /**
- * Uploads of a YouTube channel, or one playlist, from YouTube's public Atom feeds (no API key).
- * Only the TUI fetches it: `@handle` and legacy channel paths are resolved to a `UC…` id at fetch time.
+ * Uploads of a YouTube channel, or one playlist. Only the TUI fetches it: with a YouTube Data API
+ * key from the YouTube Data API v3 (with video lengths), otherwise from YouTube's public Atom feeds.
+ * `@handle` and legacy channel paths are resolved to a `UC…` id at fetch time.
  */
 export interface YoutubeSourceSpec extends SourceSpecBase {
   kind: 'youtube';

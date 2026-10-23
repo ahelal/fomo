@@ -54,6 +54,8 @@ export interface LocalConfig {
   backupDir?: string;
   /** Experimental sources turned on for this profile (ids from EXPERIMENTAL_SOURCE_INFOS), e.g. Teams meetings. Default none. */
   experimentalSources?: string[];
+  /** YouTube Data API v3 key; YouTube sources use the public feeds (no video lengths) without one. Never leaves this machine. */
+  youtubeApiKey?: string;
 }
 
 /**
@@ -66,6 +68,7 @@ export const CONFIG_ENV: Partial<Record<keyof LocalConfig, string>> = {
   copilotModel: 'FOMO_COPILOT_MODEL',
   interests: 'FOMO_INTERESTS',
   groupingHints: 'FOMO_GROUPING_HINTS',
+  youtubeApiKey: 'FOMO_YOUTUBE_API_KEY',
 };
 
 // ─── Profiles ────────────────────────────────────────────────────────────────
@@ -98,7 +101,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 function sanitizeProfile(raw: Record<string, unknown>): LocalConfig {
   const out: LocalConfig = {};
-  for (const key of ['connectionString', 'webUrl', 'copilotModel', 'copilotAccount', 'interests', 'groupingHints', 'backupDir'] as const) {
+  for (const key of ['connectionString', 'webUrl', 'copilotModel', 'copilotAccount', 'interests', 'groupingHints', 'backupDir', 'youtubeApiKey'] as const) {
     if (typeof raw[key] === 'string' && raw[key]) out[key] = raw[key] as string;
   }
   for (const key of ['autoDigest', 'autoFetch'] as const) {
@@ -264,6 +267,7 @@ export function loadConfig(profile: string): LocalConfig {
     copilotModel: env('copilotModel') || file.copilotModel,
     interests: env('interests') || file.interests,
     groupingHints: env('groupingHints') || file.groupingHints,
+    youtubeApiKey: env('youtubeApiKey') || file.youtubeApiKey,
   };
 }
 
@@ -278,6 +282,16 @@ export function saveConfig(profile: string, patch: Partial<LocalConfig>): LocalC
 
 export function maskConnectionString(cs: string): string {
   return cs.replace(/(AccountKey=)[^;]+/i, '$1***').replace(/(SharedAccessSignature=)[^;]+/i, '$1***');
+}
+
+/** A secret for display: only its last 4 characters. */
+export function maskSecret(secret: string): string {
+  return secret.length > 8 ? `••••${secret.slice(-4)}` : '••••';
+}
+
+/** Cheap shape check of a Google API key (`AIza…`, 39 characters). */
+export function youtubeApiKeyProblem(key: string): string | undefined {
+  return /^[\w-]{30,60}$/.test(key) ? undefined : 'That doesn’t look like a Google API key (expected AIza… without spaces)';
 }
 
 /** Storage account a connection string points at, for display. Never includes a key. */

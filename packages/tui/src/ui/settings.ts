@@ -14,8 +14,10 @@ import {
   MAX_AUTO_FETCH_MINUTES,
   MIN_AUTO_FETCH_MINUTES,
   maskConnectionString,
+  maskSecret,
   tildify,
   untildify,
+  youtubeApiKeyProblem,
   type LocalConfig,
 } from '../config.js';
 
@@ -48,6 +50,7 @@ const CONFIG_FIELDS: { field: ConfigField; label: string }[] = [
   { field: 'copilotAccount', label: 'Copilot account' },
   { field: 'interests', label: 'Interests' },
   { field: 'groupingHints', label: 'Grouping hints' },
+  { field: 'youtubeApiKey', label: 'YouTube API key' },
   { field: 'autoFetch', label: 'Auto-fetch (minutes)' },
   { field: 'autoDigest', label: 'Group after fetch' },
   { field: 'digestMaxItems', label: 'Max items per run' },
@@ -158,6 +161,8 @@ export function configDisplay(
       return config.interests ? { value: config.interests, muted: false, env } : muted('(none)');
     case 'groupingHints':
       return config.groupingHints ? { value: config.groupingHints, muted: false, env } : muted('(none — e.g. one topic per Copilot surface)');
+    case 'youtubeApiKey':
+      return config.youtubeApiKey ? { value: maskSecret(config.youtubeApiKey), muted: false, env } : muted('(not set · public feeds, no video lengths)');
     case 'autoFetch':
     case 'autoFetchMinutes': {
       const minutes = autoFetchInterval(config);
@@ -177,6 +182,13 @@ export function configDisplay(
       return config.experimentalSources?.length ? { value: config.experimentalSources.join(', '), muted: false } : muted('(none)');
   }
 }
+
+/** Settings never shown in full: masked while typed, in the list and in the audit log. */
+export const isSecretField = (field: string): boolean => field === 'connectionString' || field === 'youtubeApiKey';
+
+/** A secret setting's value for display. */
+export const maskSetting = (field: string, value: string): string =>
+  field === 'connectionString' ? maskConnectionString(value) : maskSecret(value);
 
 /** On/off settings toggled with ↵ instead of edited as text. */
 export const TOGGLE_FIELDS = ['autoDigest'] as const;
@@ -200,9 +212,9 @@ export const ADD_SOURCE_PROMPTS: Record<AddSourceStep, string> = {
   include: 'keywords to keep, as a regex, e.g. copilot|agents   (empty keeps everything)',
 };
 
-/** Starting text when editing a field, from the profile's stored config `file`. The connection string starts empty so the key is never shown. */
+/** Starting text when editing a field, from the profile's stored config `file`. Secrets start empty so they are never shown. */
 export function editStartValue(field: ConfigField, file: LocalConfig): string {
-  if (field === 'connectionString' || isToggleField(field)) return '';
+  if (isSecretField(field) || isToggleField(field)) return '';
   if (field === 'autoFetch') {
     return file.autoFetch === false ? 'off' : file.autoFetchMinutes ? String(file.autoFetchMinutes) : '';
   }
@@ -242,6 +254,10 @@ export function parseConfigEdit(field: ConfigField, text: string): { patch: Part
     case 'connectionString': {
       const problem = connectionStringProblem(value);
       return problem ? { error: problem } : { patch: { connectionString: value } };
+    }
+    case 'youtubeApiKey': {
+      const problem = youtubeApiKeyProblem(value);
+      return problem ? { error: problem } : { patch: { youtubeApiKey: value } };
     }
     case 'autoDigest':
       return { error: 'Press ↵ to toggle' };
@@ -288,6 +304,7 @@ export function rowHint(row: SettingsRow | undefined): string {
       if (isToggleField(row.field)) return '↵ toggle';
       if (row.field === 'autoFetch') return `↵ edit   minutes ${MIN_AUTO_FETCH_MINUTES}–${MAX_AUTO_FETCH_MINUTES} or off   (save empty for every ${DEFAULT_AUTO_FETCH_MINUTES} minutes)`;
       if (row.field === 'webUrl') return '↵ edit   o open in browser   (save empty to reset to the default)';
+      if (row.field === 'youtubeApiKey') return '↵ edit   a YouTube Data API v3 key fetches YouTube with video lengths   (save empty to use the public feeds)';
       return isPickerField(row.field) ? '↵ choose' : '↵ edit   (save empty to reset to the default)';
     default: return '';
   }

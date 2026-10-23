@@ -6,6 +6,7 @@
  */
 
 import type { Update } from './types.js';
+import { youtubeVideoId } from './scraper/youtube.js';
 
 /** Query parameters that only track where a click came from. */
 const TRACKING_PARAM = /^(utm_.*|fbclid|gclid|msclkid|mc_cid|mc_eid|ref_src|wt\.mc_id|ocid)$/i;
@@ -16,7 +17,8 @@ export const TITLE_MATCH_DAYS = 60;
 /**
  * A URL reduced to what identifies the page: no scheme, `www.`, fragment, tracking parameters,
  * trailing slash or locale segment (`/en-us/`); Tech Community posts reduce to their numeric id,
- * since `/t5/<board>/<slug>/ba-p/<id>` and `/blog/<board>/<slug>/<id>` are the same post.
+ * since `/t5/<board>/<slug>/ba-p/<id>` and `/blog/<board>/<slug>/<id>` are the same post, and
+ * YouTube videos to `youtube.com/watch?v=<id>` (also for `/shorts/`, `/live/` and `youtu.be` links).
  */
 export function canonicalUrl(url: string): string {
   let u: URL;
@@ -26,6 +28,8 @@ export function canonicalUrl(url: string): string {
     return url.trim();
   }
   const host = u.hostname.toLowerCase().replace(/^www\./, '');
+  const video = youtubeVideoId(u.href);
+  if (video) return `youtube.com/watch?v=${video}`;
   if (host === 'techcommunity.microsoft.com') {
     const id = u.pathname.match(/\/ba-p\/(\d+)\/?$/)?.[1] ?? u.pathname.match(/^\/blog\/[^/]+\/[^/]+\/(\d+)\/?$/)?.[1];
     if (id) return `${host}/post/${id}`;

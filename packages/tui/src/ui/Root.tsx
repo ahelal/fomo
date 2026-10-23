@@ -34,10 +34,10 @@ interface Props {
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-function createService(connectionString?: string): { service?: FomoDirectService; error?: string } {
+function createService(connectionString?: string, youtubeApiKey?: string): { service?: FomoDirectService; error?: string } {
   if (!connectionString) return {};
   try {
-    return { service: new FomoDirectService(connectionString) };
+    return { service: new FomoDirectService(connectionString, { youtubeApiKey }) };
   } catch (err) {
     return { error: errorText(err) };
   }
@@ -89,7 +89,9 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
     profiles: readProfiles() ?? [{ name: initialProfile }],
   }));
   const { profile, config, profiles, notice } = session;
-  const { service, error } = useMemo(() => createService(config.connectionString), [config.connectionString]);
+  // The YouTube key is applied in place below, so changing it keeps the service (and the app) as they are.
+  const { service, error } = useMemo(() => createService(config.connectionString, config.youtubeApiKey), [config.connectionString]);
+  useLayoutEffect(() => { service?.setYoutubeApiKey(config.youtubeApiKey); }, [service, config.youtubeApiKey]);
 
   // Before the children's effects, so that nothing they log goes untagged.
   useLayoutEffect(() => stampAudit(audit, profile, profiles), [audit, profile, profiles]);

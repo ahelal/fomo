@@ -20,6 +20,19 @@ describe('canonicalUrl', () => {
     expect(canonicalUrl(now)).toBe(canonicalUrl(old));
   });
 
+  it('treats every URL of one YouTube video as the same page', () => {
+    const urls = [
+      'https://www.youtube.com/watch?v=ZQ0Qq6LlAmI',
+      'https://m.youtube.com/watch?v=ZQ0Qq6LlAmI&t=42s',
+      'https://www.youtube.com/shorts/ZQ0Qq6LlAmI',
+      'https://youtube.com/live/ZQ0Qq6LlAmI?si=share',
+      'https://youtu.be/ZQ0Qq6LlAmI',
+    ];
+    for (const url of urls) expect(canonicalUrl(url), url).toBe('youtube.com/watch?v=ZQ0Qq6LlAmI');
+    expect(canonicalUrl('https://www.youtube.com/shorts/other')).not.toBe(canonicalUrl(urls[0]!));
+    expect(canonicalUrl('https://www.youtube.com/@GitHub')).toBe('youtube.com/@GitHub');
+  });
+
   it('returns unparsable input trimmed', () => {
     expect(canonicalUrl(' not a url ')).toBe('not a url');
   });
