@@ -93,13 +93,14 @@ The **Pending** view (key `4`) is grouped the same way (press `4` again for a pl
 keeps it there: `r` toggles a topic or update read / unread (a blue `●` marks unread ones), `x` marks it read and
 moves on, and `p` clears pending on an update, which removes it from the view.
 
-**Grouping.** Each topic is one **product or feature area**, such as "Copilot code review", "GitHub Actions", "VS Code releases", "Azure SRE Agent" or "Anthropic news":
+**Experimental grouping.** Each topic is one **product, release stream or specific theme**, such as "Copilot code review", "GitHub Actions", "VS Code releases" or "Azure SRE Agent":
 
-- Topics usually hold 3–15 updates. A new topic with more than 15 gets a second call that splits it into narrower areas.
+- There is no target group count or size. Single items can stand alone; coherent release streams stay together.
 - There are no catch-all topics such as "Azure updates" or "Misc".
-- Deprecations and retirements go into one topic per vendor ("Azure retirements"). Titles that mention a retirement or deprecation are flagged to the model.
+- Deprecations and retirements follow the product or theme they affect, not a vendor-wide retirement bucket.
 - Releases of one product stay together. Items whose titles differ only in version numbers are flagged to the model as a release series.
-- General essays go into one topic per source ("GitHub blog essays").
+- Essays follow their specific theme, not their publisher. Source names and generic terms such as "software" are not grouping criteria.
+- A local lexical pass uses [wink-nlp](https://github.com/winkjs/wink-nlp)'s standalone BM25 vectorizer and cosine similarity to compare words and two-word phrases in titles and bodies (up to 12,000 text characters per body), with extra title weight and common words removed. No language model or model download is needed. Its nearest-neighbour clues accompany the original language; Copilot can disagree with them. Similarity scores are lexical overlap, not confidence. Source labels are not included in this calculation. Saved prompts identify the algorithm used; old TF-IDF runs remain inspectable, but their scores are not directly comparable to BM25 scores.
 - New products and major launches get their own topic so they aren't buried.
 
 **Importance.** Each topic is rated so you can tell what's worth reading:
@@ -124,15 +125,23 @@ How it works:
 
 - `f` in the TUI fetches the sources and then runs the digest in the background; new updates show up ungrouped right away and the status bar shows Copilot's progress. Turn **Group after fetch** off in the config screen to fetch only.
 - Only **unread or saved updates that don't have a topic yet** are sent to Copilot (pending ones even after you've read them, so the Pending view is grouped too), in two passes:
-  1. **Plan:** one call sees every pending update (title and a short excerpt, or its [post summary](#post-summaries) when it has one) plus the currently open topics. It assigns each update to an existing or new topic and rates it. Updates the model skips get one more call; oversized new topics get a split call.
-  2. **Write:** one small call per touched topic writes the summary, the highlights and a one-sentence summary of each new update. These run 6 at a time with low reasoning effort, and a failed call is retried once.
+  1. **Plan:** one call sees every pending update (title and a short excerpt, or its [post summary](#post-summaries) when it has one), lexical similarity clues and the currently open topics. It assigns each update to an existing or new topic, rates it and states a short grouping rationale. Updates the model skips get one more call; items omitted twice get standalone fallback groups.
+  2. **Write:** small calls write the summary, highlights and a one-sentence summary of each new update. Large topics are written in batches of 30 items without splitting the visible group; each batch carries the current topic summary forward. Up to 6 topics run concurrently with low reasoning effort, and a failed call is retried once.
 - Topics are stored in the `topics` table, and each update points to its topic (`topicId`), so the web app and TUI only read.
 - Updates that haven't been digested yet still appear in the grouped Unread and Pending views as single-item entries.
 - About 220 updates take roughly 2 minutes. **Max items per run** (default 300) caps a run; the rest are grouped next time.
 - The default model is `gpt-5-mini`. Change it with **Copilot model** in the config screen or `FOMO_COPILOT_MODEL`.
 - Existing topics keep their grouping and rating. **Regroup all topics** in the config screen (or `z` twice in the TUI's main view) regroups and re-rates all unread and pending updates (read and pending status is untouched). This also fills in per-update summaries for updates digested before they existed.
-- If regrouping fails before processing any updates, FOMO restores the previous topic assignments and shows the first error.
+- Regroup leaves prior assignments in storage until replacements are written. A failed planning call leaves its previous groups intact. If the run is capped, untouched items retain their groups.
 - Authentication: pick a GitHub account with **Copilot account** in the config screen. It lists the accounts signed in to the GitHub CLI (`gh auth login`), and FOMO asks `gh` for that account's token. On **Automatic** (the default), it uses `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`, else your logged-in Copilot CLI user or gh's active account. If Copilot answers `Authorization error`, the message names the rejected account; choose one with Copilot access.
+
+**Behind the grouping (TUI).** Press `i` in Unread (`2`) or Pending (`4`), in either grouped or list mode, to open the inspector directly without starting a run. `zz` still regroups; a third `z` within five seconds opens the inspector for that run without starting another one. The inspector opens the latest saved run by default. `[` browses older runs; `]` browses newer ones, without regrouping. You can open the inspector before any run to edit guidance or explicitly start one with `r`.
+
+Run evidence is saved locally under `~/.fomo/grouping-runs/<encoded-profile>/` (or beneath `FOMO_CONFIG_DIR`), one JSON file per run, updated atomically as requests progress. Files are private to your OS user and contain article excerpts, prompts, responses, memberships and rationales; they are not uploaded to Azure. Runs remain until you remove their files. A saved request still marked `running` may have been interrupted when the app closed; reopening it does not resume it. History browsing waits for an active job to finish. Read/write failures are shown and audited; grouping can continue with in-memory evidence if saving fails.
+
+- Scroll with arrows (Shift+arrows jumps; Page Up/Down scrolls a page). `i` toggles the supplied system prompts, inputs and raw responses before validation, including item aliases, excerpts and lexical clues. Planning results list memberships and model-stated rationales; these are not internal reasoning. Request states, errors and fallback groups are shown live.
+- `f` opens a multiline feedback field. `Ctrl+S` asks Copilot to turn it and the current guidance into a reusable suggestion. Review/edit the suggestion and press `Ctrl+S` again to save it to this profile; `Esc` discards it. `e` edits guidance directly. Guidance is limited to 1,000 characters; remove `FOMO_GROUPING_HINTS` first if it overrides the profile.
+- `r` explicitly regroups using the accepted guidance; saving alone does not rerun. Each run freezes its guidance. Feedback and reruns wait until the active job finishes, but the inspector can be read while it runs. `Esc` returns to normal reading. The feedback/refinement loop is available only inside this view; the existing config hints remain an advanced escape hatch.
 
 ### Post Summaries
 

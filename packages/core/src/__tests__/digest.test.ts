@@ -704,7 +704,7 @@ describe('runDigest', () => {
     expect(updateStore.setTopicId).not.toHaveBeenCalled();
   });
 
-  it('restores existing topics when regroup planning fails before processing any updates', async () => {
+  it('keeps existing topics untouched when regroup planning fails', async () => {
     const original = topic('t1', { title: 'Existing topic' });
     const { updateStore, topicStore, topicMap } = makeStores(
       [upd('a__1', { topicId: 't1' }), upd('b__2', { topicId: 't1' }), upd('c__3')],
@@ -714,10 +714,10 @@ describe('runDigest', () => {
 
     const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer, { reset: true });
 
-    expect(result).toMatchObject({ processed: 0, remaining: 1, errors: ['planning: quota'] });
+    expect(result).toMatchObject({ processed: 0, remaining: 3, errors: ['planning: quota'] });
     expect(topicMap.get('t1')).toEqual(original);
-    expect(updateStore.setTopicId).toHaveBeenCalledWith('a__1', 't1');
-    expect(updateStore.setTopicId).toHaveBeenCalledWith('b__2', 't1');
+    expect(updateStore.setTopicId).not.toHaveBeenCalled();
+    expect(topicStore.deleteTopic).not.toHaveBeenCalled();
   });
 
   it('respects maxItems and reports the rest as remaining', async () => {
@@ -744,14 +744,72 @@ describe('runDigest', () => {
     expect(result.processed).toBe(2);
   });
 
-  it('reset ungroups unread items and deletes their topics before regrouping', async () => {
+  it('reset replaces assignments before deleting old topics without first clearing them', async () => {
     const { updateStore, topicStore } = makeStores([upd('a__1', { topicId: 'old' })], [topic('old')]);
     const { summarizer, planRequests } = fakeSummarizer([]);
     const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer, { reset: true, newId: () => 'fresh' });
     expect(topicStore.deleteTopic).toHaveBeenCalledWith('old');
-    expect(updateStore.setTopicId).toHaveBeenCalledWith('a__1', '');
+    expect(updateStore.setTopicId).not.toHaveBeenCalledWith('a__1', '');
     expect(updateStore.setTopicId).toHaveBeenCalledWith('a__1', 'fresh');
     expect(planRequests[0]!.prompt).toContain('OPEN TOPICS:\n(none)');
     expect(result.created).toBe(1);
+    expect(vi.mocked(topicStore.deleteTopic).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(updateStore.setTopicId).mock.invocationCallOrder[0]!);
+  });
+
+  it('does not split a coherent large group by default and captures live evidence and rationale', async () => {
+    const items = Array.from({ length: 20 }, (_, i) => upd(`cli__${i}`, { title: `Copilot CLI release ${i}` }));
+    const { updateStore, topicStore } = makeStores(items);
+    const { summarizer, splitRequests } = fakeSummarizer([{
+      topics: [{
+        topic: null, title: 'Copilot CLI releases', importance: 'medium',
+        items: items.map((_, i) => `i${i + 1}`), rationale: 'One product release stream.',
+      }],
+    }]);
+    const onInspection = vi.fn();
+    const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer, {
+      groupingHints: 'Keep CLI together', onInspection,
+    });
+    expect(result).toMatchObject({ created: 1, processed: 20 });
+    expect(splitRequests).toHaveLength(0);
+    const snapshots = onInspection.mock.calls.map(([inspection]) => inspection);
+    expect(snapshots[1].calls[0].state).toBe('running');
+    expect(snapshots.at(-1)).toMatchObject({
+      guidance: 'Keep CLI together',
+      calls: expect.arrayContaining([expect.objectContaining({
+        state: 'complete', prompt: expect.stringContaining('LEXICAL SIMILARITY'),
+        groups: [expect.objectContaining({ rationale: 'One product release stream.', itemIds: expect.any(Array) })],
+      })]),
+    });
+  });
+
+  it('preserves old topics still needed by items beyond a regroup cap', async () => {
+    const { updateStore, topicStore, topicMap } = makeStores(
+      [upd('a__1', { topicId: 'old' }), upd('b__2', { topicId: 'old' })],
+      [topic('old')],
+    );
+    const { summarizer } = fakeSummarizer([]);
+    const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer, {
+      reset: true, maxItems: 1, newId: () => 'fresh',
+    });
+    expect(result).toMatchObject({ processed: 1, remaining: 1 });
+    expect(topicMap.has('old')).toBe(true);
+    expect(topicStore.deleteTopic).not.toHaveBeenCalled();
+    expect(updateStore.setTopicId).not.toHaveBeenCalledWith('a__1', '');
+  });
+
+  it('writes per-item summaries for every item in a large group without splitting it', async () => {
+    const items = Array.from({ length: 35 }, (_, i) => upd(`cli__${i}`));
+    const { updateStore, topicStore } = makeStores(items);
+    const { summarizer, writeRequests } = fakeSummarizer([{
+      topics: [{ topic: null, title: 'CLI releases', items: items.map((_, i) => `i${i + 1}`) }],
+    }], async (req) => ({
+      title: 'CLI releases', summary: 'Current release stream', highlights: ['New features'],
+      items: [...req.prompt.matchAll(/^\[(i\d+)\]/gm)].map((match) => ({ id: match[1], summary: 'Feature available to CLI users' })),
+    }));
+    const result = await runDigest({ updates: updateStore, topics: topicStore }, summarizer);
+    expect(result).toMatchObject({ processed: 35, created: 1 });
+    expect(writeRequests).toHaveLength(2);
+    expect(writeRequests[1]!.prompt).toContain('CURRENT:\nsummary: Current release stream');
+    expect(vi.mocked(updateStore.setTopicId).mock.calls.every(([, , summary]) => Boolean(summary))).toBe(true);
   });
 });

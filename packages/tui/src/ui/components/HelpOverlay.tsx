@@ -21,6 +21,7 @@ interface Section {
 }
 
 const DIGEST_KEYS: [string, string][] = [
+  ['i',    'Inspect grouping without starting a run'],
   ['↵',    'Expand topic / toggle detail'],
   ['→/l',  'Expand topic'],
   ['←',    'Collapse topic'],
@@ -37,6 +38,7 @@ const DIGEST_KEYS: [string, string][] = [
 ];
 
 const SAVED_KEYS: [string, string][] = [
+  ['i',    'Inspect grouping without starting a run'],
   ['↵',    'Expand topic / toggle detail'],
   ['→/l',  'Expand topic'],
   ['←',    'Collapse topic'],
@@ -85,6 +87,8 @@ const GLOBAL_KEYS: [string, string][] = [
   ['2 / 4','Again: switch between ▤ topics and ≡ list'],
   ['f',    'Fetch latest updates + group with Copilot'],
   ['z',    'Regroup all topics with Copilot (press twice)'],
+  ['zzz',  'Third z opens grouping inspector: inputs, feedback, guidance, rerun'],
+  ['i',    'In views 2 / 4: open grouping inspector without regrouping'],
   ['c',    'Config: sources, link a device, backup / restore'],
   ['w',    'Switch profile (storage account): ↵ switch, a add, e rename, x remove'],
   ['5',    'Bookmarks: links filed into folders'],

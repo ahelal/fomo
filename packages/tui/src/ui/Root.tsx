@@ -1,7 +1,7 @@
 import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { ReferenceSuggestion } from '@fomo/core';
-import type { DigestResult } from '@fomo/core/digest';
+import { refineGroupingGuidance, type DigestResult, type DigestInspection } from '@fomo/core/digest';
 import {
   accountLabel,
   addProfile,
@@ -18,6 +18,7 @@ import {
 } from '../config.js';
 import type { SummarizerCache } from '../copilot.js';
 import type { AuditLog } from '../audit.js';
+import { createGroupingHistory } from '../groupingHistory.js';
 import { experimentalProviders } from '../experimental/index.js';
 import { App, type DigestRunOptions } from './App.js';
 import { SetupScreen } from './components/SetupScreen.js';
@@ -89,6 +90,7 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
     profiles: readProfiles() ?? [{ name: initialProfile }],
   }));
   const { profile, config, profiles, notice } = session;
+  const groupingHistory = useMemo(() => createGroupingHistory(profile), [profile]);
   // The YouTube key is applied in place below, so changing it keeps the service (and the app) as they are.
   const { service, error } = useMemo(() => createService(config.connectionString, config.youtubeApiKey), [config.connectionString]);
   useLayoutEffect(() => { service?.setYoutubeApiKey(config.youtubeApiKey); }, [service, config.youtubeApiKey]);
@@ -195,9 +197,16 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
         groupingHints: config.groupingHints,
         maxItems: config.digestMaxItems,
         reset: options.reset,
+        onInspection: options.onInspection,
       });
     },
     [service, summarizers, config.copilotModel, config.copilotAccount, config.interests, config.groupingHints, config.digestMaxItems],
+  );
+
+  const refineGrouping = useCallback(
+    (current: string, feedback: string, inspection?: DigestInspection) =>
+      refineGroupingGuidance(summarizers.get(config.copilotModel, config.copilotAccount), current, feedback, inspection),
+    [summarizers, config.copilotModel, config.copilotAccount],
   );
 
   const summarize = useCallback(
@@ -245,6 +254,8 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
       profiles={controls}
       notice={notice}
       digest={digest}
+      refineGrouping={refineGrouping}
+      groupingHistory={groupingHistory}
       summarize={summarize}
       suggestReference={suggestReference}
       audit={audit}

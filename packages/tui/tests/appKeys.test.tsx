@@ -8,12 +8,13 @@ const openMock = vi.hoisted(() => vi.fn(async (_url: string) => {}));
 vi.mock('open', () => ({ default: openMock }));
 import { COLOR_PALETTE, DEFAULT_COLOR, DEFAULT_SETTINGS, moveInGrid, paletteIndex, retiredSources, sourceInfos } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
-import type { DigestResult } from '@fomo/core/digest';
-import { App, REGROUP_CONFIRM_MS } from '../src/ui/App.js';
+import type { DigestInspection, DigestResult } from '@fomo/core/digest';
+import { App, REGROUP_CONFIRM_MS, type DigestRunOptions } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
 import { DEFAULT_BACKUP_DIR, tildify, type LocalConfig } from '../src/config.js';
 import type { GhAccount } from '../src/ghAccounts.js';
 import type { ExperimentalSetups } from '../src/experimental/index.js';
+import type { GroupingHistory } from '../src/groupingHistory.js';
 import { DEFAULT_SOURCE_COLOR } from '../src/ui/components/UpdatesTable.js';
 import { buildSettingsRows, configDisplay, editStartValue, findRow, firstFocusable, moveFocus, parseConfigEdit, settingsRowText } from '../src/ui/settings.js';
 
@@ -55,9 +56,11 @@ interface RenderOptions {
   listAccounts?: () => Promise<GhAccount[]>;
   experimental?: ExperimentalSetups;
   service?: FomoDirectService;
+  refineGrouping?: (current: string, feedback: string, inspection?: DigestInspection) => Promise<string>;
+  groupingHistory?: GroupingHistory;
 }
 
-async function renderApp(digestRun: () => Promise<DigestResult> = async () => result, options: RenderOptions = {}) {
+async function renderApp(digestRun: (progress: (message: string) => void, options?: DigestRunOptions) => Promise<DigestResult> = async () => result, options: RenderOptions = {}) {
   const digest = vi.fn(digestRun);
   const onConfigChange = vi.fn((_patch: Partial<LocalConfig>): string | undefined => undefined);
   const audit = createMemoryAuditLog();
@@ -73,6 +76,8 @@ async function renderApp(digestRun: () => Promise<DigestResult> = async () => re
         config={options.config ?? {}}
         onConfigChange={onConfigChange}
         digest={digest}
+        refineGrouping={options.refineGrouping}
+        groupingHistory={options.groupingHistory}
         audit={audit}
         auditFile="/tmp/audit.log"
         listAccounts={options.listAccounts}
@@ -99,6 +104,23 @@ async function renderApp(digestRun: () => Promise<DigestResult> = async () => re
 }
 
 describe('z regroup shortcut', () => {
+  it.each([['2', false], ['2', true], ['4', false], ['4', true]])('opens the inspector directly without regrouping in view %s (list=%s)', async (view, list) => {
+    const { digest, press, frame } = await renderApp();
+    await press('1');
+    await press(view);
+    if (list) await press(view);
+    await press('I');
+    expect(frame()).toContain('Behind the grouping');
+    expect(frame()).toContain('No grouping run recorded');
+    expect(digest).not.toHaveBeenCalled();
+    await press('\u001B');
+    await press('i');
+    expect(frame()).toContain('Behind the grouping');
+    expect(digest).not.toHaveBeenCalled();
+    await press('r');
+    expect(digest).toHaveBeenCalledTimes(1);
+  });
+
   it('asks first, then regroups all topics on the second z', async () => {
     const { digest, press, frame } = await renderApp();
     await press('z');
@@ -106,7 +128,7 @@ describe('z regroup shortcut', () => {
     expect(frame()).toContain('z again to regroup all topics');
     await press('z');
     expect(digest).toHaveBeenCalledTimes(1);
-    expect(digest).toHaveBeenCalledWith(expect.any(Function), { reset: true });
+    expect(digest).toHaveBeenCalledWith(expect.any(Function), { reset: true, onInspection: expect.any(Function) });
   });
 
   it('cancels when another key or Esc comes in between', async () => {
@@ -142,6 +164,120 @@ describe('z regroup shortcut', () => {
 
     expect(digest).toHaveBeenCalledTimes(1);
     expect(frame()).toContain('planning: quota exceeded');
+  });
+
+  it.each([['2', false], ['2', true], ['4', false], ['4', true]])('opens the inspector on a third z in view %s (list=%s)', async (view, list) => {
+    const { digest, press, frame } = await renderApp();
+    await press('1');
+    await press(view);
+    if (list) await press(view);
+    await press('z');
+    await press('z');
+    await press('z');
+    expect(digest).toHaveBeenCalledTimes(1);
+    expect(frame()).toContain('Behind the grouping');
+    await press('r');
+    expect(digest).toHaveBeenCalledTimes(2);
+    await press('\u001B');
+    expect(frame()).not.toContain('Behind the grouping');
+  });
+
+  it('accepts rapid zzz delivered as a single terminal input chunk', async () => {
+    const { digest, press, frame } = await renderApp();
+    await press('ZZZ');
+    expect(digest).toHaveBeenCalledTimes(1);
+    expect(frame()).toContain('Behind the grouping');
+  });
+
+  it('opens the latest saved run by default and browses older runs without regrouping', async () => {
+    const snapshot = (guidance: string): DigestInspection => ({ startedAt: '2026-10-23T12:00:00Z', guidance, items: [], calls: [] });
+    const groupingHistory: GroupingHistory = {
+      list: () => ['new', 'old'],
+      read: (id) => snapshot(id === 'new' ? 'Latest saved guidance' : 'Previous saved guidance'),
+      save: vi.fn(() => 'new'),
+    };
+    const { press, frame, digest } = await renderApp(undefined, { groupingHistory });
+    await press('i');
+    expect(frame()).toContain('Latest saved guidance');
+    expect(frame()).toContain('Run 1/2');
+    await press('[');
+    expect(frame()).toContain('Previous saved guidance');
+    expect(frame()).toContain('Run 2/2');
+    await press('\u001B'); await press('i');
+    expect(frame()).toContain('Latest saved guidance');
+    await press('['); await press(']');
+    expect(frame()).toContain('Latest saved guidance');
+    expect(digest).not.toHaveBeenCalled();
+  });
+
+  it('saves live snapshots and reports disk failures without breaking grouping', async () => {
+    const groupingHistory: GroupingHistory = {
+      list: () => [], read: () => { throw new Error('missing'); },
+      save: vi.fn(() => { throw new Error('disk full'); }),
+    };
+    const { press, frame, audit } = await renderApp(async (_progress, options) => {
+      options?.onInspection?.({ startedAt: '2026-10-23T12:00:00Z', guidance: 'Live guidance', items: [], calls: [] });
+      return result;
+    }, { groupingHistory });
+    await press('zz');
+    expect(groupingHistory.save).toHaveBeenCalledTimes(1);
+    expect(audit.recent()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'grouping-history', level: 'error', detail: 'disk full' }),
+    ]));
+    await press('z');
+    expect(frame()).toContain('Live guidance');
+  });
+
+  it('shows live evidence on the third z without starting a second run', async () => {
+    let finish!: (value: DigestResult) => void;
+    const { digest, press, frame } = await renderApp(async (_progress, options) => {
+      options?.onInspection?.({
+        startedAt: 'now', guidance: 'Keep CLI separate', items: [{ id: 'one', title: 'CLI extensions' }],
+        calls: [{ label: 'Planning', system: 'system rules', prompt: 'LEXICAL SIMILARITY: cli extensions', state: 'running' }],
+      });
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    await press('z'); await press('z'); await press('z');
+    expect(digest).toHaveBeenCalledTimes(1);
+    expect(frame()).toContain('Planning: running');
+    await press('i');
+    expect(frame()).toContain('system rules');
+    expect(frame()).toContain('LEXICAL SIMILARITY');
+    await press('r');
+    expect(digest).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(result); });
+  });
+
+  it('requires review before saving suggested guidance and does not rerun automatically', async () => {
+    const refineGrouping = vi.fn(async () => 'Keep CLI and editor releases separate');
+    const { digest, press, frame, onConfigChange } = await renderApp(undefined, { refineGrouping });
+    await press('z'); await press('z'); await press('z');
+    await press('f');
+    await press('Separate CLI from editors');
+    await press('\u0013');
+    expect(refineGrouping).toHaveBeenCalledWith('', 'Separate CLI from editors', undefined);
+    expect(onConfigChange).not.toHaveBeenCalled();
+    expect(frame()).toContain('Review/edit guidance');
+    await press('\u0013');
+    expect(onConfigChange).toHaveBeenCalledWith({ groupingHints: 'Keep CLI and editor releases separate' });
+    expect(digest).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves feedback and surfaces a failed suggestion without saving', async () => {
+    const refineGrouping = vi.fn(async () => { throw new Error('quota exceeded'); });
+    const { press, frame, onConfigChange } = await renderApp(undefined, { refineGrouping });
+    await press('zzz'); await press('f'); await press('Separate products'); await press('\u0013');
+    expect(frame()).toContain('quota exceeded');
+    expect(frame()).toContain('Separate products');
+    expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
+  it('does not silently save guidance overridden by the environment', async () => {
+    vi.stubEnv('FOMO_GROUPING_HINTS', 'environment guidance');
+    const { press, frame, onConfigChange } = await renderApp();
+    await press('zzz'); await press('e'); await press('my guidance'); await press('\u0013');
+    expect(frame()).toContain('Remove FOMO_GROUPING_HINTS');
+    expect(onConfigChange).not.toHaveBeenCalled();
   });
 });
 

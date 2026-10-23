@@ -8,6 +8,7 @@ export interface TopicGroup {
   title: string;
   importance?: TopicImportance;
   itemIds: string[];
+  rationale?: string;
 }
 
 /** Topic text produced by the write pass. */
@@ -95,6 +96,7 @@ export function reconcilePlan(raw: unknown, prompt: PlanPrompt): TopicGroup[] {
       title,
       ...(importance ? { importance } : {}),
       itemIds,
+      ...(typeof obj['rationale'] === 'string' ? { rationale: clean(obj['rationale'], 600) } : {}),
     };
     byKey.set(key, group);
     groups.push(group);

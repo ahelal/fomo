@@ -1,6 +1,7 @@
 import type { Topic, Update } from '../types.js';
+import { similarityClues } from './similarity.js';
 
-const TITLE_RULE = `TITLE: the area name, max 6 words, no trailing period (e.g. "Copilot code review", "Azure retirements"). For a standalone launch, name the launch.`;
+const TITLE_RULE = `TITLE: the area name, max 6 words, no trailing period (e.g. "Copilot code review", "Azure SRE Agent"). For a standalone launch, name the launch.`;
 
 const IMPORTANCE_RULES = `IMPORTANCE — would the reader regret skipping the topic? Rate by its most important item.
 - "high": at most 3 topics per reply, often none. Only a new product, a major version or revamp of a widely used developer tool (e.g. Copilot CLI, VS Code, GitHub Actions), or a flagship model from a major AI lab.
@@ -10,7 +11,7 @@ Deprecations and protocol or algorithm changes are never high: a Copilot CLI rev
 If READER INTERESTS are given, move importance by at most one level for topics that clearly match them; interests never change the grouping.`;
 
 const SHARED_GROUPING_RULES = `- Never make vendor-wide or catch-all topics such as "Azure product updates", "GitHub updates", "Misc", "Other news" or "Guidance and opinion". A title joining unrelated areas with "and" means the topic should be split.
-- Deprecations, retirements and end-of-support notices (see LIKELY RETIREMENTS) go into one retirements topic per vendor (e.g. "Azure retirements", "GitHub deprecations"); never mix them with launches.
+- Group deprecations with the product or coherent theme they affect, not a vendor-wide retirement bucket.
 - Items listed together under RELEASE SERIES belong in the same topic. Items with the same title are the same story: same topic.`;
 
 const HINTS_RULE = `- If READER GROUPING HINTS are given, follow them: they take priority over the other grouping rules, but every item still goes into exactly one topic.`;
@@ -23,10 +24,12 @@ export const DIGEST_PLAN_SYSTEM_PROMPT = `You organise a personal tech-news dige
 Group the NEW ITEMS (release notes, changelogs, blog posts, news) into product-area topics that the reader can read or skip as a unit, and rate each topic.
 
 GROUPING
-- A topic is one product, or one clear feature area of a large platform, e.g. "Copilot CLI releases", "Copilot code review", "Copilot coding agent", "Copilot models", "Copilot billing and metrics", "GitHub Actions", "GitHub code security", "GitHub enterprise admin", "GitHub issues and projects", "VS Code releases", "Azure SRE Agent", "Azure databases", "Azure networking", "Azure retirements", "Anthropic news".
-- Size: 3–15 items per topic is ideal; aim for about one topic per 10 items (20–30 topics for 250 items). Split an area with more than 15 items into narrower areas. Put an area with only 1–2 items into the closest area of the same product, unless it is a major launch.
+- A topic is one product, or one clear feature area of a large platform, e.g. "Copilot CLI releases", "Copilot code review", "Copilot coding agent", "Copilot models", "Copilot billing and metrics", "GitHub Actions", "GitHub code security", "GitHub enterprise admin", "GitHub issues and projects", "VS Code releases", "Azure SRE Agent", "Azure networking".
+- Group items when reading or dismissing them together makes sense: the same product, release stream, or a specific coherent theme. There is no target group count or size. A single item can stand alone; a long coherent release stream can stay together.
+- Never group by source name or generic vocabulary such as "software", "technology" or "updates". Shared vocabulary alone is not enough.
+- LEXICAL SIMILARITY is deterministic BM25-weighted cosine evidence from titles and bodies, not a grouping decision. Use it alongside the original language; disagree when products or themes differ.
 ${SHARED_GROUPING_RULES}
-- A blog post goes into the product area it is about. General essays (opinion, culture, career, generic how-tos) go into one "<source> essays" topic per source (e.g. "GitHub blog essays").
+- A blog post goes into the product or specific theme it is about. Do not collect unrelated essays by publisher.
 - A new product, a major launch or a revamp of a widely used developer tool gets its own topic so it is not buried.
 - If an item fits an OPEN topic, set "topic" to that id (e.g. "t2") and keep its title; otherwise set "topic" to null.
 - Every new item id (e.g. "i3") must appear in exactly one topic. Never invent ids.
@@ -35,6 +38,7 @@ ${HINTS_RULE}
 ${TITLE_RULE}
 
 ${IMPORTANCE_RULES}
+For each topic, include a brief rationale explaining its common product/theme and why reading or dismissing its items together makes sense. This is a stated rationale, not internal reasoning.
 Reply only with JSON matching the schema.`;
 
 /** Follow-up for a planned topic that came out too large: split it into narrower areas. */
@@ -64,12 +68,13 @@ export const DIGEST_PLAN_SCHEMA: Record<string, unknown> = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['topic', 'title', 'items', 'importance'],
+        required: ['topic', 'title', 'items', 'importance', 'rationale'],
         properties: {
           topic: { type: ['string', 'null'], description: 'Open topic id (t1, t2, …) or null for a new topic' },
           title: { type: 'string' },
           items: { type: 'array', items: { type: 'string' }, description: 'New item ids (i1, i2, …)' },
           importance: { type: 'string', enum: ['high', 'medium', 'low'] },
+          rationale: { type: 'string', description: 'Brief grouping rationale, not internal reasoning' },
         },
       },
     },
@@ -137,7 +142,7 @@ const PLAN_EXCERPT_CHARS = 140;
 const MAX_INTERESTS_CHARS = 500;
 const MAX_HINTS_CHARS = 1000;
 const OPEN_TOPIC_SAMPLES = 3;
-const MAX_WRITE_ITEMS = 30;
+export const WRITE_BATCH_SIZE = 30;
 
 /** Reader settings shared by the plan and split prompts. */
 export interface ReaderOptions {
@@ -249,6 +254,13 @@ export function buildPlanPrompt(items: Update[], open: OpenTopic[], options: Rea
   });
 
   lines.push('', ...itemSection(items, itemAliases));
+  const aliases = new Map([...itemAliases].map(([alias, item]) => [item.id, alias]));
+  const clues = similarityClues(items);
+  lines.push('', 'LEXICAL SIMILARITY (wink-nlp BM25 + cosine; clues only; scores are lexical overlap, not confidence):');
+  if (!clues.length) lines.push('(no strong lexical neighbours)');
+  for (const clue of clues) {
+    lines.push(`${aliases.get(clue.left)} ~ ${aliases.get(clue.right)} (${clue.score.toFixed(2)}): ${clue.terms.join(', ')}`);
+  }
 
   return {
     system: DIGEST_PLAN_SYSTEM_PROMPT,
@@ -293,7 +305,7 @@ function writeExcerptChars(count: number): number {
 
 /** Pass 2 prompt for one topic. Only the newest items are sent for very large topics. */
 export function buildWritePrompt(title: string, items: Update[], existing?: Topic): WritePrompt {
-  const newest = [...items].sort((a, b) => b.datePublished.localeCompare(a.datePublished)).slice(0, MAX_WRITE_ITEMS);
+  const newest = [...items].sort((a, b) => b.datePublished.localeCompare(a.datePublished)).slice(0, WRITE_BATCH_SIZE);
   const chars = writeExcerptChars(newest.length);
   const lines = [`TITLE: ${title}`];
   if (existing && (existing.summary || existing.highlights.length > 0)) {

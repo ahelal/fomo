@@ -5,13 +5,15 @@ import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TopicSort, UpdateSort } from '@fomo/core';
 import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, isExperimentalSource } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
-import type { DigestResult } from '@fomo/core/digest';
+import type { DigestResult, DigestInspection } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, readConfigFile, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
+import type { GroupingHistory } from '../groupingHistory.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
 import { openTodoAttachment } from '../attachments.js';
 import { EXPERIMENTAL_SETUPS, type ExperimentalSetups } from '../experimental/index.js';
 import { AuditView } from './components/AuditView.js';
+import { GroupingInspector, groupingLines, inspectionText } from './components/GroupingInspector.js';
 import { automaticAccount, buildSettingsRows, editStartValue, experimentalOn, findRow, firstFocusable, isPickerField, isSecretField, isToggleField, maskSetting, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
@@ -33,7 +35,7 @@ import { SettingsPane, PREVIEW_OPTIONS } from './components/SettingsPane.js';
 import { TodosView } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
 import { ColorPicker } from './components/ColorPicker.js';
-import { editText } from './editText.js';
+import { editText, editMultiline } from './editText.js';
 import { useReferences } from './hooks/useReferences.js';
 import { useTodos } from './hooks/useTodos.js';
 import { useColorPicker } from './hooks/useColorPicker.js';
@@ -60,6 +62,7 @@ interface ViewSorts {
 export interface DigestRunOptions {
   /** Forget all topics and regroup every unread and saved update. */
   reset?: boolean;
+  onInspection?(inspection: DigestInspection): void;
 }
 
 interface Props {
@@ -70,6 +73,8 @@ interface Props {
   onConfigChange(patch: Partial<LocalConfig>): string | undefined;
   /** Group unread and saved updates with Copilot (runs after an `f` fetch). */
   digest?(onProgress: (message: string) => void, options?: DigestRunOptions): Promise<DigestResult>;
+  refineGrouping?(current: string, feedback: string, inspection?: DigestInspection): Promise<string>;
+  groupingHistory?: GroupingHistory;
   /** Summarise a post with Copilot and save it (`g`); `force` regenerates a saved one (`g` again). */
   summarize?(id: string, force?: boolean): Promise<PostGistResult>;
   /** Ask Copilot where to file a link in Bookmarks and how to describe it. */
@@ -124,7 +129,7 @@ export function refreshMessage(previous: Update, update: Update): string {
 const STATUSBAR_H = 2; // content + border line
 const FILTERBAR_H = 1;
 
-export function App({ service, config, onConfigChange, digest, summarize, suggestReference, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts, experimental = EXPERIMENTAL_SETUPS, profiles, notice }: Props) {
+export function App({ service, config, onConfigChange, digest, refineGrouping, groupingHistory, summarize, suggestReference, audit: auditProp, auditFile = AUDIT_FILE, listAccounts = listGhAccounts, experimental = EXPERIMENTAL_SETUPS, profiles, notice }: Props) {
   const { exit } = useApp();
   const { columns, rows } = useTerminalSize();
   const audit = useMemo(() => auditProp ?? createMemoryAuditLog(), [auditProp]);
@@ -244,6 +249,21 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   // ── Digest state ────────────────────────────────────────────────────────────
   const [digestEntries, setDigestEntries] = useState<DigestEntry[]>([]);
   const [digestPending, setDigestPending] = useState(0);
+  const [inspection, setInspection] = useState<DigestInspection>();
+  const [groupingRuns, setGroupingRuns] = useState<string[]>([]);
+  const [groupingRunIndex, setGroupingRunIndex] = useState(0);
+  const historyError = useRef<string>();
+  const [showGrouping, setShowGrouping] = useState(false);
+  const [groupingInputs, setGroupingInputs] = useState(false);
+  const [groupingOffset, setGroupingOffset] = useState(0);
+  const [groupingEdit, setGroupingEdit] = useState<'feedback' | 'guidance'>();
+  const [groupingBuffer, setGroupingBuffer] = useState('');
+  const [groupingCursor, setGroupingCursor] = useState(0);
+  useEffect(() => {
+    setInspection(undefined);
+    setShowGrouping(false);
+    setGroupingEdit(undefined);
+  }, [profile]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   // Digest lists skip `content`; it is loaded on demand for the detail pane.
   const [contentCache, setContentCache] = useState<Record<string, string>>({});
@@ -321,6 +341,55 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   useEffect(() => {
     if (notice) showMessage(notice);
   }, [notice, showMessage]);
+
+  useEffect(() => {
+    setInspection(undefined);
+    setGroupingRuns([]);
+    setGroupingRunIndex(0);
+    historyError.current = undefined;
+    if (!groupingHistory) return;
+    try {
+      const ids = groupingHistory.list();
+      setGroupingRuns(ids);
+      if (ids[0]) setInspection(groupingHistory.read(ids[0]));
+    } catch (err) {
+      audit.error('grouping-history', err);
+      showMessage(`Cannot load grouping history: ${errorText(err)}`, 10_000);
+    }
+  }, [groupingHistory, audit, showMessage]);
+
+  const recordInspection = useCallback((snapshot: DigestInspection) => {
+    setInspection(snapshot);
+    setGroupingRunIndex(0);
+    if (!groupingHistory) return;
+    try {
+      const id = groupingHistory.save(snapshot);
+      setGroupingRuns((ids) => [id, ...ids.filter((other) => other !== id)].sort().reverse());
+      historyError.current = undefined;
+    } catch (err) {
+      const message = errorText(err);
+      if (historyError.current !== message) {
+        audit.error('grouping-history', err);
+        showMessage(`Grouping evidence is in memory only: ${message}`, 10_000);
+        historyError.current = message;
+      }
+    }
+  }, [groupingHistory, audit, showMessage]);
+
+  const openGroupingInspector = () => {
+    setShowGrouping(true);
+    setGroupingOffset(0);
+    if (!groupingHistory) return;
+    try {
+      const ids = groupingHistory.list();
+      setGroupingRuns(ids);
+      setGroupingRunIndex(0);
+      if (ids[0]) setInspection(groupingHistory.read(ids[0]));
+    } catch (err) {
+      audit.error('grouping-history', err);
+      showMessage(`Cannot load grouping history: ${errorText(err)}`, 10_000);
+    }
+  };
 
   /** The color picker popup, shared by Config, source details, Bookmarks and Todos. */
   const colorPicker = useColorPicker();
@@ -483,7 +552,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       setDigesting(true);
       await refresh();
       try {
-        const result = await digest((msg) => updatePhase(`Copilot: ${msg}`));
+        const result = await digest((msg) => updatePhase(`Copilot: ${msg}`), { onInspection: recordInspection });
         logDigest('digest', result);
         const grouped = result.processed
           ? `grouped ${result.processed} into topics`
@@ -499,7 +568,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     } finally {
       releaseBusy();
     }
-  }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy, audit, logDigest]);
+  }, [service, digest, config.autoDigest, refresh, showMessage, sourceName, claimBusy, startPhase, updatePhase, releaseBusy, audit, logDigest, recordInspection]);
 
   const nextAutoFetchAt = useAutoFetch(() => {
     if (busyRef.current) {
@@ -522,7 +591,7 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     if (!digest || !claimBusy('Copilot: regrouping all unread and saved updates…')) return;
     setDigesting(true);
     try {
-      const result = await digest((msg) => updatePhase(`Copilot: ${msg}`), { reset: true });
+      const result = await digest((msg) => updatePhase(`Copilot: ${msg}`), { reset: true, onInspection: recordInspection });
       logDigest('regroup', result);
       const left = result.remaining ? ` · ${result.remaining} left for next time` : '';
       const summary = `Regrouped ${result.processed} update${result.processed !== 1 ? 's' : ''} into ${result.created} topics${left}`;
@@ -537,9 +606,28 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
     } finally {
       releaseBusy();
     }
-  }, [digest, refresh, showMessage, claimBusy, updatePhase, releaseBusy, audit, logDigest]);
+  }, [digest, refresh, showMessage, claimBusy, updatePhase, releaseBusy, audit, logDigest, recordInspection]);
   /** When `z` asked to confirm a regroup (0 = not waiting for the second `z`). */
   const regroupArmedAt = useRef(0);
+  const regroupStartedAt = useRef(0);
+
+  const submitGroupingFeedback = async () => {
+    if (!refineGrouping) { showMessage('Copilot feedback is not available'); return; }
+    if (!groupingBuffer.trim()) { showMessage('Describe what should change before submitting feedback'); return; }
+    if (!claimBusy('Copilot: refining grouping guidance…')) return;
+    try {
+      const suggestion = await refineGrouping(config.groupingHints ?? '', groupingBuffer, inspection);
+      setGroupingBuffer(suggestion);
+      setGroupingCursor(suggestion.length);
+      setGroupingEdit('guidance');
+      audit.log('grouping-feedback', 'generated guidance suggestion; awaiting reader approval');
+    } catch (err) {
+      audit.error('grouping-feedback', err);
+      showMessage(`Grouping feedback failed: ${errorText(err)}`, 10_000);
+    } finally {
+      releaseBusy();
+    }
+  };
 
   const backupDir = config.backupDir ?? defaultBackupDir(profile);
 
@@ -1243,6 +1331,61 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   useInput((raw, key) => {
     // Shortcuts ignore case (Shift+b does what b does); typed text keeps `raw`.
     const input = shortcutKey(raw);
+    if (showGrouping) {
+      if (groupingEdit) {
+        if (key.escape) { setGroupingEdit(undefined); return; }
+        if (busyRef.current) return;
+        if (key.ctrl && input === 's') {
+          if (groupingEdit === 'feedback') { void submitGroupingFeedback(); return; }
+          if (groupingBuffer.trim().length > 1000) { showMessage('Grouping guidance must be at most 1000 characters'); return; }
+          if (envSource('groupingHints', configFile)) { showMessage('Remove FOMO_GROUPING_HINTS before saving profile guidance'); return; }
+          const error = onConfigChange({ groupingHints: groupingBuffer.trim() || undefined });
+          if (error) { audit.error('grouping-feedback', error); showMessage(error, 8000); return; }
+          audit.log('config', 'grouping guidance saved from inspector');
+          setGroupingEdit(undefined);
+          showMessage('Guidance saved. Press r here to regroup with it.', 6000);
+          return;
+        }
+        const next = editMultiline(groupingBuffer, groupingCursor, raw, key);
+        if (next) { setGroupingBuffer(next.value); setGroupingCursor(next.cursor); }
+        return;
+      }
+      if (key.escape) { setShowGrouping(false); return; }
+      if (input === 'q') { exit(); return; }
+      if (input === '[' || input === ']') {
+        if (!groupingHistory) return;
+        if (busyRef.current) { showMessage('Wait for the current run before browsing history'); return; }
+        const next = Math.max(0, Math.min(groupingRuns.length - 1, groupingRunIndex + (input === '[' ? 1 : -1)));
+        const id = groupingRuns[next];
+        if (!id) return;
+        try {
+          setInspection(groupingHistory.read(id));
+          setGroupingRunIndex(next);
+          setGroupingOffset(0);
+        } catch (err) {
+          audit.error('grouping-history', err);
+          showMessage(`Cannot load grouping run: ${errorText(err)}`, 10_000);
+        }
+        return;
+      }
+      const step = key.shift ? jumpStep(rows) : key.pageUp || key.pageDown ? Math.max(1, rows - 10) : 1;
+      if (key.upArrow || key.pageUp || input === 'k') { setGroupingOffset((n) => Math.max(0, n - step)); return; }
+      if (key.downArrow || key.pageDown || input === 'j') {
+        const length = groupingLines(`Current guidance: ${config.groupingHints || '(none)'}\n\n${inspectionText(inspection, groupingInputs)}`, columns).length;
+        setGroupingOffset((n) => Math.min(Math.max(0, length - Math.max(1, rows - STATUSBAR_H - FILTERBAR_H - 5)), n + step));
+        return;
+      }
+      if (input === 'i') { setGroupingInputs((on) => !on); setGroupingOffset(0); return; }
+      if (busyRef.current) { if (['f', 'e', 'r'].includes(input)) showMessage(BUSY_MESSAGE); return; }
+      if (input === 'r') { void doRegroup(); setGroupingOffset(0); return; }
+      if (input === 'f' || input === 'e') {
+        if (input === 'f' && !refineGrouping) { showMessage('Copilot feedback is not available'); return; }
+        const text = input === 'e' ? config.groupingHints ?? '' : '';
+        setGroupingBuffer(text); setGroupingCursor(text.length);
+        setGroupingEdit(input === 'e' ? 'guidance' : 'feedback');
+      }
+      return;
+    }
     // ── Color picker popup: takes every key until a color is picked or Esc ──
     if (colorPicker.active) { colorPicker.handleInput(raw, key); return; }
     // ── Quit from any screen (but not while typing) ──
@@ -1767,14 +1910,27 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
       setMessage(undefined);
       if (key.escape) return;
     }
-    if (input === 'z') {
-      if (!digest) showMessage('Copilot is not available');
+    if (/^z{1,3}$/i.test(input)) {
+      const justStarted = Date.now() - regroupStartedAt.current < REGROUP_CONFIRM_MS;
+      const count = input.length + (justStarted ? 2 : regroupArmed ? 1 : 0);
+      if (count >= 3) {
+        if (!justStarted && !busyRef.current && digest) void doRegroup();
+        regroupStartedAt.current = 0;
+        openGroupingInspector();
+      }
+      else if (!digest) showMessage('Copilot is not available');
       else if (busyRef.current) showMessage(BUSY_MESSAGE);
-      else if (regroupArmed) void doRegroup();
+      else if (count >= 2) { regroupStartedAt.current = Date.now(); void doRegroup(); }
       else {
         regroupArmedAt.current = Date.now();
         showMessage('⚠ z again to regroup all topics · Esc cancels', REGROUP_CONFIRM_MS);
       }
+      return;
+    }
+    regroupStartedAt.current = 0;
+
+    if (input === 'i' && canGroup(filter)) {
+      openGroupingInspector();
       return;
     }
 
@@ -2153,6 +2309,19 @@ export function App({ service, config, onConfigChange, digest, summarize, sugges
   };
 
   // Help overlay — replaces main content area
+  if (showGrouping) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        {statusBar}
+        {filterBar}
+        <GroupingInspector inspection={inspection} guidance={config.groupingHints ?? ''} inputs={groupingInputs}
+          offset={groupingOffset} height={availableH} columns={columns} editing={groupingEdit}
+          buffer={groupingBuffer} cursor={groupingCursor} busy={!!activity}
+          historyLabel={groupingRuns.length ? `Run ${groupingRunIndex + 1}/${groupingRuns.length} (newest first)` : undefined} />
+      </Box>
+    );
+  }
+
   if (showHelp) {
     return (
       <Box flexDirection="column" height={rows}>

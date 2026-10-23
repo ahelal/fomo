@@ -1,6 +1,6 @@
 import type { ListOptions, ListResponse, Topic, TopicImportance, Update } from '../types.js';
 import { mapLimit } from '../util.js';
-import { buildPlanPrompt, buildSplitPrompt, buildWritePrompt, type ModelRequest } from './prompt.js';
+import { buildPlanPrompt, buildSplitPrompt, buildWritePrompt, WRITE_BATCH_SIZE, type ModelRequest } from './prompt.js';
 import {
   higherImportance,
   parseItemSummaries,
@@ -37,7 +37,7 @@ export interface DigestOptions {
   planBatchSize?: number;
   /** Max open topics sent as context per planning call. Default 100. */
   maxContextTopics?: number;
-  /** New topics with more items than this get a follow-up call to split them. Default 15. */
+  /** Legacy opt-in size-based splitting. Unset: no artificial group-size limit. */
   maxTopicItems?: number;
   /** Parallel topic-writing calls. Default 6. */
   concurrency?: number;
@@ -52,9 +52,27 @@ export interface DigestOptions {
   /** Free-text grouping instructions; take priority over the default grouping rules. */
   groupingHints?: string;
   onProgress?(message: string): void;
+  onInspection?(inspection: DigestInspection): void;
   /** Injectable for tests. */
   now?(): Date;
   newId?(): string;
+}
+
+export interface DigestCall {
+  label: string;
+  system: string;
+  prompt: string;
+  state: 'running' | 'complete' | 'failed';
+  groups?: TopicGroup[];
+  response?: unknown;
+  error?: string;
+}
+
+export interface DigestInspection {
+  startedAt: string;
+  guidance: string;
+  items: Array<{ id: string; title: string }>;
+  calls: DigestCall[];
 }
 
 export interface DigestResult {
@@ -89,9 +107,8 @@ function capImportance(value: TopicImportance | undefined, cap: TopicImportance 
  * Group ungrouped unread and saved updates (saved ones also when read, so the Saved view is grouped too)
  * into product-area topics in two passes:
  * 1. plan — the model sees all pending items (titles + short excerpts) and the open topics at once,
- *    and assigns items to topics with an importance rating; items it skips get one more planning call,
- *    and new topics over `maxTopicItems` get a call to split them into narrower areas;
- * 2. write — one call per touched topic writes its summary, highlights and a one-line summary per item.
+ *    and assigns items to topics with an importance rating; items it skips get one more planning call;
+ * 2. write — bounded batches per topic write its summary, highlights and a one-line summary per item.
  * Safe to re-run: only items without a known topic are sent to the model.
  */
 export async function runDigest(
@@ -102,7 +119,7 @@ export async function runDigest(
   const maxItems = options.maxItems ?? 300;
   const planBatchSize = Math.max(1, options.planBatchSize ?? 300);
   const maxContextTopics = options.maxContextTopics ?? 100;
-  const maxTopicItems = Math.max(2, options.maxTopicItems ?? 15);
+  const maxTopicItems = Math.max(2, options.maxTopicItems ?? Infinity);
   const concurrency = Math.max(1, options.concurrency ?? 6);
   const planTimeoutMs = options.planTimeoutMs ?? 480_000;
   const writeTimeoutMs = options.writeTimeoutMs ?? 120_000;
@@ -120,20 +137,13 @@ export async function runDigest(
   for (const u of lists.flatMap((l) => l.updates)) {
     if (u.status === 'unread' || u.saved) activeById.set(u.id, u);
   }
-  const active = [...activeById.values()];
+  const active = [...activeById.values()].map((item) => ({ ...item }));
 
-  let resetAssignments: Array<{ id: string; topicId: string }> = [];
-  let remainingBeforeReset = 0;
-  let resetTopics = new Map<string, Topic>();
+  const resetAssignments = new Map<string, string>();
   if (options.reset) {
     const grouped = active.filter((u) => u.topicId);
-    const topicIds = [...new Set(grouped.map((u) => u.topicId!))];
-    resetAssignments = grouped.map((u) => ({ id: u.id, topicId: u.topicId! }));
-    remainingBeforeReset = active.length - grouped.length;
-    resetTopics = await stores.topics.getTopics(topicIds);
-    log(`Resetting ${grouped.length} item(s) across ${topicIds.length} topic(s)…`);
-    await mapLimit(grouped, 8, (u) => stores.updates.setTopicId(u.id, ''));
-    await mapLimit(topicIds, 8, (id) => stores.topics.deleteTopic(id));
+    for (const u of grouped) resetAssignments.set(u.id, u.topicId!);
+    log(`Replanning ${grouped.length} grouped item(s); prior assignments stay until replacements are written…`);
     for (const u of grouped) delete u.topicId;
   }
 
@@ -146,9 +156,36 @@ export async function runDigest(
   const allPending = newestFirst.filter((u) => !u.topicId || !open.has(u.topicId));
   // Oldest first so topics evolve chronologically
   const pending = allPending.slice(0, maxItems).reverse();
+  const inspection: DigestInspection = {
+    startedAt: now().toISOString(),
+    guidance: options.groupingHints ?? '',
+    items: pending.map(({ id, title }) => ({ id, title })),
+    calls: [],
+  };
+  const inspect = () => options.onInspection?.({ ...inspection, calls: inspection.calls.map((call) => ({ ...call })) });
+  const request = async (req: ModelRequest, label: string, parse?: (raw: unknown) => TopicGroup[]): Promise<unknown> => {
+    const call: DigestCall = { label, system: req.system, prompt: req.prompt, state: 'running' };
+    inspection.calls.push(call);
+    inspect();
+    try {
+      const raw = await summarizer.generateJson(req);
+      call.response = raw;
+      if (parse) call.groups = parse(raw);
+      call.state = 'complete';
+      inspect();
+      return raw;
+    } catch (err) {
+      call.state = 'failed';
+      call.error = errorMessage(err);
+      inspect();
+      throw err;
+    }
+  };
+  inspect();
 
   const result: DigestResult = { processed: 0, remaining: 0, created: 0, updated: 0, errors: [] };
   const work = new Map<string, TopicWork>();
+  const assigned = new Set<string>();
 
   const applyGroup = (group: TopicGroup, byId: Map<string, Update>) => {
     const items = group.itemIds.map((id) => byId.get(id)!);
@@ -178,10 +215,8 @@ export async function runDigest(
     log(`${label} ${batch.length} item(s), ${context.length} open topic(s)…`);
     try {
       const prompt = buildPlanPrompt(batch, context, reader);
-      const groups = reconcilePlan(
-        await summarizer.generateJson({ ...prompt, timeoutMs: planTimeoutMs }),
-        prompt,
-      );
+      const raw = await request({ ...prompt, timeoutMs: planTimeoutMs }, label, (raw) => reconcilePlan(raw, prompt));
+      const groups = reconcilePlan(raw, prompt);
       const byId = new Map(batch.map((u) => [u.id, u]));
       for (const group of groups) applyGroup(group, byId);
       const placed = new Set(groups.flatMap((g) => g.itemIds));
@@ -203,7 +238,14 @@ export async function runDigest(
   // The skipped items now see every topic formed above, so most find a home.
   if (skipped.length > 0) skipped = await plan(skipped, 'Placing skipped');
   const byId = new Map(skipped.map((u) => [u.id, u]));
-  for (const u of skipped) applyGroup(singletonGroup(u), byId);
+  if (skipped.length) {
+    const groups = skipped.map(singletonGroup);
+    inspection.calls.push({
+      label: 'Fallback: items omitted twice by the model', system: '', prompt: '', state: 'complete', groups,
+    });
+    inspect();
+    for (const group of groups) applyGroup(group, byId);
+  }
 
   // Oversized new topics get one more call to split them into narrower areas.
   const oversized = [...work.values()].filter((e) => !e.prior && e.items.length > maxTopicItems);
@@ -220,7 +262,7 @@ export async function runDigest(
     log(`Splitting "${topic.title}" (${items.length})…`);
     try {
       const prompt = buildSplitPrompt(topic.title, items, { ...reader, otherTopics });
-      const groups = reconcilePlan(await summarizer.generateJson({ ...prompt, timeoutMs: planTimeoutMs }), prompt);
+      const groups = reconcilePlan(await request({ ...prompt, timeoutMs: planTimeoutMs }, `Splitting ${topic.title}`, (raw) => reconcilePlan(raw, prompt)), prompt);
       if (groups.length < 2) return;
       const placed = new Set(groups.flatMap((g) => g.itemIds));
       const rest = items.filter((u) => !placed.has(u.id)).map((u) => u.id);
@@ -257,28 +299,33 @@ export async function runDigest(
       highlights: [...(prior?.highlights ?? []), ...items.map((u) => u.title)],
     };
     let text = fallback;
-    let summaries = new Map<string, string>();
-    const prompt = buildWritePrompt(topic.title, items, prior);
-    const request = { ...prompt, timeoutMs: writeTimeoutMs };
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const raw = await summarizer.generateJson(request);
-        text = parseTopicText(raw, fallback);
-        summaries = parseItemSummaries(raw, prompt.items);
-        break;
-      } catch (err) {
-        if (attempt === 2) result.errors.push(`topic "${topic.title}": ${errorMessage(err)}`);
-        else log(`↻ retrying "${topic.title}": ${errorMessage(err)}`);
+    const summaries = new Map<string, string>();
+    for (let offset = 0; offset < items.length; offset += WRITE_BATCH_SIZE) {
+      const batch = items.slice(offset, offset + WRITE_BATCH_SIZE);
+      const current = offset ? { ...topic, ...text } : prior;
+      const prompt = buildWritePrompt(topic.title, batch, current);
+      const writeRequest = { ...prompt, timeoutMs: writeTimeoutMs };
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const raw = await request(writeRequest, `Writing ${topic.title} [${offset + 1}-${offset + batch.length}/${items.length}] (${attempt}/2)`);
+          text = parseTopicText(raw, text);
+          for (const [id, summary] of parseItemSummaries(raw, prompt.items)) summaries.set(id, summary);
+          break;
+        } catch (err) {
+          if (attempt === 2) result.errors.push(`topic "${topic.title}": ${errorMessage(err)}`);
+          else log(`↻ retrying "${topic.title}": ${errorMessage(err)}`);
+        }
       }
     }
     const ts = now().toISOString();
     const saved: Topic = { ...topic, ...text, createdAt: prior?.createdAt ?? ts, updatedAt: ts };
-    // Topic first: if item assignment fails midway the items simply stay pending.
+    // Topic first: failed assignments leave those items pending or in their prior group.
     await stores.topics.upsertTopic(saved);
     await mapLimit(items, 8, (u) => {
       const summary = summaries.get(u.id);
       return summary ? stores.updates.setTopicId(u.id, saved.id, summary) : stores.updates.setTopicId(u.id, saved.id);
     });
+    for (const item of items) assigned.add(item.id);
     if (prior) result.updated++;
     else result.created++;
     result.processed += items.length;
@@ -287,11 +334,12 @@ export async function runDigest(
   });
 
   result.remaining = allPending.length - result.processed;
-  if (options.reset && result.processed === 0 && result.errors.length > 0) {
-    await mapLimit([...resetTopics.values()], 8, (topic) => stores.topics.upsertTopic(topic));
-    await mapLimit(resetAssignments, 8, ({ id, topicId }) => stores.updates.setTopicId(id, topicId));
-    result.remaining = remainingBeforeReset;
-    log('⚠ Regroup failed before processing any updates; restored prior topic assignments.');
+  if (options.reset) {
+    const retained = new Set([...resetAssignments].filter(([id]) => !assigned.has(id)).map(([, topicId]) => topicId));
+    await mapLimit([...new Set(resetAssignments.values())].filter((id) => !retained.has(id)), 8, (id) => stores.topics.deleteTopic(id));
+    if (result.processed === 0 && result.errors.length > 0) {
+      log('⚠ Regroup failed before processing any updates; kept prior topic assignments.');
+    }
   }
   return result;
 }

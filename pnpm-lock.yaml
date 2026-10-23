@@ -30,6 +30,9 @@ importers:
       '@azure/data-tables':
         specifier: ^13.2.0
         version: 13.3.2
+      wink-nlp:
+        specifier: ^2.4.0
+        version: 2.4.0
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -2909,6 +2912,9 @@ packages:
   widest-line@5.0.0:
     resolution: {integrity: sha1-t0gmoeSAeDNF8M2QYbSXU8nacNA=}
     engines: {node: '>=18'}
+
+  wink-nlp@2.4.0:
+    resolution: {integrity: sha1-uiHCl6QQvGejZkEnPyLNANfo0yA=}
 
   workbox-background-sync@7.4.1:
     resolution: {integrity: sha1-KnESvvenNOZlynXR2c6wqQwsY1c=}
@@ -5966,6 +5972,8 @@ snapshots:
   widest-line@5.0.0:
     dependencies:
       string-width: 7.2.0
+
+  wink-nlp@2.4.0: {}
 
   workbox-background-sync@7.4.1:
     dependencies:
