@@ -22,9 +22,11 @@ reaches everyone who kept it.
   2. a name (`↵` keeps the suggestion),
   3. for feeds and YouTube, an optional keyword regex such as `copilot|agents` (only matching items are kept).
 
-  YouTube needs no API key: it reads YouTube's public feeds, which hold the 15 newest videos. A channel skips
-  Shorts by default (it fetches its videos and live streams); turn **Shorts** on in the source's details to get them.
-  Only the TUI can fetch YouTube (`@handle`s are resolved to the channel id when fetching); the web app just saves it.
+  YouTube works without an API key, from YouTube's public feeds (the 15 newest videos, no video lengths). With a
+  **YouTube API key** (`c` → **YouTube API key** or `FOMO_YOUTUBE_API_KEY`; see [README → YouTube](README.md#youtube))
+  it uses the YouTube Data API v3 instead, which adds full descriptions and video lengths. A channel skips Shorts by
+  default (it fetches its videos and live streams); turn **Shorts** on in the source's details to get them. Only the
+  TUI can fetch YouTube (`@handle`s are resolved to the channel id when fetching); the web app just saves it.
 
   The source is fetched straight away. `x` on a source removes it (`x` again confirms); removed built-ins come
   back with **Restore removed**.

@@ -6,11 +6,11 @@ import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSet
 import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult } from '@fomo/core/digest';
-import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, maskConnectionString, readConfigFile, tildify, type LocalConfig } from '../config.js';
+import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, readConfigFile, tildify, type LocalConfig } from '../config.js';
 import { createMemoryAuditLog, type AuditLog } from '../audit.js';
 import { listGhAccounts, type GhAccount } from '../ghAccounts.js';
 import { AuditView } from './components/AuditView.js';
-import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isToggleField, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
+import { automaticAccount, buildSettingsRows, editStartValue, findRow, firstFocusable, isPickerField, isSecretField, isToggleField, maskSetting, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
 import { ProfilePicker } from './components/ProfilePicker.js';
@@ -85,12 +85,12 @@ interface Props {
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
-/** Audit text for a local config change; the connection string's secret is masked. */
+/** Audit text for a local config change; secrets are masked. */
 const describeConfig = (patch: Partial<LocalConfig>) =>
   Object.entries(patch)
     .map(([field, value]) => `${field} = ${
       value === undefined ? '(default)'
-        : field === 'connectionString' ? maskConnectionString(String(value))
+        : isSecretField(field) ? maskSetting(field, String(value))
           : typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value)}`)
     .join(', ');
 const BUSY_MESSAGE = '⏳ Still busy — wait for the current run to finish';

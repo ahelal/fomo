@@ -13,6 +13,7 @@ import {
   envSource,
   listProfiles,
   loadConfig,
+  maskSecret,
   profileNameProblem,
   readConfigFile,
   removeProfile,
@@ -20,6 +21,7 @@ import {
   saveConfig,
   selectProfile,
   setActiveProfile,
+  youtubeApiKeyProblem,
 } from '../src/config.js';
 
 const KEY = 'AccountName=acct;AccountKey=c2VjcmV0;EndpointSuffix=core.windows.net';
@@ -217,6 +219,18 @@ describe('removing a profile', () => {
   });
 });
 
+describe('masking secrets', () => {
+  it('shows only the last 4 characters of a long one', () => {
+    expect(maskSecret('fake-youtube-key-0123456789-abcdefghi-rstu')).toBe('••••rstu');
+    expect(maskSecret('short')).toBe('••••');
+  });
+
+  it('checks the shape of a YouTube API key', () => {
+    expect(youtubeApiKeyProblem('fake-youtube-key-0123456789-abcdefghi-rstu')).toBeUndefined();
+    expect(youtubeApiKeyProblem('not a key')).toMatch(/Google API key/);
+  });
+});
+
 describe('backup folders', () => {
   it('give each profile its own folder, except the default one', () => {
     expect(defaultBackupDir('default')).toBe(DEFAULT_BACKUP_DIR);
@@ -244,6 +258,15 @@ describe('environment variables', () => {
     expect(loadConfig('lacks').connectionString).toBe('UseDevelopmentStorage=true');
     expect(envSource('connectionString', readConfigFile('has'))).toBeUndefined();
     expect(envSource('connectionString', readConfigFile('lacks'))).toBe('AZURE_STORAGE_CONNECTION_STRING');
+  });
+
+  it('supply the YouTube API key without changing the file', () => {
+    saveConfig('a', { youtubeApiKey: 'file-key' });
+    vi.stubEnv('FOMO_YOUTUBE_API_KEY', 'env-key');
+    expect(loadConfig('a').youtubeApiKey).toBe('env-key');
+    expect(loadConfig('b').youtubeApiKey).toBe('env-key');
+    expect(envSource('youtubeApiKey', readConfigFile('a'))).toBe('FOMO_YOUTUBE_API_KEY');
+    expect(readConfigFile('a').youtubeApiKey).toBe('file-key');
   });
 
   it('ignore an empty value', () => {

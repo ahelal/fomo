@@ -5,6 +5,7 @@ import { mapLimit } from './util.js';
 import { getAllSources, getSource, getSourceIds } from './scraper/registry.js';
 import { estimateReadingTimeMinutes } from './scraper/feed.js';
 import { isYoutubeVideoUrl, videoDuration } from './scraper/youtube.js';
+import { createYoutubeApi, type YoutubeApi } from './scraper/youtube-api.js';
 import { FomoStorageService } from './storage-service.js';
 import { runDigest, type Summarizer, type DigestOptions, type DigestResult } from './digest/run.js';
 import { GIST_MAX_INPUT_CHARS, GIST_MIN_CHARS, gistSource, mentionsTitle, writeGist } from './digest/gist.js';
@@ -51,8 +52,20 @@ const REFRESH_PREVIEW_CHARS = 5000;
  * Requires a connection string (or a SAS) with network access to the sources.
  */
 export class FomoDirectService extends FomoStorageService {
-  constructor(conn: StoreConnection) {
+  private youtube?: YoutubeApi;
+  private youtubeApiKey?: string;
+
+  constructor(conn: StoreConnection, options: { youtubeApiKey?: string } = {}) {
     super(conn);
+    this.setYoutubeApiKey(options.youtubeApiKey);
+  }
+
+  /** Fetch YouTube sources with the YouTube Data API using this key; none uses the public feeds. */
+  setYoutubeApiKey(key: string | undefined): void {
+    const next = key?.trim() || undefined;
+    if (next === this.youtubeApiKey) return;
+    this.youtubeApiKey = next;
+    this.youtube = next ? createYoutubeApi({ apiKey: next }) : undefined;
   }
 
   /**
@@ -67,7 +80,7 @@ export class FomoDirectService extends FomoStorageService {
 
     let info: PageInfo;
     if (isYoutubeVideoUrl(previous.url)) {
-      const durationSeconds = await videoDuration(previous.url);
+      const durationSeconds = await videoDuration(previous.url, this.youtube);
       if (!durationSeconds) throw new Error('Could not read the video length from YouTube');
       info = { durationSeconds };
     } else {
@@ -155,12 +168,13 @@ export class FomoDirectService extends FomoStorageService {
     await this.ensureInit();
 
     const settings = await this.store.getSettings();
-    let sources = getAllSources(settings);
+    const deps = { youtube: this.youtube };
+    let sources = getAllSources(settings, deps);
 
     if (req.sources && req.sources.length > 0) {
       // Explicit source list — ignore disabledSources
       sources = req.sources
-        .map((id) => getSource(id, settings))
+        .map((id) => getSource(id, settings, deps))
         .filter((s): s is NonNullable<typeof s> => s !== undefined);
 
       if (sources.length === 0) {

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { render } from 'ink';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fake = vi.hoisted(() => ({ created: [] as string[] }));
+const fake = vi.hoisted(() => ({ created: [] as string[], youtubeKeys: [] as Array<string | undefined> }));
 
 // Each account answers with its own total, so the status bar shows which account is open.
 vi.mock('@fomo/core/service', async () => {
@@ -12,10 +12,12 @@ vi.mock('@fomo/core/service', async () => {
   const totals: Record<string, number> = { workacct: 11, homeacct: 22, newacct: 33 };
   class FomoDirectService {
     private readonly account: string;
-    constructor(connectionString: string) {
+    constructor(connectionString: string, options: { youtubeApiKey?: string } = {}) {
       this.account = /AccountName=([^;]+)/.exec(connectionString)?.[1] ?? '';
       fake.created.push(this.account);
+      fake.youtubeKeys.push(options.youtubeApiKey);
     }
+    setYoutubeApiKey = (key?: string) => { if (key !== fake.youtubeKeys.at(-1)) fake.youtubeKeys.push(key); };
     getSettings = async () => ({ ...DEFAULT_SETTINGS });
     getSources = async () => [];
     getDigest = async () => ({ entries: [], pending: 0 });
@@ -59,6 +61,7 @@ beforeEach(() => {
   columns = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
   Object.defineProperty(process.stdout, 'columns', { value: 200, configurable: true });
   fake.created.length = 0;
+  fake.youtubeKeys.length = 0;
   rmSync(CONFIG_FILE, { force: true });
 });
 
@@ -137,6 +140,34 @@ describe('opening a profile', () => {
   it('says first-time setup when there is only the default profile', async () => {
     const { plain } = await renderRoot('default');
     expect(plain()).toContain('first-time setup');
+  });
+});
+
+describe('YouTube API key', () => {
+  it('goes to the service of its own profile, and to no other', async () => {
+    write({
+      activeProfile: 'work',
+      profiles: { work: { connectionString: connection('workacct'), youtubeApiKey: 'work-key' }, home: { connectionString: connection('homeacct') } },
+    });
+    const { press, plain } = await renderRoot('work');
+    expect(fake.youtubeKeys).toEqual(['work-key']);
+    await press('w', 'j', ENTER);
+    expect(plain()).toContain('Total: 22');
+    expect(fake.created).toEqual(['workacct', 'homeacct']);
+    expect(fake.youtubeKeys).toEqual(['work-key', undefined]);
+  });
+
+  it('changes on the open service, keeping the app as it is', async () => {
+    const key = 'fake-youtube-key-0123456789-abcdefghi-rstu';
+    twoAccounts();
+    const { press, plain } = await renderRoot('work');
+    await press('c');
+    for (let i = 0; i < 60 && !plain().includes('▸ ◆ YouTube API key'); i++) await press('j');
+    await press(ENTER, key, ENTER);
+    expect(plain()).toContain('✓ Saved youtube api key');
+    expect(readConfigFile('work').youtubeApiKey).toBe(key);
+    expect(fake.created).toEqual(['workacct']);
+    expect(fake.youtubeKeys).toEqual([undefined, key]);
   });
 });
 

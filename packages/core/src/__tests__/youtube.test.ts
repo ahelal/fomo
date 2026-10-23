@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSource } from '../scraper/registry.js';
 import { parseFeed } from '../scraper/feed.js';
 import { newUserSource, sourceDraft, sourceDraftPatch, sourceEditInput, sourceInfo, isYoutubeChannelUrl } from '../scraper/specs.js';
-import { isYoutubeVideoUrl, parseYoutubeUrl, youtubeUrl } from '../scraper/youtube.js';
+import { isYoutubeVideoUrl, parseYoutubeUrl, videoDuration, youtubeUrl, youtubeVideoId } from '../scraper/youtube.js';
 import { DEFAULT_SETTINGS, type AppSettings, type YoutubeSourceSpec } from '../types.js';
 
 const ID = 'UC7c3Kb6jYCRj4JOHHZTxKsQ';
@@ -78,6 +78,14 @@ describe('YouTube URLs', () => {
       expect(isYoutubeVideoUrl(url), url).toBe(false);
     }
   });
+
+  it('reads the video id of every kind of video URL', () => {
+    expect(youtubeVideoId('https://www.youtube.com/watch?v=ZQ0Qq6LlAmI&t=10s')).toBe('ZQ0Qq6LlAmI');
+    expect(youtubeVideoId('https://m.youtube.com/shorts/abc_-1')).toBe('abc_-1');
+    expect(youtubeVideoId('https://youtube.com/live/xyz?si=1')).toBe('xyz');
+    expect(youtubeVideoId('https://youtu.be/ZQ0Qq6LlAmI?si=x')).toBe('ZQ0Qq6LlAmI');
+    expect(youtubeVideoId('https://www.youtube.com/@GitHub')).toBeUndefined();
+  });
 });
 
 describe('YouTube user sources', () => {
@@ -139,25 +147,24 @@ describe('YouTube fetch', () => {
     });
     const items = await createSource(spec()).fetch();
     expect(items.map((i) => i.title)).toEqual(['Newest video', 'Stream', 'Older video']);
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    // The two feeds only: no watch page per video
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(items.every((i) => i.durationSeconds === undefined)).toBe(true);
   });
 
-  it('reads exact duration metadata from video pages', async () => {
-    mockYoutube({
-      [feedUrl('playlist_id=PL123456789012')]: atom(entry('v1', 'Lesson', '2026-10-10T00:00:00Z')),
-      'https://www.youtube.com/watch?v=v1': '<meta itemprop="duration" content="PT1H2M3S">',
-    });
-    const items = await createSource(spec({ channel: undefined, playlist: 'PL123456789012' })).fetch();
-    expect(items[0]?.durationSeconds).toBe(3723);
+  it('reads exact duration metadata from a watch page (u)', async () => {
+    mockYoutube({ 'https://www.youtube.com/watch?v=v1': '<meta itemprop="duration" content="PT1H2M3S">' });
+    await expect(videoDuration('https://www.youtube.com/watch?v=v1')).resolves.toBe(3723);
   });
 
   it('finds duration metadata deep in a large watch page', async () => {
-    mockYoutube({
-      [feedUrl('playlist_id=PL123456789012')]: atom(entry('v1', 'Lesson', '2026-10-10T00:00:00Z')),
-      'https://www.youtube.com/watch?v=v1': `${'x'.repeat(900_000)}"lengthSeconds":"849"`,
-    });
-    const items = await createSource(spec({ channel: undefined, playlist: 'PL123456789012' })).fetch();
-    expect(items[0]?.durationSeconds).toBe(849);
+    mockYoutube({ 'https://www.youtube.com/watch?v=v1': `${'x'.repeat(900_000)}"lengthSeconds":"849"` });
+    await expect(videoDuration('https://www.youtube.com/watch?v=v1')).resolves.toBe(849);
+  });
+
+  it('keeps the cause of a network failure in the message', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) }));
+    await expect(createSource(spec()).fetch()).rejects.toThrow('[gh] fetch failed: fetch failed (ECONNRESET)');
   });
 
   it('copes with a channel that never streamed (no live playlist)', async () => {

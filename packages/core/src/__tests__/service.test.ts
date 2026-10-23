@@ -154,6 +154,20 @@ describe('FomoDirectService', () => {
     expect(result.results['mock-source'].added).toBe(1);
   });
 
+  it('hands sources a YouTube Data API client only while a key is set', async () => {
+    const { getAllSources, getSource } = await import('../scraper/registry.js') as any;
+    await svc.fetch();
+    expect(getAllSources.mock.calls.at(-1)[1]).toEqual({ youtube: undefined });
+
+    const keyed = new FomoDirectService('UseDevelopmentStorage=true', { youtubeApiKey: 'k' });
+    await keyed.fetch({ sources: ['mock-source'] });
+    expect(getSource.mock.calls.at(-1)[2].youtube).toMatchObject({ videos: expect.any(Function) });
+
+    keyed.setYoutubeApiKey('  ');
+    await keyed.fetch();
+    expect(getAllSources.mock.calls.at(-1)[1]).toEqual({ youtube: undefined });
+  });
+
   it('persists reading time and video duration from scraped items', async () => {
     const { __mockStore } = await import('../store/tables.js') as any;
     const { __mockSource } = await import('../scraper/registry.js') as any;
@@ -716,6 +730,25 @@ describe('FomoDirectService', () => {
       expect(previous.durationSeconds).toBe(60);
       expect(update.durationSeconds).toBe(849);
       expect(store.setPageInfo).toHaveBeenCalledWith('blog__1', { durationSeconds: 849 });
+    });
+
+    it('reads a YouTube video’s length from the YouTube Data API when a key is set', async () => {
+      const store = await mockStore({ ...post, source: 'yt', url: 'https://www.youtube.com/watch?v=abc' });
+      const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        items: [{ id: 'abc', contentDetails: { duration: 'PT2M' }, snippet: { liveBroadcastContent: 'none' } }],
+      })));
+      vi.stubGlobal('fetch', fetch);
+      svc.setYoutubeApiKey('test-key');
+      try {
+        const { update } = await svc.refreshUpdate('blog__1');
+        expect(update.durationSeconds).toBe(120);
+        expect(store.setPageInfo).toHaveBeenCalledWith('blog__1', { durationSeconds: 120 });
+        const [url, init] = fetch.mock.calls[0]!;
+        expect(String(url)).toMatch(/^https:\/\/www\.googleapis\.com\/youtube\/v3\/videos\?.*id=abc/);
+        expect(init.headers['X-Goog-Api-Key']).toBe('test-key');
+      } finally {
+        svc.setYoutubeApiKey(undefined);
+      }
     });
 
     it('changes nothing when the page is not the post or cannot be read', async () => {
