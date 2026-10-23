@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Box, Text } from 'ink';
-import { soloUpdate, type DigestEntry, type DigestRow } from '@fomo/core';
+import { formatUpdateTime, soloUpdate, type DigestEntry, type DigestRow } from '@fomo/core';
 import { DEFAULT_SOURCE_COLOR, DUP_BADGE, DUP_COLOR, updateLook } from './UpdatesTable.js';
 
 interface Props {
@@ -24,6 +24,7 @@ const SEL_BG = '#1c2d4f';
 const SOURCE_W = 13;
 const DATE_W = 12;
 const COUNT_W = 5;
+const TIME_W = 8;
 const READ_COLOR = '#8b949e';
 
 /** Summary shown under a single-update topic row; falls back to the topic's Copilot summary. */
@@ -85,8 +86,8 @@ export function DigestTable({
   }
   const hasMoreBelow = offset + visible.length < rows.length;
 
-  const titleW = Math.max(10, columns - (2 + 2 + SOURCE_W + DATE_W + COUNT_W) - 2);
-  const summaryIndent = 2 + 2 + SOURCE_W + DATE_W + COUNT_W;
+  const titleW = Math.max(10, columns - (2 + 2 + SOURCE_W + DATE_W + COUNT_W + TIME_W) - 2);
+  const summaryIndent = 2 + 2 + SOURCE_W + DATE_W + COUNT_W + TIME_W;
   const separatorW = Math.max(columns - 2, 10);
   const label = (source: string) => (sourceLabels[source] ?? source).slice(0, SOURCE_W - 2);
   const color = (source: string) => sourceColors[source] ?? DEFAULT_SOURCE_COLOR[source] ?? '#58a6ff';
@@ -124,6 +125,7 @@ export function DigestTable({
           {'SOURCE'.padEnd(SOURCE_W)}
           {'LATEST'.padEnd(DATE_W)}
           {'#'.padEnd(COUNT_W)}
+          {'TIME'.padEnd(TIME_W)}
           {'TOPIC'}
           {grouping
             ? `   · ${pending > 0 ? `${pending} not grouped yet — ` : ''}Copilot is grouping in the background…`
@@ -147,6 +149,7 @@ export function DigestTable({
                 <Text color={color(u.source)} bold={look.unread} backgroundColor={bg}>{label(u.source).padEnd(SOURCE_W)}</Text>
                 <Text color={look.textColor} bold={look.unread} backgroundColor={bg}>{u.datePublished.slice(0, 10).padEnd(DATE_W)}</Text>
                 <Text color={look.statusColor} backgroundColor={bg}>{look.status.padEnd(COUNT_W)}</Text>
+                <Text color={look.textColor} backgroundColor={bg}>{formatUpdateTime(u).padEnd(TIME_W)}</Text>
                 {u.duplicateOf && <Text color={DUP_COLOR} backgroundColor={bg}>{DUP_BADGE}</Text>}
                 <Text color={look.textColor} bold={look.unread} backgroundColor={bg} wrap="truncate">{clip(u.title, u.duplicateOf ? titleW - DUP_BADGE.length : titleW)}</Text>
               </Box>
@@ -191,6 +194,7 @@ export function DigestTable({
               <Text color={sourceColor} bold={unread} backgroundColor={bg}>{sourceText.padEnd(SOURCE_W)}</Text>
               <Text color={textColor} bold={unread} backgroundColor={bg}>{entry.latestDate.slice(0, 10).padEnd(DATE_W)}</Text>
               <Text color={countColor} bold={!soloLook && unread} backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
+              <Text color={textColor} backgroundColor={bg}>{(solo ? formatUpdateTime(solo) : '').padEnd(TIME_W)}</Text>
               {importance === 'high' && <Text color={unread ? '#f0883e' : READ_COLOR} bold={unread} backgroundColor={bg}>{'▲ '}</Text>}
               {solo?.duplicateOf && <Text color={DUP_COLOR} backgroundColor={bg}>{DUP_BADGE}</Text>}
               <Text color={titleColor} bold={unread && titleColor !== READ_COLOR} backgroundColor={bg} wrap="truncate">

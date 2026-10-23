@@ -87,6 +87,7 @@ usually 20–30 topics. Press `2` again to switch to a plain list of unread upda
 
 Open a topic to see a one-sentence summary and up to six highlights (most important first). Each update in the topic also gets its own one-line summary, so you can decide which ones to open.
 A topic with only one update doesn't expand: its row shows that update's title and summary directly, and `Enter` opens the update.
+The grouped table's **TIME** column shows each expanded item's reading estimate (`~5m`) or video duration (`15m`), also on single-update topics. Multi-item topic headers leave time blank rather than imply a combined duration.
 Mark the whole topic read with `x`, which makes skipping a low-value area a single key press.
 
 The **Pending** view (key `4`) is grouped the same way (press `4` again for a plain list), so pending posts sit together by product area. Reading a pending post
