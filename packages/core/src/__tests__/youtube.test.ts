@@ -111,7 +111,7 @@ describe('YouTube user sources', () => {
     const yt: YoutubeSourceSpec = { kind: 'youtube', id: 'gh', displayName: 'GH', channel: '@GitHub', include: 'ai' };
     expect(sourceInfo(yt)).toMatchObject({ kind: 'youtube', location: 'https://www.youtube.com/@GitHub', filter: 'keywords /ai/, no Shorts' });
     expect(sourceInfo({ ...yt, include: undefined, shorts: true }).filter).toBeUndefined();
-    expect(sourceEditInput(yt)).toEqual({ url: 'https://www.youtube.com/@GitHub', name: 'GH', include: 'ai', shorts: false });
+    expect(sourceEditInput(yt)).toEqual({ url: 'https://www.youtube.com/@GitHub', name: 'GH', include: 'ai', shorts: false, changelogPath: '' });
 
     const current = settings({ userSources: [yt] });
     const draft = sourceDraft(current, 'gh');

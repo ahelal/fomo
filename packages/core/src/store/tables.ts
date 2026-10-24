@@ -24,6 +24,7 @@ import type {
   ListTodosResponse,
 } from '../types.js';
 import { DEFAULT_SETTINGS } from '../types.js';
+import { LEGACY_BUILTIN_SOURCES, LEGACY_COPILOT_CLI_SOURCE, LEGACY_USER_SOURCES } from '../scraper/specs.js';
 import type { DuplicateRow } from '../duplicates.js';
 
 const TABLE_NAME = 'updates';
@@ -634,17 +635,42 @@ export class UpdateStore {
 
   /** Read centralised app settings. Returns defaults for any missing fields. */
   async getSettings(): Promise<AppSettings> {
+    let stored: Partial<AppSettings>;
+    let existingAccount = true;
     try {
       const entity = await this.settingsClient.getEntity<TableEntity<{ data: string }>>(
         SETTINGS_PK,
         SETTINGS_RK,
       );
-      const stored = JSON.parse(entity.data) as Partial<AppSettings>;
-      return { ...DEFAULT_SETTINGS, ...stored };
+      stored = JSON.parse(entity.data) as Partial<AppSettings>;
     } catch (err: unknown) {
-      if (isTableError(err, 404)) return { ...DEFAULT_SETTINGS };
-      throw err;
+      if (!isTableError(err, 404)) throw err;
+      stored = {};
+      existingAccount = await this.hasStoredUpdates();
     }
+
+    const needsMigration = (stored.sourceDefaultsVersion ?? 0) < DEFAULT_SETTINGS.sourceDefaultsVersion;
+    const settings: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      ...stored,
+      ...(needsMigration && existingAccount ? migrateLegacySources(stored) : {}),
+      sourceDefaultsVersion: DEFAULT_SETTINGS.sourceDefaultsVersion,
+    };
+
+    if (needsMigration) {
+      await this.settingsClient.upsertEntity<TableEntity<{ data: string }>>(
+        { partitionKey: SETTINGS_PK, rowKey: SETTINGS_RK, data: JSON.stringify(settings) },
+        'Replace',
+      );
+    }
+
+    return settings;
+  }
+
+  private async hasStoredUpdates(): Promise<boolean> {
+    const iter = this.client.listEntities<UpdateEntity>({ queryOptions: { select: ['PartitionKey'] } });
+    for await (const _ of iter) return true;
+    return false;
   }
 
   /** Merge partial settings into the stored settings. */
@@ -819,4 +845,30 @@ export class TodoStore {
       throw err;
     }
   }
+}
+
+/**
+ * Former built-ins of an account from an earlier FOMO version: feeds become the user's own sources,
+ * extension sources stay built-in. Version 1 kept every former built-in in `installedLegacySources`.
+ */
+function migrateLegacySources(stored: Partial<AppSettings>): Pick<AppSettings, 'userSources' | 'installedLegacySources'> {
+  const userSources = stored.userSources ?? [];
+  const own = new Set(userSources.map((source) => source.id));
+  const removed = new Set(stored.removedSources ?? []);
+  const kept = new Set(
+    stored.sourceDefaultsVersion === undefined
+      ? [...LEGACY_USER_SOURCES, ...LEGACY_BUILTIN_SOURCES, LEGACY_COPILOT_CLI_SOURCE].map((source) => source.id).filter((id) => !own.has(id))
+      : stored.installedLegacySources ?? [],
+  );
+  const migrateCopilotCli = kept.has(LEGACY_COPILOT_CLI_SOURCE.id)
+    && !own.has(LEGACY_COPILOT_CLI_SOURCE.id)
+    && !removed.has(LEGACY_COPILOT_CLI_SOURCE.id);
+  return {
+    userSources: [
+      ...LEGACY_USER_SOURCES.filter((source) => kept.has(source.id) && !own.has(source.id) && !removed.has(source.id)),
+      ...(migrateCopilotCli ? [LEGACY_COPILOT_CLI_SOURCE] : []),
+      ...userSources,
+    ],
+    installedLegacySources: LEGACY_BUILTIN_SOURCES.map((source) => source.id).filter((id) => kept.has(id)),
+  };
 }

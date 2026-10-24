@@ -334,6 +334,118 @@ describe('UpdateStore fetch history', () => {
       azure: { lastFetchAt: '2026-10-21T11:00:00Z', lastError: 'HTTP 500' },
       vscode: { lastAddedAt: '2026-09-01T00:00:00Z' },
     });
+
+    describe('UpdateStore settings migration', () => {
+      const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+      const rows = (items: object[]) => () => (async function* () { yield* items; })();
+
+      it('installs former defaults for accounts with saved settings', async () => {
+        const store = new UpdateStore(conn as any);
+        const writes: Record<string, unknown>[] = [];
+        (store as any).settingsClient = {
+          getEntity: async () => ({ data: JSON.stringify({ removedSources: ['github'], disabledSources: ['azure'] }) }),
+          upsertEntity: async (entity: Record<string, unknown>) => { writes.push(entity); },
+        };
+
+        const settings = await store.getSettings();
+        const own = settings.userSources.map((s) => s.id);
+        expect(own).toContain('azure');
+        expect(own).toContain('copilot-cli');
+        expect(own).not.toContain('github');
+        expect(settings.installedLegacySources).toEqual(['anthropic-news', 'anthropic-engineering']);
+        expect(settings.removedSources).toEqual(['github']);
+        expect(settings.disabledSources).toEqual(['azure']);
+        expect(settings.sourceDefaultsVersion).toBe(3);
+        expect(writes).toHaveLength(1);
+      });
+
+      it('does not install former defaults for a fresh account', async () => {
+        const store = new UpdateStore(conn as any);
+        const writes: Record<string, unknown>[] = [];
+        (store as any).settingsClient = {
+          getEntity: async () => { throw Object.assign(new Error('not found'), { statusCode: 404 }); },
+          upsertEntity: async (entity: Record<string, unknown>) => { writes.push(entity); },
+        };
+        (store as any).client = { listEntities: rows([]) };
+
+        const settings = await store.getSettings();
+        expect(settings.installedLegacySources).toEqual([]);
+        expect(settings.userSources).toEqual([]);
+        expect(settings.sourceDefaultsVersion).toBe(3);
+        expect(writes).toHaveLength(1);
+      });
+
+      it('installs former defaults for accounts with stored updates but no settings row', async () => {
+        const store = new UpdateStore(conn as any);
+        const writes: Record<string, unknown>[] = [];
+        (store as any).settingsClient = {
+          getEntity: async () => { throw Object.assign(new Error('not found'), { statusCode: 404 }); },
+          upsertEntity: async (entity: Record<string, unknown>) => { writes.push(entity); },
+        };
+        (store as any).client = { listEntities: rows([{ partitionKey: 'github' }]) };
+
+        const settings = await store.getSettings();
+        expect(settings.userSources.map((s) => s.id)).toEqual(['github', 'github-blog', 'azure', 'vscode', 'theregister', 'azure-sre-agent', 'github-next', 'copilot-cli']);
+        expect(settings.userSources.at(-1)).toMatchObject({ kind: 'github-releases', repo: 'github/copilot-cli', changelogPath: 'changelog.md' });
+        expect(settings.installedLegacySources).toEqual(['anthropic-news', 'anthropic-engineering']);
+        expect(settings.sourceDefaultsVersion).toBe(3);
+        expect(writes).toHaveLength(1);
+      });
+
+      it('turns former default feeds kept by version 1 into the user\'s own sources', async () => {
+        const store = new UpdateStore(conn as any);
+        const writes: Record<string, unknown>[] = [];
+        const mine = { kind: 'feed', id: 'mine', displayName: 'Mine', urls: ['https://example.com/feed'] };
+        (store as any).settingsClient = {
+          getEntity: async () => ({ data: JSON.stringify({ sourceDefaultsVersion: 1, installedLegacySources: ['github', 'copilot-cli'], userSources: [mine] }) }),
+          upsertEntity: async (entity: Record<string, unknown>) => { writes.push(entity); },
+        };
+
+        const settings = await store.getSettings();
+        expect(settings.userSources.map((s) => s.id)).toEqual(['github', 'copilot-cli', 'mine']);
+        expect(settings.userSources[1]).toMatchObject({ kind: 'github-releases', repo: 'github/copilot-cli', changelogPath: 'changelog.md' });
+        expect(settings.installedLegacySources).toEqual([]);
+        expect(settings.sourceDefaultsVersion).toBe(3);
+        expect(writes).toHaveLength(1);
+      });
+
+      it('migrates version 2 Copilot CLI custom sources without changing their ID', async () => {
+        const store = new UpdateStore(conn as any);
+        const writes: Record<string, unknown>[] = [];
+        (store as any).settingsClient = {
+          getEntity: async () => ({ data: JSON.stringify({
+            sourceDefaultsVersion: 2,
+            installedLegacySources: ['copilot-cli', 'anthropic-news'],
+            userSources: [],
+            sourceNames: { 'copilot-cli': 'Copilot CLI' },
+          }) }),
+          upsertEntity: async (entity: Record<string, unknown>) => { writes.push(entity); },
+        };
+
+        const settings = await store.getSettings();
+        expect(settings.userSources).toEqual([{
+          kind: 'github-releases', id: 'copilot-cli', displayName: 'Copilot CLI Releases',
+          repo: 'github/copilot-cli', changelogPath: 'changelog.md',
+        }]);
+        expect(settings.installedLegacySources).toEqual(['anthropic-news']);
+        expect(settings.sourceNames).toEqual({ 'copilot-cli': 'Copilot CLI' });
+        expect(settings.sourceDefaultsVersion).toBe(3);
+        expect(writes).toHaveLength(1);
+      });
+
+      it('leaves migrated settings alone', async () => {
+        const store = new UpdateStore(conn as any);
+        const writes: Record<string, unknown>[] = [];
+        (store as any).settingsClient = {
+          getEntity: async () => ({ data: JSON.stringify({ sourceDefaultsVersion: 3, installedLegacySources: [], userSources: [] }) }),
+          upsertEntity: async (entity: Record<string, unknown>) => { writes.push(entity); },
+        };
+
+        const settings = await store.getSettings();
+        expect(settings.userSources).toEqual([]);
+        expect(writes).toHaveLength(0);
+      });
+    });
   });
 
   it('still returns stats when the fetch history cannot be read', async () => {

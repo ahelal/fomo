@@ -129,6 +129,8 @@ export interface GithubReleasesSourceSpec extends SourceSpecBase {
   kind: 'github-releases';
   /** `owner/name` */
   repo: string;
+  /** Optional repository-relative Markdown changelog used in place of release bodies. */
+  changelogPath?: string;
 }
 
 /**
@@ -518,6 +520,10 @@ export interface AppSettings {
   sourceColors: Record<SourceId, string>;
   /** Sources added by the user from the app. */
   userSources: UserSourceSpec[];
+  /** Former built-ins retained for accounts that existed before the default source list changed. */
+  installedLegacySources: SourceId[];
+  /** Version of the shipped default-source list used to initialize this account. */
+  sourceDefaultsVersion: number;
   /** Built-in sources the user removed. */
   removedSources: SourceId[];
 }
@@ -531,5 +537,7 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
   extensionNames: {},
   sourceColors: {},
   userSources: [],
+  installedLegacySources: [],
+  sourceDefaultsVersion: 3,
   removedSources: [],
 };

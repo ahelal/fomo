@@ -8,7 +8,7 @@ import { activeSourceSpecs } from './specs.js';
  * To add a built-in, append a spec to `BUILTIN_SOURCES` in `specs.ts`. If no spec kind fits,
  * ship a sandboxed extension in `packages/extensions/` and inject its adapter from the TUI.
  */
-type SourceSettings = Partial<Pick<AppSettings, 'userSources' | 'removedSources'>>;
+type SourceSettings = Partial<Pick<AppSettings, 'userSources' | 'removedSources' | 'installedLegacySources'>>;
 
 export function getAllSources(settings: SourceSettings = {}, deps: SourceDeps = {}): SourcePlugin[] {
   return activeSourceSpecs(settings).map((spec) => createSource(spec, deps));

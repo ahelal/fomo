@@ -564,13 +564,12 @@ describe('FomoDirectService', () => {
     const { __mockStore } = await import('../store/tables.js') as any;
     __mockStore.getSettings.mockResolvedValueOnce({
       disabledSources: [],
-      removedSources: ['github'],
+      removedSources: [],
       userSources: [{ kind: 'feed', id: 'mine', displayName: 'Mine', urls: ['https://example.com/rss'] }],
     });
     const sources = await svc.getSources();
     const ids = sources.map((s) => s.id);
-    expect(ids).toContain('azure');
-    expect(ids).not.toContain('github');
+    expect(ids).toEqual(['fomo-releases', 'mine']);
     expect(sources.find((s) => s.id === 'mine')).toMatchObject({ displayName: 'Mine', kind: 'feed', builtin: false });
   });
 

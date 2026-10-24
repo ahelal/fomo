@@ -1,19 +1,25 @@
 import type { AppSettings, SourceId, SourceInfo, SourceSpec, UserSourceSpec } from '../types.js';
 import { EXPERIMENTAL_SOURCE_INFOS, experimentalSourceInfo, isExperimentalSource } from '../experimental.js';
+import { normalizeChangelogPath } from './github.js';
 import { parseYoutubeUrl, youtubeName, youtubeUrl } from './youtube.js';
 
 const AZURE_UPDATES_FEED = 'https://www.microsoft.com/releasecommunications/api/v2/azure/rss';
 
 /** Sources shipped with the app. Changing one here reaches every user (unless they removed it). */
 export const BUILTIN_SOURCES: readonly SourceSpec[] = [
+  { kind: 'github-releases', id: 'fomo-releases', displayName: 'FOMO Releases', repo: 'ahelal/fomo' },
+];
+
+/**
+ * Former built-in feeds. An account that used an earlier FOMO version gets them as its own sources
+ * (`AppSettings.userSources`) on upgrade, as if the user had added them.
+ */
+export const LEGACY_USER_SOURCES: readonly UserSourceSpec[] = [
   { kind: 'feed', id: 'github', displayName: 'GitHub Changelog', urls: ['https://github.blog/changelog/feed/'] },
   { kind: 'feed', id: 'github-blog', displayName: 'GitHub Blog', urls: ['https://github.blog/feed/'] },
   { kind: 'feed', id: 'azure', displayName: 'Azure Updates', urls: [AZURE_UPDATES_FEED] },
   { kind: 'feed', id: 'vscode', displayName: 'VS Code Updates', urls: ['https://code.visualstudio.com/feed.xml'], category: 'release' },
-  { kind: 'custom', id: 'copilot-cli', displayName: 'Copilot CLI Releases', extension: 'copilot-cli', extensionName: 'Copilot CLI' },
   { kind: 'feed', id: 'theregister', displayName: 'The Register', urls: ['https://www.theregister.com/headlines.atom'] },
-  { kind: 'custom', id: 'anthropic-news', displayName: 'Anthropic News', extension: 'anthropic', extensionName: 'Anthropic', options: { section: 'news' }, preview: false },
-  { kind: 'custom', id: 'anthropic-engineering', displayName: 'Anthropic Engineering', extension: 'anthropic', extensionName: 'Anthropic', options: { section: 'engineering' }, preview: false },
   {
     kind: 'feed',
     id: 'azure-sre-agent',
@@ -24,17 +30,42 @@ export const BUILTIN_SOURCES: readonly SourceSpec[] = [
   { kind: 'feed', id: 'github-next', displayName: 'GitHub Next', urls: ['https://githubnext.com/rss.xml'] },
 ];
 
-const BUILTIN_IDS = new Set(BUILTIN_SOURCES.map((s) => s.id));
+/**
+ * Former built-ins that run bundled extension code, which users cannot add themselves. Accounts from an
+ * earlier FOMO version keep them as built-ins (`AppSettings.installedLegacySources`).
+ */
+export const LEGACY_BUILTIN_SOURCES: readonly SourceSpec[] = [
+  { kind: 'custom', id: 'anthropic-news', displayName: 'Anthropic News', extension: 'anthropic', extensionName: 'Anthropic', options: { section: 'news' }, preview: false },
+  { kind: 'custom', id: 'anthropic-engineering', displayName: 'Anthropic Engineering', extension: 'anthropic', extensionName: 'Anthropic', options: { section: 'engineering' }, preview: false },
+];
 
-type SourceSettings = Pick<AppSettings, 'userSources' | 'removedSources'> & Partial<Pick<AppSettings, 'sourceNames' | 'extensionNames'>>;
+/** Former custom source, migrated to a regular user-configured GitHub releases source. */
+export const LEGACY_COPILOT_CLI_SOURCE: UserSourceSpec = {
+  kind: 'github-releases',
+  id: 'copilot-cli',
+  displayName: 'Copilot CLI Releases',
+  repo: 'github/copilot-cli',
+  changelogPath: 'changelog.md',
+};
+
+const BUILTIN_IDS = new Set(BUILTIN_SOURCES.map((s) => s.id));
+const LEGACY_BUILTIN_IDS = new Set(LEGACY_BUILTIN_SOURCES.map((s) => s.id));
+const ALL_BUILTIN_IDS = new Set([...BUILTIN_IDS, ...LEGACY_BUILTIN_IDS]);
+
+type SourceSettings = Pick<AppSettings, 'userSources' | 'removedSources' | 'installedLegacySources'> & Partial<Pick<AppSettings, 'sourceNames' | 'extensionNames'>>;
 
 export const MAX_SOURCE_LABEL_LENGTH = 10;
 
 /** Built-ins the user kept, then the user's own sources. */
 export function activeSourceSpecs(settings: Partial<SourceSettings> = {}): SourceSpec[] {
   const removed = new Set(settings.removedSources ?? []);
-  const user = (settings.userSources ?? []).filter((s) => !BUILTIN_IDS.has(s.id));
-  return [...BUILTIN_SOURCES.filter((s) => !removed.has(s.id)), ...user];
+  const installedLegacy = new Set(settings.installedLegacySources ?? []);
+  const user = (settings.userSources ?? []).filter((s) => !ALL_BUILTIN_IDS.has(s.id));
+  return [
+    ...BUILTIN_SOURCES.filter((s) => !removed.has(s.id)),
+    ...LEGACY_BUILTIN_SOURCES.filter((s) => installedLegacy.has(s.id) && !removed.has(s.id)),
+    ...user,
+  ];
 }
 
 export function sourceInfo(
@@ -51,7 +82,7 @@ export function sourceInfo(
     displayName: sourceNames[spec.id] || spec.displayName,
     capabilities: { preview: spec.kind === 'custom' ? spec.preview !== false : true },
     kind: spec.kind,
-    builtin: BUILTIN_IDS.has(spec.id),
+    builtin: ALL_BUILTIN_IDS.has(spec.id),
     ...(extensionId ? { extensionId, extensionName } : {}),
     location: spec.kind === 'feed' ? spec.urls.join(' ') : spec.kind === 'github-releases' ? `github.com/${spec.repo}` : spec.kind === 'youtube' ? youtubeUrl(spec) : undefined,
     filter: sourceFilter(spec),
@@ -79,6 +110,8 @@ export interface NewSourceInput {
   include?: string;
   /** Include Shorts of a YouTube channel. */
   shorts?: boolean;
+  /** Optional relative path to a Markdown changelog in a GitHub repository. */
+  changelogPath?: string;
 }
 
 const GITHUB_REPO_URL = /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?(?:releases\/?)?$/i;
@@ -103,13 +136,18 @@ export function newUserSource(input: NewSourceInput, settings: Partial<SourceSet
   const repo = urls.length === 1 ? urls[0].match(GITHUB_REPO_URL)?.[1] : undefined;
   const defaultName = target ? youtubeName(target) : repo ? `${repo} releases` : new URL(urls[0]).hostname.replace(/^www\./, '');
   const displayName = input.name?.trim() || defaultName;
-  const taken = new Set([...BUILTIN_IDS, ...EXPERIMENTAL_SOURCE_INFOS.map((s) => s.id), ...(settings.userSources ?? []).map((s) => s.id)]);
+  const taken = new Set([...ALL_BUILTIN_IDS, ...EXPERIMENTAL_SOURCE_INFOS.map((s) => s.id), ...(settings.userSources ?? []).map((s) => s.id)]);
   const id = uniqueId(slugify(displayName) || 'source', taken);
 
   if (repo) {
     if (include) return { error: 'The keyword filter only works for feeds' };
-    return { spec: { kind: 'github-releases', id, displayName, repo } };
+    let changelogPath: string | undefined;
+    try { changelogPath = normalizeChangelogPath(input.changelogPath); } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+    return { spec: { kind: 'github-releases', id, displayName, repo, ...(changelogPath ? { changelogPath } : {}) } };
   }
+  if (input.changelogPath?.trim()) return { error: 'The changelog file path only applies to GitHub releases' };
   if (target) {
     const shorts = 'channel' in target && input.shorts ? { shorts: true } : {};
     return { spec: { kind: 'youtube', id, displayName, ...target, ...shorts, ...(include ? { include } : {}) } };
@@ -125,9 +163,9 @@ export function userSource(settings: Partial<SourceSettings>, id: SourceId): Use
 /** The editable fields of a user source, as `newUserSource` takes them. */
 export function sourceEditInput(spec: UserSourceSpec): Required<NewSourceInput> {
   switch (spec.kind) {
-    case 'feed': return { url: spec.urls.join(' '), name: spec.displayName, include: spec.include ?? '', shorts: false };
-    case 'github-releases': return { url: `https://github.com/${spec.repo}`, name: spec.displayName, include: '', shorts: false };
-    case 'youtube': return { url: youtubeUrl(spec), name: spec.displayName, include: spec.include ?? '', shorts: !!spec.shorts };
+    case 'feed': return { url: spec.urls.join(' '), name: spec.displayName, include: spec.include ?? '', shorts: false, changelogPath: '' };
+    case 'github-releases': return { url: `https://github.com/${spec.repo}`, name: spec.displayName, include: '', shorts: false, changelogPath: spec.changelogPath ?? '' };
+    case 'youtube': return { url: youtubeUrl(spec), name: spec.displayName, include: spec.include ?? '', shorts: !!spec.shorts, changelogPath: '' };
   }
 }
 
@@ -155,13 +193,15 @@ export interface SourceDraft {
   /** Feed URLs separated by spaces or new lines, a GitHub repository URL, or a YouTube channel or playlist URL. */
   url: string;
   include: string;
+  /** Optional relative Markdown changelog path for GitHub releases. */
+  changelogPath: string;
   /** Include Shorts; only applies to a YouTube channel. */
   shorts: boolean;
 }
 
 /** The name a built-in or experimental source ships with, and the extension it runs. */
 function sourceDefaults(id: SourceId): { name: string; extensionId?: string; extensionName?: string } {
-  const spec = BUILTIN_SOURCES.find((s) => s.id === id);
+  const spec = [...BUILTIN_SOURCES, ...LEGACY_BUILTIN_SOURCES].find((s) => s.id === id);
   if (spec?.kind === 'custom') {
     const extensionId = 'extension' in spec ? spec.extension : spec.module;
     return { name: spec.displayName, extensionId, extensionName: ('extensionName' in spec ? spec.extensionName : undefined) ?? extensionId };
@@ -184,7 +224,7 @@ export function sourceDraft(settings: Pick<AppSettings, 'disabledSources' | 'sou
     label: settings.sourceLabels[id] ?? '',
     color: settings.sourceColors?.[id] ?? '',
     ...(extensionId ? { extensionName: settings.extensionNames?.[extensionId] ?? extensionName ?? extensionId } : {}),
-    ...(own ? sourceEditInput(own) : { name: settings.sourceNames?.[id] ?? name, url: '', include: '', shorts: false }),
+    ...(own ? sourceEditInput(own) : { name: settings.sourceNames?.[id] ?? name, url: '', include: '', shorts: false, changelogPath: '' }),
   };
 }
 
@@ -214,7 +254,13 @@ export function sourceDraftPatch(settings: AppSettings, id: SourceId, draft: Sou
   const own = userSource(settings, id);
   const defaults = sourceDefaults(id);
   if (own) {
-    const edited = editUserSource(own, { url: draft.url, name: draft.name, include: isGithubRepoUrl(draft.url) ? undefined : draft.include, shorts: draft.shorts });
+    const edited = editUserSource(own, {
+      url: draft.url,
+      name: draft.name,
+      include: isGithubRepoUrl(draft.url) ? undefined : draft.include,
+      shorts: draft.shorts,
+      changelogPath: isGithubRepoUrl(draft.url) ? draft.changelogPath : undefined,
+    });
     if ('error' in edited) return edited;
     Object.assign(patch, updateSourcePatch(settings, edited.spec));
   } else {
@@ -260,7 +306,7 @@ export function removeSourcePatch(
   { keepName = false } = {},
 ): Partial<AppSettings> {
   const disabledSources = settings.disabledSources.filter((s) => s !== id);
-  if (BUILTIN_IDS.has(id)) {
+  if (ALL_BUILTIN_IDS.has(id)) {
     return { removedSources: [...new Set([...settings.removedSources, id])], disabledSources };
   }
   const spec = settings.userSources.find((s) => s.id === id);
@@ -282,7 +328,7 @@ export function retiredSources(
     .filter((id) => (bySource[id] ?? 0) > 0 && !active.has(id) && !isExperimentalSource(id))
     .sort()
     .map((id) => {
-      const builtin = BUILTIN_SOURCES.find((s) => s.id === id);
+      const builtin = [...BUILTIN_SOURCES, ...LEGACY_BUILTIN_SOURCES].find((s) => s.id === id);
       if (builtin) return { ...sourceInfo(builtin, settings.sourceNames, settings.extensionNames), removed: true };
       return { id, displayName: settings.sourceNames?.[id] ?? settings.sourceLabels?.[id] ?? id, capabilities: { preview: true }, kind: 'feed', builtin: false, removed: true };
     });
