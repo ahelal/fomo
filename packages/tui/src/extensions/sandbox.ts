@@ -37,7 +37,11 @@ async function runtimeImages(): Promise<string[]> {
       }
     }
     return [...paths];
-  })();
+  })().catch((error) => {
+    // One slow or failed probe must not disable every later launch in this process.
+    nodeImages = undefined;
+    throw error;
+  });
   return nodeImages;
 }
 
