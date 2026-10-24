@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { DEFAULT_COLOR, timeAgo, type AppSettings, type PreviewPosition, type SourceFetchResult, type StatsResponse } from '@fomo/core';
+import { DEFAULT_COLOR, timeAgo, type AppSettings, type PreviewPosition, type SourceFetchResult, type SourceKind, type StatsResponse } from '@fomo/core';
 import type { LocalConfig } from '../../config.js';
 import { EXPERIMENTAL_SETUPS, type ExperimentalSetups } from '../../experimental/index.js';
 import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
@@ -39,8 +39,25 @@ const PREVIEW_OPTIONS: PreviewPosition[] = ['right', 'bottom', 'off'];
 const BG = '#0d1117';
 const FOCUS_BG = '#1c2d4f';
 const NAME_W = 22;
+const STATUS_W = 10;
+const TYPE_W = 16;
+const LABEL_W = 14;
+const ITEMS_W = 7;
+const NEW_W = 7;
+const LAST_NEW_W = 12;
+
+const SOURCE_TYPE: Record<SourceKind, string> = {
+  feed: 'RSS/Atom',
+  'github-releases': 'GitHub releases',
+  youtube: 'YouTube',
+  custom: 'Custom',
+};
 
 const clip = (s: string, w: number) => (w <= 0 ? '' : s.length > w ? `${s.slice(0, Math.max(0, w - 1))}…` : s);
+export const fixedColumn = (value: string, width: number, align: 'left' | 'right' = 'left') => {
+  const clipped = value.length > width ? `${value.slice(0, Math.max(0, width - 1))}…` : value;
+  return align === 'right' ? clipped.padStart(width) : clipped.padEnd(width);
+};
 /** Keep the end of the text visible while typing. */
 const tail = (s: string, w: number) => (w <= 0 ? '' : s.length > w ? `…${s.slice(s.length - w + 1)}` : s);
 
@@ -91,6 +108,27 @@ export const SettingsPane = React.memo(function SettingsPane({
       );
     }
 
+    if (row.kind === 'source-columns') {
+      const bg = BG;
+      const heading = (text: string, width: number) => (
+        <Text color="#8b949e" backgroundColor={bg} bold>{text.padEnd(width)}</Text>
+      );
+      const prefix = ' '.repeat(2 + 2 + NAME_W);
+      return (
+        <Text key={row.key} wrap="truncate">
+          <Text backgroundColor={bg}>{prefix}</Text>
+          {heading('Status', STATUS_W)}
+          <Text backgroundColor={bg}>{'  '}</Text>
+          {heading('Type', TYPE_W)}
+          {heading('Label', LABEL_W)}
+          {heading('Items', ITEMS_W)}
+          {heading('New', NEW_W)}
+          {heading('Last new', LAST_NEW_W)}
+          {heading('Fetched', Math.max(0, restW - (STATUS_W + 2 + TYPE_W + LABEL_W + ITEMS_W + NEW_W + LAST_NEW_W)))}
+        </Text>
+      );
+    }
+
     const bg = isFocused ? FOCUS_BG : BG;
     const cursor = <Text color="#1c7cd6" backgroundColor={bg}>{isFocused ? '▸ ' : '  '}</Text>;
     const name = (label: string, color = '#f0f6fc') => (
@@ -112,19 +150,27 @@ export const SettingsPane = React.memo(function SettingsPane({
       );
     };
     /** A source's state, label, item count and last fetch. */
-    const sourceLine = (row: { key: string; source: { id: string; displayName: string } }, on: boolean, state: string, tag: string, tagColor: string) => {
+    const sourceLine = (
+      row: { key: string; source: { id: string; displayName: string; kind?: string } },
+      on: boolean,
+      state: string,
+      type: string,
+      tag: string,
+      tagColor: string,
+    ) => {
       const id = row.source.id;
-      const status = state.padEnd(10);
-      const label = clip(tag, 12).padEnd(14);
-      const count = `${stats?.bySource[id] ?? 0} items`.padEnd(11);
+      const status = fixedColumn(state, STATUS_W);
+      const sourceType = fixedColumn(type, TYPE_W);
+      const label = fixedColumn(tag, LABEL_W);
+      const count = fixedColumn(String(stats?.bySource[id] ?? 0), ITEMS_W);
       const result = lastFetch[id];
       const history = stats?.sourceStatus?.[id];
       const error = history ? history.lastError : result?.error;
-      const added = (result && !result.error ? `+${result.added} new` : '').padEnd(9);
-      const newest = (history?.lastAddedAt ? `last new ${timeAgo(history.lastAddedAt)}` : '').padEnd(17);
+      const added = fixedColumn(result && !result.error && result.added > 0 ? `+${result.added}` : '', NEW_W);
+      const newest = fixedColumn(history?.lastAddedAt ? timeAgo(history.lastAddedAt) : '', LAST_NEW_W);
       const fetchedAt = history?.lastFetchAt ? timeAgo(history.lastFetchAt) : '';
-      const fetched = error ? `⚠ ${fetchedAt ? `${fetchedAt}: ` : ''}${error}` : fetchedAt ? `✓ fetched ${fetchedAt}` : '';
-      const used = 37 + added.length + newest.length;
+      const fetched = error ? `⚠ ${fetchedAt ? `${fetchedAt}: ` : ''}${error}` : fetchedAt ? `✓ ${fetchedAt}` : '';
+      const used = STATUS_W + 2 + TYPE_W + LABEL_W + ITEMS_W + added.length + newest.length;
       const last = clip(fetched, Math.max(0, restW - used));
       return (
         <Text key={row.key} wrap="truncate">
@@ -133,6 +179,7 @@ export const SettingsPane = React.memo(function SettingsPane({
           {name(row.source.displayName, on ? '#f0f6fc' : '#8b949e')}
           <Text color={on ? '#3fb950' : '#f85149'} backgroundColor={bg}>{status}</Text>
           <Text color={settings.sourceColors?.[id] || DEFAULT_SOURCE_COLOR[id] || DEFAULT_COLOR} backgroundColor={bg}>{'■ '}</Text>
+          <Text color="#8b949e" backgroundColor={bg}>{sourceType}</Text>
           <Text color={tagColor} backgroundColor={bg}>{label}</Text>
           <Text color="#8b949e" backgroundColor={bg}>{count}</Text>
           <Text color="#3fb950" backgroundColor={bg}>{added}</Text>
@@ -153,7 +200,7 @@ export const SettingsPane = React.memo(function SettingsPane({
       if (confirmKey === `${row.key}:x`) {
         return asking(row.key, on, row.source.displayName, `press x again to delete its ${items} items · Esc cancel`);
       }
-      return sourceLine(row, on, on ? 'on' : 'off', 'experimental', '#d2a8ff');
+      return sourceLine(row, on, on ? 'on' : 'off', 'Experimental', '', '#d2a8ff');
     }
 
     if (row.kind === 'action') {
@@ -213,7 +260,14 @@ export const SettingsPane = React.memo(function SettingsPane({
           </Text>
         );
       }
-      return sourceLine(row, enabled, enabled ? 'enabled' : 'disabled', settings.sourceLabels[id] ?? '', '#58a6ff');
+      return sourceLine(
+        row,
+        enabled,
+        enabled ? 'enabled' : 'disabled',
+        SOURCE_TYPE[row.source.kind],
+        settings.sourceLabels[id] ?? '',
+        '#58a6ff',
+      );
     }
 
     if (row.kind === 'add-source' || row.kind === 'restore-sources') {

@@ -1565,7 +1565,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         if (d.confirm !== 'remove') { setSourceDetails({ ...d, confirm: 'remove' }); return; }
         setSourceDetails(undefined);
         removeSource(d.id, false);
-        setSettingsFocusIndex((i) => Math.max(0, i - 1));
+        setSettingsFocusIndex((i) => moveFocus(settingsRows, i, -1));
         return;
       }
       if ((input === 'd' || (removed && input === 'x')) && items > 0) {
@@ -1707,6 +1707,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         return;
       }
       if (!row) return;
+      if (row.kind === 'source-columns') return;
 
       // Sections stay open while searching
       if (settingsSearch && (row.kind === 'header' || key.leftArrow || key.rightArrow)) return;
@@ -1731,7 +1732,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         if (confirmKey === row.key && !row.source.removed && items > 0 && (input === 'x' || input === 'd')) {
           setConfirmKey(undefined);
           removeSource(sourceId, input === 'd');
-          setSettingsFocusIndex((i) => Math.max(0, i - 1));
+          setSettingsFocusIndex((i) => moveFocus(settingsRows, i, -1));
           return;
         }
         if (row.source.removed && !key.return && input !== 'v') {
@@ -1739,7 +1740,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
             if (confirmKey !== row.key) { setConfirmKey(row.key); return; }
             setConfirmKey(undefined);
             void deleteSourceItems(sourceId);
-            setSettingsFocusIndex((i) => Math.max(0, i - 1));
+            setSettingsFocusIndex((i) => moveFocus(settingsRows, i, -1));
             return;
           }
           setConfirmKey(undefined);
@@ -1787,7 +1788,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           if (confirmKey !== row.key) { setConfirmKey(row.key); return; }
           setConfirmKey(undefined);
           removeSource(sourceId, false);
-          setSettingsFocusIndex((i) => Math.max(0, i - 1));
+          setSettingsFocusIndex((i) => moveFocus(settingsRows, i, -1));
           return;
         }
         setConfirmKey(undefined);

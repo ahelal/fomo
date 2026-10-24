@@ -16,6 +16,7 @@ import type { GhAccount } from '../src/ghAccounts.js';
 import type { ExperimentalSetups } from '../src/experimental/index.js';
 import type { GroupingHistory } from '../src/groupingHistory.js';
 import { DEFAULT_SOURCE_COLOR } from '../src/ui/components/UpdatesTable.js';
+import { fixedColumn } from '../src/ui/components/SettingsPane.js';
 import { buildSettingsRows, configDisplay, editStartValue, findRow, firstFocusable, moveFocus, parseConfigEdit, settingsRowText } from '../src/ui/settings.js';
 
 /** The built-in sources the config screen lists with the default settings. */
@@ -440,6 +441,16 @@ describe('Config → sources', () => {
   afterEach(() => {
     delete (service as { updateSettings?: unknown }).updateSettings;
     delete (service as { fetch?: unknown }).fetch;
+  });
+
+  it('shows source types and fetch metrics in separate columns', async () => {
+    const { press, frame } = await renderApp();
+    await press('c');
+    expect(frame()).toContain('Type');
+    expect(frame()).toContain('RSS/Atom');
+    expect(frame()).toContain('Items');
+    expect(frame()).toContain('Last new');
+    expect(frame()).toContain('Fetched');
   });
 
   async function focusRow(press: (key: string) => Promise<void>, key: string) {
@@ -905,6 +916,13 @@ describe('/ search', () => {
 });
 
 describe('settings rows', () => {
+  it('keeps source metric columns fixed when values are empty, populated, or too wide', () => {
+    expect(fixedColumn('', 7)).toBe('       ');
+    expect(fixedColumn('667', 7)).toBe('667    ');
+    expect(fixedColumn('+4', 7)).toBe('+4     ');
+    expect(fixedColumn('12345678', 7)).toBe('123456…');
+  });
+
   it('filters rows and drops sections without matches', () => {
     const rows = buildSettingsRows([], new Set(['h-actions']), (r) => r.kind === 'config' && r.field === 'webUrl');
     expect(rows.map((r) => r.key)).toEqual(['h-local', 'c-webUrl']);
@@ -913,9 +931,10 @@ describe('settings rows', () => {
 
   it('leaves out the rows of collapsed sections', () => {
     const rows = buildSettingsRows([], new Set(['h-local', 'h-actions']));
-    expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'add-source', 'h-experimental', 'x-teams-meetings', 'h-display', 'preview', 'h-local']);
+    expect(rows.map((r) => r.key)).toEqual(['h-actions', 'h-sources', 'source-columns', 'add-source', 'h-experimental', 'x-teams-meetings', 'h-display', 'preview', 'h-local']);
     expect(rows[0]).toMatchObject({ collapsed: true, count: 6 });
-    expect(moveFocus(rows, 7, 10)).toBe(7);
+    expect(moveFocus(rows, 1, 1)).toBe(3);
+    expect(moveFocus(rows, 7, 10)).toBe(8);
     expect(moveFocus(rows, 1, -10)).toBe(0);
   });
 

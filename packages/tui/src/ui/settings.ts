@@ -26,6 +26,7 @@ export type ActionId = 'link' | 'webapp' | 'regroup' | 'backup' | 'restore' | 'p
 
 export type SettingsRow =
   | { kind: 'header'; key: string; label: string; collapsed: boolean; count: number }
+  | { kind: 'source-columns'; key: string }
   | { kind: 'action'; key: string; action: ActionId; label: string; hint: string }
   | { kind: 'source'; key: string; source: SourceInfo }
   | { kind: 'add-source'; key: string }
@@ -87,7 +88,7 @@ export function buildSettingsRows(
     ...retired.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source })),
     ...(removedSources > 0 ? [{ kind: 'restore-sources' as const, key: 'restore-sources', count: removedSources }] : []),
   ];
-  const section = (key: string, label: string, all: SettingsRow[]): SettingsRow[] => {
+  const section = (key: string, label: string, all: SettingsRow[], columnHeader?: SettingsRow): SettingsRow[] => {
     let rows = all;
     if (matches) {
       const header: SettingsRow = { kind: 'header', key, label, collapsed: false, count: all.length };
@@ -95,11 +96,14 @@ export function buildSettingsRows(
       if (rows.length === 0) return [];
     }
     const folded = !matches && collapsed.has(key);
-    return [{ kind: 'header', key, label, collapsed: folded, count: rows.length }, ...(folded ? [] : rows)];
+    return [
+      { kind: 'header', key, label, collapsed: folded, count: rows.length },
+      ...(folded ? [] : [...(columnHeader ? [columnHeader] : []), ...rows]),
+    ];
   };
   return [
     ...section('h-actions', 'Actions', ACTIONS.map((a) => ({ kind: 'action' as const, key: `a-${a.action}`, ...a }))),
-    ...section('h-sources', 'Sources · shared with the web app', sourceRows),
+    ...section('h-sources', 'Sources · shared with the web app', sourceRows, { kind: 'source-columns', key: 'source-columns' }),
     ...section('h-experimental', 'Experimental sources · this computer', EXPERIMENTAL_SOURCE_INFOS.map((source) => ({ kind: 'experimental' as const, key: `x-${source.id}`, source }))),
     ...section('h-display', 'Display · shared with the web app', [{ kind: 'preview', key: 'preview' }]),
     ...section('h-local', `This computer${profile ? ` · profile ${profile}` : ''} · ${tildify(CONFIG_FILE)}`, CONFIG_FIELDS.map((f) => ({ kind: 'config' as const, key: `c-${f.field}`, ...f }))),
@@ -108,12 +112,17 @@ export function buildSettingsRows(
 
 /** The first row that is not a section header (or the first header when every section is collapsed). */
 export function firstFocusable(rows: SettingsRow[]): number {
-  return Math.max(0, rows.findIndex((r) => r.kind !== 'header'));
+  return Math.max(0, rows.findIndex((r) => r.kind !== 'header' && r.kind !== 'source-columns'));
 }
 
 /** Move the focus by `delta` rows (headers included, so sections can be collapsed), staying in range. */
 export function moveFocus(rows: SettingsRow[], index: number, delta: number): number {
-  return Math.max(0, Math.min(rows.length - 1, index + delta));
+  const direction = Math.sign(delta);
+  let next = Math.max(0, Math.min(rows.length - 1, index + delta));
+  while (direction && rows[next]?.kind === 'source-columns') {
+    next = Math.max(0, Math.min(rows.length - 1, next + direction));
+  }
+  return next;
 }
 
 /** Index of the header of the section `index` is in. */
@@ -276,6 +285,7 @@ export function settingsRowText(
 ): string {
   switch (row.kind) {
     case 'header': return row.label;
+    case 'source-columns': return '';
     case 'action': return `${row.label} ${row.hint}`;
     case 'source': return `${row.source.displayName} ${row.source.id} ${sourceLabel(row.source.id)} ${row.source.kind} ${row.source.location ?? ''}`;
     case 'add-source': return 'Add source feed rss atom github releases youtube';
