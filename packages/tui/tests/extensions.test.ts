@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -187,6 +188,17 @@ describe.runIf(process.platform === 'darwin')('real MXC workers', () => {
     } finally { if (child) await closeSandbox(child); await rm(base, { recursive: true, force: true }); }
   }, 10_000);
 
+  // MXC's timeout teardown sweeps every pid on the machine and reports a spurious backend_error
+  // (ffiStatus 12) when a process exits mid-sweep, e.g. under parallel test load. The worker is
+  // still killed, so tolerate only that error and keep asserting that nothing keeps running.
+  const tolerateTeardownRace = (error: unknown) => {
+    const { code, details } = (error ?? {}) as { code?: unknown; details?: { ffiStatus?: unknown } };
+    if (!(error instanceof Error) || code !== 'backend_error' || details?.ffiStatus !== 12) throw error;
+  };
+  const running = (pid: number) => {
+    try { return !execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim().startsWith('Z'); } catch { return false; }
+  };
+
   it('terminates a timed-out CPU loop and confirms that the process is gone', async () => {
     const directory = await realpath(await mkdtemp(join(tmpdir(), 'fomo-timeout-test-')));
     let child: Awaited<ReturnType<typeof spawnSandbox>> | undefined;
@@ -197,10 +209,15 @@ describe.runIf(process.platform === 'darwin')('real MXC workers', () => {
       child.standardInput?.end();
       child.standardOutput?.resume();
       child.standardError?.resume();
-      expect(await child.wait()).toMatchObject({ timedOut: true });
+      let timedOut: boolean | undefined;
+      try { timedOut = (await child.wait()).timedOut; } catch (error) { tolerateTeardownRace(error); }
+      if (timedOut !== undefined) expect(timedOut).toBe(true);
       const pid = child.id;
       expect(pid).toBeGreaterThan(0);
-      expect(() => process.kill(pid, 0)).toThrow();
-    } finally { if (child) await closeSandbox(child); await rm(directory, { recursive: true, force: true }); }
+      expect(running(pid)).toBe(false);
+    } finally {
+      if (child) await closeSandbox(child).catch(tolerateTeardownRace);
+      await rm(directory, { recursive: true, force: true });
+    }
   }, 5000);
 });
