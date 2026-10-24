@@ -171,8 +171,8 @@ const SETTINGS_KEYS: [string, string][] = [
   ['s',    'In source details: save the changes'],
   ['d',    'In source details: delete its stored items (d again to confirm)'],
   ['↵',    'On “Add source”: add an RSS/Atom feed, GitHub repo or YouTube channel'],
-  ['↵',    'On an experimental source: turn it on (↵ again to sign in) or off'],
-  ['l',    'On an experimental source: sign in again'],
+  ['space','On an experimental source: turn it on (space again signs in) or off; while it signs in or fetches, space twice cancels'],
+  ['l',    'On an experimental source (or its details): sign in again'],
   ['o',    'Open the web app in the browser (web app rows)'],
   ['/',    'Search rows (a matching section header keeps its rows)'],
   ['Esc/⌫','Cancel / close config'],
@@ -262,7 +262,7 @@ export function HelpOverlay({ context, height, columns, search = '', searchTypin
             <Text color="#58a6ff" bold>{section.title}</Text>
           </Box>
           {section.keys.map(([key, label]) => (
-            <Box key={key} paddingX={6}>
+            <Box key={`${key} ${label}`} paddingX={6}>
               <Text color="#58a6ff" bold>{key.padEnd(KEY_W)}</Text>
               <Text color="#c9d1d9">{label}</Text>
             </Box>

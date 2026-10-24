@@ -12,4 +12,9 @@ describe('source details fields', () => {
     expect(detailsFields(true, draft('https://github.com/o/r'))).toEqual(['enabled', 'label', 'color', 'name', 'url']);
     expect(detailsFields(false, draft(''))).toEqual(['enabled', 'label', 'color', 'name']);
   });
+
+  it('offers a separate editable extension name when the source has an extension identity', () => {
+    expect(detailsFields(false, { ...draft(''), extensionName: 'Anthropic' }))
+      .toEqual(['enabled', 'label', 'color', 'name', 'extensionName']);
+  });
 });

@@ -67,6 +67,13 @@ export const SECTION_KEYS = ['h-actions', 'h-sources', 'h-experimental', 'h-disp
 /** Whether this profile turned an experimental source on. */
 export const experimentalOn = (config: LocalConfig, id: string): boolean => !!config.experimentalSources?.includes(id);
 
+/** What the running fetch covers: every source that is on (`all`), or only these. */
+export type FetchScope = 'all' | readonly string[];
+
+/** Whether the running fetch covers this source; `on` tells whether a fetch of every source includes it. */
+export const fetchCovers = (scope: FetchScope | undefined, id: string, on: boolean): boolean =>
+  scope === 'all' ? on : !!scope?.includes(id);
+
 /**
  * Config screen rows; rows of the sections in `collapsed` (header keys) are left out.
  * With `matches`, only matching rows are kept (all of a section whose title matches), sections without
@@ -81,6 +88,8 @@ export function buildSettingsRows(
   retired: SourceInfo[] = [],
   /** Profile in use; named in the local section's title when given (only when there is more than one). */
   profile?: string,
+  /** The experimental sources, with the names the user gave them. */
+  experimental: readonly SourceInfo[] = EXPERIMENTAL_SOURCE_INFOS,
 ): SettingsRow[] {
   const sourceRows: SettingsRow[] = [
     ...sources.map((source) => ({ kind: 'source' as const, key: `s-${source.id}`, source })),
@@ -104,7 +113,7 @@ export function buildSettingsRows(
   return [
     ...section('h-actions', 'Actions', ACTIONS.map((a) => ({ kind: 'action' as const, key: `a-${a.action}`, ...a }))),
     ...section('h-sources', 'Sources · shared with the web app', sourceRows, { kind: 'source-columns', key: 'source-columns' }),
-    ...section('h-experimental', 'Experimental sources · this computer', EXPERIMENTAL_SOURCE_INFOS.map((source) => ({ kind: 'experimental' as const, key: `x-${source.id}`, source }))),
+    ...section('h-experimental', 'Experimental sources · this computer', experimental.map((source) => ({ kind: 'experimental' as const, key: `x-${source.id}`, source }))),
     ...section('h-display', 'Display · shared with the web app', [{ kind: 'preview', key: 'preview' }]),
     ...section('h-local', `This computer${profile ? ` · profile ${profile}` : ''} · ${tildify(CONFIG_FILE)}`, CONFIG_FIELDS.map((f) => ({ kind: 'config' as const, key: `c-${f.field}`, ...f }))),
   ];
@@ -290,7 +299,7 @@ export function settingsRowText(
     case 'source': return `${row.source.displayName} ${row.source.id} ${sourceLabel(row.source.id)} ${row.source.kind} ${row.source.location ?? ''}`;
     case 'add-source': return 'Add source feed rss atom github releases youtube';
     case 'restore-sources': return 'Restore removed sources';
-    case 'experimental': return `${row.source.displayName} ${row.source.id} experimental ${row.source.location ?? ''} ${experimentalOn(config, row.source.id) ? 'on' : 'off'}`;
+    case 'experimental': return `${row.source.displayName} ${row.source.id} ${sourceLabel(row.source.id)} experimental ${row.source.extensionName ?? ''} ${row.source.location ?? ''} ${experimentalOn(config, row.source.id) ? 'on' : 'off'}`;
     case 'preview': return 'Preview position right bottom off';
     case 'config': return `${row.label} ${row.field} ${configDisplay(config, row.field, file, profile).value}`;
   }
@@ -308,7 +317,7 @@ export function rowHint(row: SettingsRow | undefined): string {
       : '↵ details & edit   space on/off   e label (max 10)   d color   f fetch now   v show its updates   x remove';
     case 'add-source': return '↵ add an RSS/Atom feed, a GitHub repository or a YouTube channel';
     case 'restore-sources': return '↵ bring back the removed built-in sources';
-    case 'experimental': return '↵ on/off (on asks to sign in)   l sign in again   f fetch now   v show its updates   x delete its items';
+    case 'experimental': return '↵ details & edit   space on/off (on signs in; space twice cancels a sign-in)   e label (max 10)   d color   l sign in again   f fetch now   v show its updates   x delete its items';
     case 'preview': return '↵ cycle';
     case 'config':
       if (isToggleField(row.field)) return '↵ toggle';

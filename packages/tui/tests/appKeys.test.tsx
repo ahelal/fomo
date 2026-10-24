@@ -54,11 +54,25 @@ afterEach(() => {
 
 interface RenderOptions {
   config?: LocalConfig;
+  /** Keep the config in state, so a change shows like it does in Root (the mock alone leaves it as it was). */
+  liveConfig?: boolean;
   listAccounts?: () => Promise<GhAccount[]>;
   experimental?: ExperimentalSetups;
   service?: FomoDirectService;
   refineGrouping?: (current: string, feedback: string, inspection?: DigestInspection) => Promise<string>;
   groupingHistory?: GroupingHistory;
+}
+
+type AppProps = React.ComponentProps<typeof App>;
+
+function LiveConfigApp({ config: initial, onConfigChange, ...props }: AppProps) {
+  const [config, setConfig] = React.useState(initial);
+  const change = (patch: Partial<LocalConfig>) => {
+    const err = onConfigChange(patch);
+    if (!err) setConfig((c) => ({ ...c, ...patch }));
+    return err;
+  };
+  return <App {...props} config={config} onConfigChange={change} />;
 }
 
 async function renderApp(digestRun: (progress: (message: string) => void, options?: DigestRunOptions) => Promise<DigestResult> = async () => result, options: RenderOptions = {}) {
@@ -70,20 +84,21 @@ async function renderApp(digestRun: (progress: (message: string) => void, option
   const stdout = new PassThrough();
   let frame = '';
   stdout.on('data', (chunk: Buffer) => { frame = chunk.toString(); });
+  const props: AppProps = {
+    service: options.service ?? service,
+    config: options.config ?? {},
+    onConfigChange,
+    digest,
+    refineGrouping: options.refineGrouping,
+    groupingHistory: options.groupingHistory,
+    audit,
+    auditFile: '/tmp/audit.log',
+    listAccounts: options.listAccounts,
+    experimental: options.experimental,
+  };
   await act(async () => {
     const instance = render(
-      <App
-        service={options.service ?? service}
-        config={options.config ?? {}}
-        onConfigChange={onConfigChange}
-        digest={digest}
-        refineGrouping={options.refineGrouping}
-        groupingHistory={options.groupingHistory}
-        audit={audit}
-        auditFile="/tmp/audit.log"
-        listAccounts={options.listAccounts}
-        experimental={options.experimental}
-      />,
+      options.liveConfig ? <LiveConfigApp {...props} /> : <App {...props} />,
       {
         stdout: stdout as unknown as NodeJS.WriteStream,
         stdin: stdin as unknown as NodeJS.ReadStream,
@@ -790,7 +805,8 @@ describe('experimental source row', () => {
   function setup(signIn: ExperimentalSetups[string]['signIn'] = async () => ({ ok: true, output: 'Signed in' })) {
     const setups: ExperimentalSetups = {
       [ID]: {
-        consent: 'agree to the test terms',
+        isolation: 'unsandboxed',
+        consent: 'UNSANDBOXED host filesystem/network access; read-only meeting lookup',
         signIn: vi.fn(signIn),
         provider: () => ({ id: ID, fetch: async () => [] }),
       },
@@ -800,7 +816,12 @@ describe('experimental source row', () => {
       getStats: async () => ({ total: 3, byStatus: { unread: 3, read: 0 }, bySource: { [ID]: 3 }, saved: 0 }),
       fetch: vi.fn(async () => ({ added: 2, results: { [ID]: { added: 2 } } })),
       deleteSourceUpdates: vi.fn(async () => 3),
-    } as unknown as FomoDirectService & { fetch: ReturnType<typeof vi.fn>; deleteSourceUpdates: ReturnType<typeof vi.fn> };
+      updateSettings: vi.fn(async (patch: object) => ({ ...DEFAULT_SETTINGS, ...patch })),
+    } as unknown as FomoDirectService & {
+      fetch: ReturnType<typeof vi.fn>;
+      deleteSourceUpdates: ReturnType<typeof vi.fn>;
+      updateSettings: ReturnType<typeof vi.fn>;
+    };
     return { setups, signIn: setups[ID]!.signIn as ReturnType<typeof vi.fn>, svc };
   }
   async function openRow(options: RenderOptions) {
@@ -813,13 +834,13 @@ describe('experimental source row', () => {
     return app;
   }
 
-  it('asks first, then signs in, turns it on and fetches it', async () => {
+  it('space asks first, then signs in, turns it on and fetches it', async () => {
     const { setups, signIn, svc } = setup();
     const { press, frame, onConfigChange } = await openRow({ experimental: setups, service: svc });
-    await press('\r');
-    expect(frame()).toContain('↵ again to agree to the test terms');
+    await press(' ');
+    expect(frame()).toContain('space again to UNSANDBOXED host filesystem/network access');
     expect(signIn).not.toHaveBeenCalled();
-    await press('\r');
+    await press(' ');
     await vi.waitFor(() => expect(svc.fetch).toHaveBeenCalledWith({ sources: [ID] }));
     expect(signIn).toHaveBeenCalledTimes(1);
     expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [ID] });
@@ -828,8 +849,8 @@ describe('experimental source row', () => {
   it('stays off when signing in fails', async () => {
     const { setups, svc } = setup(async () => ({ ok: false, output: 'WorkIQ sign-in failed: cancelled' }));
     const { press, frame, onConfigChange, audit } = await openRow({ experimental: setups, service: svc });
-    await press('\r');
-    await press('\r');
+    await press(' ');
+    await press(' ');
     await vi.waitFor(() => expect(frame()).toContain('cancelled · Teams meetings stays off'));
     expect(onConfigChange).not.toHaveBeenCalled();
     expect(svc.fetch).not.toHaveBeenCalled();
@@ -840,11 +861,11 @@ describe('experimental source row', () => {
     const { setups, svc } = setup();
     const { press, frame } = await openRow({ experimental: setups, service: svc });
     await press('f');
-    expect(frame()).toContain('Teams meetings is off · ↵ turns it on');
+    expect(frame()).toContain('Teams meetings is off · space turns it on');
     expect(svc.fetch).not.toHaveBeenCalled();
   });
 
-  it('when on: f fetches it, l signs in again, ↵ turns it off without asking', async () => {
+  it('when on: f fetches it, l signs in again, space turns it off without asking', async () => {
     const { setups, signIn, svc } = setup();
     const { press, frame, onConfigChange } = await openRow({ experimental: setups, service: svc, config: { experimentalSources: [ID] } });
     await press('f');
@@ -853,7 +874,7 @@ describe('experimental source row', () => {
     await vi.waitFor(() => expect(frame()).toContain('✓ Signed in for Teams meetings'));
     expect(signIn).toHaveBeenCalledTimes(1);
     expect(onConfigChange).not.toHaveBeenCalled();
-    await press('\r');
+    await press(' ');
     expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [] });
     expect(frame()).toContain('its 3 items stay (x deletes them)');
   });
@@ -867,6 +888,188 @@ describe('experimental source row', () => {
     await press('x');
     await vi.waitFor(() => expect(svc.deleteSourceUpdates).toHaveBeenCalledWith(ID));
     await vi.waitFor(() => expect(frame()).toContain('✓ Deleted 3 items of Teams meetings · f fetches them again'));
+  });
+
+  it('e edits its label inline, capped at 10 characters', async () => {
+    const { setups, svc } = setup();
+    const { press } = await openRow({ experimental: setups, service: svc });
+    await press('e');
+    await press('Meetings and more');
+    await press('\r');
+    await vi.waitFor(() => expect(svc.updateSettings).toHaveBeenCalledWith({ sourceLabels: { [ID]: 'Meetings a' } }));
+  });
+
+  it('d picks its color', async () => {
+    const { setups, svc } = setup();
+    const start = DEFAULT_SOURCE_COLOR[ID] ?? DEFAULT_COLOR;
+    const next = COLOR_PALETTE[moveInGrid(paletteIndex(start), 'right')]!;
+    const { press, frame } = await openRow({ experimental: setups, service: svc });
+    await press('d');
+    expect(frame()).toContain('Pick a color · ');
+    await press('\u001B[C');
+    await press('\r');
+    await vi.waitFor(() => expect(svc.updateSettings).toHaveBeenCalledWith({ sourceColors: { [ID]: next } }));
+  });
+
+  it('↵ opens its details with the same fields as a source, without remove', async () => {
+    const { setups, svc } = setup();
+    const { press, frame } = await openRow({ experimental: setups, service: svc });
+    await press('\r');
+    for (const text of ['UNSANDBOXED · host access', 'UNSANDBOXED: WorkIQ has host filesystem/network access', 'Enabled', 'Label', 'Color', 'Name', 'Extension name', 'l sign in again', 's save']) {
+      expect(frame()).toContain(text);
+    }
+    expect(frame()).not.toContain('x remove');
+    await press('x');
+    expect(frame()).not.toContain('press x again to remove');
+  });
+
+  it('labels host-executed experimental sources as unsandboxed and states the consent', async () => {
+    const { setups, svc } = setup();
+    const { press, frame } = await openRow({ experimental: setups, service: svc });
+    expect(frame()).toContain('UNSANDBOXED');
+    await press(' ');
+    expect(frame()).toContain('space again to UNSANDBOXED host filesystem/network access');
+  });
+
+  it('renames it in its details without turning it on', async () => {
+    const { setups, signIn, svc } = setup();
+    const { press, frame, onConfigChange } = await openRow({ experimental: setups, service: svc });
+    await press('\r');
+    for (let i = 0; i < 3; i++) await press('j');
+    await press('\r');
+    for (let i = 0; i < 'Teams meetings'.length; i++) await press('\x7f');
+    await press('Calls');
+    await press('\r');
+    await press('s');
+    await vi.waitFor(() => expect(svc.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ sourceNames: { [ID]: 'Calls' } })));
+    expect(svc.updateSettings.mock.calls[0]![0]).not.toHaveProperty('disabledSources');
+    expect(signIn).not.toHaveBeenCalled();
+    expect(onConfigChange).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(frame()).toContain('Calls'));
+  });
+
+  it('turning it on in its details asks for a second s, then signs in', async () => {
+    const { setups, signIn, svc } = setup();
+    const { press, frame, onConfigChange } = await openRow({ experimental: setups, service: svc });
+    await press('\r');
+    await press('\r');
+    await press('s');
+    expect(frame()).toContain('press s again to UNSANDBOXED host filesystem/network access');
+    expect(signIn).not.toHaveBeenCalled();
+    await press('s');
+    await vi.waitFor(() => expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [ID] }));
+    expect(signIn).toHaveBeenCalledTimes(1);
+    expect(svc.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('turning it off in its details needs no sign-in', async () => {
+    const { setups, signIn, svc } = setup();
+    const { press, onConfigChange } = await openRow({ experimental: setups, service: svc, config: { experimentalSources: [ID] } });
+    await press('\r');
+    await press('\r');
+    await press('s');
+    expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [] });
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  /** A sign-in that runs until the test finishes it, and the signal that cancels it. */
+  function pendingSignIn() {
+    const run: { signal?: AbortSignal; finish: (r: { ok: boolean; output: string }) => void } = { finish: () => {} };
+    const signIn: ExperimentalSetups[string]['signIn'] = (_onLine, signal) => new Promise((resolve) => {
+      run.signal = signal;
+      run.finish = resolve;
+    });
+    return { run, signIn };
+  }
+
+  it('shows a running sign-in, and space twice cancels it and leaves it off', async () => {
+    const { run, signIn: slow } = pendingSignIn();
+    const { setups, signIn, svc } = setup(slow);
+    const { press, frame, onConfigChange, audit } = await openRow({ experimental: setups, service: svc });
+    await press(' ');
+    await press(' ');
+    await vi.waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
+    expect(frame()).toContain('sign-in…');
+    expect(frame()).toContain('⟳ signing in — check your browser or account picker');
+    await press(' ');
+    expect(frame()).toContain('still signing in — space again to cancel the sign-in');
+    await press('\u001B');
+    expect(frame()).not.toContain('still signing in');
+    expect(run.signal?.aborted).toBe(false);
+    await press(' ');
+    await press(' ');
+    expect(run.signal?.aborted).toBe(true);
+    await act(async () => run.finish({ ok: false, output: 'WorkIQ sign-in failed: aborted' }));
+    await vi.waitFor(() => expect(frame()).toContain('Sign-in cancelled · Teams meetings stays off'));
+    expect(frame()).not.toContain('sign-in…');
+    expect(onConfigChange).not.toHaveBeenCalled();
+    expect(svc.fetch).not.toHaveBeenCalled();
+    expect(audit.recent().some((e) => e.detail?.includes('sign-in cancelled'))).toBe(true);
+    expect(audit.recent().some((e) => e.level === 'error')).toBe(false);
+  });
+
+  it('a space pressed while signing in cannot turn it off once it is on', async () => {
+    const { run, signIn } = pendingSignIn();
+    const { setups, svc } = setup(signIn);
+    let fetched: (r: unknown) => void = () => {};
+    svc.fetch.mockImplementation(() => new Promise((resolve) => { fetched = resolve; }));
+    const { press, frame, onConfigChange } = await openRow({ experimental: setups, service: svc, liveConfig: true });
+    await press(' ');
+    await press(' ');
+    await press(' ');
+    expect(frame()).toContain('still signing in — space again to cancel the sign-in');
+    await act(async () => run.finish({ ok: true, output: 'Signed in' }));
+    await vi.waitFor(() => expect(svc.fetch).toHaveBeenCalledWith({ sources: [ID] }));
+    expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [ID] });
+    expect(run.signal?.aborted).toBe(false);
+    expect(frame()).not.toContain('still signing in');
+    expect(frame()).toContain('⟳ fetching…');
+    await press(' ');
+    expect(frame()).toContain('fetching now — space again to stop it and turn the source off');
+    expect(onConfigChange).toHaveBeenCalledTimes(1);
+    await press('\u001B');
+    await act(async () => fetched({ added: 1, results: { [ID]: { fetched: 1, added: 1 } } }));
+    await vi.waitFor(() => expect(frame()).toContain('✓ Added 1 update'));
+    expect(frame()).not.toContain('⟳ fetching…');
+    expect(onConfigChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('space twice while it fetches turns it off, and the stopped fetch is not a failure', async () => {
+    const { setups, svc } = setup();
+    let fetched: (r: unknown) => void = () => {};
+    svc.fetch.mockImplementation(() => new Promise((resolve) => { fetched = resolve; }));
+    const { press, frame, onConfigChange, digest, audit } = await openRow({ experimental: setups, service: svc, config: { experimentalSources: [ID] }, liveConfig: true });
+    await press('f');
+    await vi.waitFor(() => expect(frame()).toContain('⟳ fetching…'));
+    await press(' ');
+    expect(frame()).toContain('fetching now — space again to stop it and turn the source off');
+    expect(onConfigChange).not.toHaveBeenCalled();
+    await press(' ');
+    expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [] });
+    expect(frame()).toContain('Teams meetings off · its fetch was stopped');
+    expect(frame()).not.toContain('⟳ fetching…');
+    await act(async () => fetched({ added: 0, results: { [ID]: { fetched: 0, added: 0, stopped: true } } }));
+    await vi.waitFor(() => expect(audit.recent().some((e) => e.detail?.includes('stopped (turned off during the fetch)'))).toBe(true));
+    expect(frame()).not.toContain('failed');
+    expect(digest).not.toHaveBeenCalled();
+    expect(audit.recent().some((e) => e.level === 'error')).toBe(false);
+  });
+
+  it('a details pane opened while signing in shows it on once signed in, so saving keeps it on', async () => {
+    const { run, signIn } = pendingSignIn();
+    const { setups, svc } = setup(signIn);
+    const { press, frame, onConfigChange } = await openRow({ experimental: setups, service: svc, liveConfig: true });
+    await press(' ');
+    await press(' ');
+    await press('\r');
+    expect(frame()).toContain('⟳ signing in — check your browser or account picker');
+    expect(frame()).toContain('[ ] off');
+    await act(async () => run.finish({ ok: true, output: 'Signed in' }));
+    await vi.waitFor(() => expect(frame()).toContain('[x] on'));
+    expect(frame()).not.toContain('● unsaved');
+    await press('s');
+    expect(onConfigChange).toHaveBeenCalledTimes(1);
+    expect(onConfigChange).toHaveBeenCalledWith({ experimentalSources: [ID] });
   });
 });
 

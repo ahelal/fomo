@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TopicSort, UpdateSort } from '@fomo/core';
-import { DEFAULT_SETTINGS, MAX_SOURCE_LABEL_LENGTH, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, isExperimentalSource } from '@fomo/core';
+import { DEFAULT_SETTINGS, MAX_SOURCE_LABEL_LENGTH, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatDate, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, experimentalSourceInfos, isExperimentalSource, type SourceDraft } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult, DigestInspection } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, readConfigFile, tildify, type LocalConfig } from '../config.js';
@@ -14,7 +14,7 @@ import { openTodoAttachment } from '../attachments.js';
 import { EXPERIMENTAL_SETUPS, type ExperimentalSetups } from '../experimental/index.js';
 import { AuditView } from './components/AuditView.js';
 import { GroupingInspector, groupingLines, inspectionText } from './components/GroupingInspector.js';
-import { automaticAccount, buildSettingsRows, editStartValue, experimentalOn, findRow, firstFocusable, isPickerField, isSecretField, isToggleField, maskSetting, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type SettingsRow } from './settings.js';
+import { automaticAccount, buildSettingsRows, editStartValue, experimentalOn, fetchCovers, findRow, firstFocusable, isPickerField, isSecretField, isToggleField, maskSetting, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type FetchScope, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
 import { ProfilePicker } from './components/ProfilePicker.js';
@@ -31,7 +31,7 @@ import { DetailPane } from './components/DetailPane.js';
 import { TopicPane } from './components/TopicPane.js';
 import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { FilterBar } from './components/FilterBar.js';
-import { SettingsPane, PREVIEW_OPTIONS } from './components/SettingsPane.js';
+import { SettingsPane, PREVIEW_OPTIONS, FETCHING_NOTE, SIGNING_IN_NOTE } from './components/SettingsPane.js';
 import { TodosView } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
 import { ColorPicker } from './components/ColorPicker.js';
@@ -159,6 +159,10 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   const [settingsFocusIndex, setSettingsFocusIndex] = useState(0);
   const [appSettings, setAppSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
   const sources = useMemo<SourceInfo[]>(() => sourceInfos(appSettings), [appSettings]);
+  const experimentalInfos = useMemo<SourceInfo[]>(
+    () => experimentalSourceInfos(appSettings),
+    [appSettings.sourceNames, appSettings.extensionNames],
+  );
   const sourceLabels = useMemo(
     () => ({ ...appSettings.sourceNames, ...appSettings.sourceLabels }),
     [appSettings.sourceNames, appSettings.sourceLabels],
@@ -179,8 +183,8 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       const text = settingsRowText(row, config, configFile, profile, (id) => sourceLabels[id] ?? '').toLowerCase();
       return terms.every((t) => text.includes(t));
     };
-    return buildSettingsRows(sources, collapsedSections, matches, removedCount, retired, shownProfile);
-  }, [sources, collapsedSections, settingsSearch, config, configFile, profile, shownProfile, sourceLabels, removedCount, retired]);
+    return buildSettingsRows(sources, collapsedSections, matches, removedCount, retired, shownProfile, experimentalInfos);
+  }, [sources, collapsedSections, settingsSearch, config, configFile, profile, shownProfile, sourceLabels, removedCount, retired, experimentalInfos]);
 
   /** Collapse or expand a config section; the focus stays on its header. */
   const setSectionCollapsed = useCallback((header: string, collapsed: boolean) => {
@@ -212,11 +216,35 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   const [addDraft, setAddDraft] = useState<AddSourceDraft | undefined>();
   /** Details popup of a source (↵ on a source in the config). */
   const [sourceDetails, setSourceDetails] = useState<SourceDetailsState | undefined>();
-  const detailsSource = sourceDetails && (sources.find((s) => s.id === sourceDetails.id) ?? retired.find((s) => s.id === sourceDetails.id));
-  const detailsChanged = !!sourceDetails && JSON.stringify(sourceDetails.draft) !== JSON.stringify(sourceDraft(appSettings, sourceDetails.id));
+  const detailsSource = sourceDetails && (
+    sources.find((s) => s.id === sourceDetails.id)
+    ?? retired.find((s) => s.id === sourceDetails.id)
+    ?? experimentalInfos.find((s) => s.id === sourceDetails.id)
+  );
+  /** The saved values of a source; an experimental one is on or off per profile on this computer. */
+  const savedDraft = (id: string): SourceDraft => {
+    const draft = sourceDraft(appSettings, id);
+    return isExperimentalSource(id) ? { ...draft, enabled: experimentalOn(config, id) } : draft;
+  };
+  const detailsChanged = !!sourceDetails && JSON.stringify(sourceDetails.draft) !== JSON.stringify(savedDraft(sourceDetails.id));
   const [lastFetch, setLastFetch] = useState<Record<string, SourceFetchResult>>({});
   /** When the last fetch (manual or automatic) finished. */
   const [lastFetchAt, setLastFetchAt] = useState<number | undefined>();
+  /** The sources the running fetch covers, until its items are stored (not while Copilot groups them). */
+  const [fetching, setFetching] = useState<FetchScope | undefined>();
+  /** The experimental source being signed in to; `signInAbort` cancels it. */
+  const [signingIn, setSigningIn] = useState<string | undefined>();
+  const signInAbort = useRef<AbortController | undefined>(undefined);
+  /** Whether the running fetch covers this experimental source (it is on). */
+  const fetchingExperimental = useCallback(
+    (id: string) => experimentalOn(config, id) && fetchCovers(fetching, id, !appSettings.disabledSources.includes(id)),
+    [config, fetching, appSettings.disabledSources],
+  );
+  /** What runs for a source right now, as the config screen shows it. */
+  const pendingNote = (id: string): string | undefined =>
+    signingIn === id ? SIGNING_IN_NOTE
+    : (isExperimentalSource(id) ? fetchingExperimental(id) : fetchCovers(fetching, id, !appSettings.disabledSources.includes(id))) ? FETCHING_NOTE
+    : undefined;
   const [linkView, setLinkView] = useState<LinkView | undefined>();
   const [restoreFiles, setRestoreFiles] = useState<BackupFile[] | undefined>();
   const [restoreIndex, setRestoreIndex] = useState(0);
@@ -527,23 +555,36 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     }
     try {
       let resp: Awaited<ReturnType<typeof service.fetch>>;
+      setFetching(only ?? 'all');
       try {
         resp = await service.fetch(only ? { sources: only } : {});
       } catch (err) {
         audit.error(action, `${what}: ${errorText(err)}`);
         showMessage(`${auto ? 'Auto-fetch' : 'Fetch'} error: ${errorText(err)}`, 8000);
         return;
+      } finally {
+        setFetching(undefined);
+      }
+      const results = Object.entries(resp.results);
+      const stopped = results.filter(([, r]) => r.stopped && !r.error).map(([id]) => sourceName(id));
+      if (stopped.length && stopped.length === results.length) {
+        // Every source it ran was turned off meanwhile, which already said so.
+        audit.log(action, `${what}: stopped (turned off during the fetch)${resp.added ? `, ${resp.added} added before it stopped` : ''}`);
+        await refresh();
+        return;
       }
       setLastFetchAt(Date.now());
-      setLastFetch((prev) => ({ ...prev, ...resp.results }));
-      const failedResults = Object.entries(resp.results).filter(([, r]) => r.error);
+      // A stopped fetch did not run to its end, so the source keeps its last result.
+      setLastFetch((prev) => ({ ...prev, ...Object.fromEntries(results.filter(([, r]) => !r.stopped)) }));
+      const failedResults = results.filter(([, r]) => r.error);
       const failed = failedResults.map(([id]) => sourceName(id));
       const dupCount = Object.values(resp.results).reduce((n, r) => n + (r.duplicates ?? 0), 0);
       const dupNote = dupCount ? ` · ${dupCount} duplicate${dupCount !== 1 ? 's' : ''} skipped` : '';
-      audit.log(action, `${what}: added ${resp.added} from ${Object.keys(resp.results).length} source(s)${dupNote}${failed.length ? `, ${failed.length} failed` : ''}`);
+      audit.log(action, `${what}: added ${resp.added} from ${results.length} source(s)${dupNote}${failed.length ? `, ${failed.length} failed` : ''}${stopped.length ? `, ${stopped.join(', ')} stopped (turned off)` : ''}`);
       for (const [id, r] of failedResults) audit.error(action, `${sourceName(id)}: ${r.error}`);
       const failedNote = failed.length ? ` · ⚠ ${failed.join(', ')} failed` : '';
-      const added = `✓ ${auto ? 'Auto-fetch: added' : 'Added'} ${resp.added} update${resp.added !== 1 ? 's' : ''}${dupNote}${failedNote}`;
+      const stoppedNote = stopped.length ? ` · ${stopped.join(', ')} stopped (turned off)` : '';
+      const added = `✓ ${auto ? 'Auto-fetch: added' : 'Added'} ${resp.added} update${resp.added !== 1 ? 's' : ''}${dupNote}${failedNote}${stoppedNote}`;
       if (!digest || config.autoDigest === false) {
         showMessage(added, failed.length ? 6000 : 3000);
         await refresh();
@@ -752,7 +793,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         title: 'Link a device',
         intro: 'Scan the QR code on your phone, or open the link on any device, to connect the web app.',
         url,
-        note: `Valid until ${conn.expiresOn.toISOString().slice(0, 10)}. Anyone with this link can read and change your FOMO data.`,
+        note: `Valid until ${formatDate(conn.expiresOn.toISOString())}. Anyone with this link can read and change your FOMO data.`,
         qr: await qrCode(url),
       });
       // Never record the link itself: it carries the access token.
@@ -1162,7 +1203,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       return;
     }
 
-    if (row.kind === 'source') {
+    if (row.kind === 'source' || row.kind === 'experimental') {
       const sourceId = row.source.id;
       const label = text.trim().slice(0, MAX_SOURCE_LABEL_LENGTH);
       const newLabels = { ...appSettings.sourceLabels, [sourceId]: label };
@@ -1263,16 +1304,24 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
 
   /**
    * Sign in for an experimental source (`l`); with `turnOn`, also turn it on for this profile and
-   * fetch it. It stays off when signing in fails.
+   * fetch it. It stays off when signing in fails or is cancelled (space twice on its row).
    */
   const signInExperimental = useCallback(async (id: string, turnOn: boolean) => {
     const setup = experimental[id];
     if (!setup) return;
     const name = sourceName(id);
-    if (!claimBusy(`${name}: signing in (a browser window or the account picker may open)…`)) return;
+    if (!claimBusy(`${name}: signing in — finish it in the browser window or account picker if one opens…`)) return;
+    const cancel = new AbortController();
+    signInAbort.current = cancel;
+    setSigningIn(id);
+    const cancelled = () => {
+      audit.log('source', `${id}: sign-in cancelled`);
+      showMessage(`Sign-in cancelled${turnOn ? ` · ${name} stays off` : ''}`, 5000);
+    };
     let fetchNow = false;
     try {
-      const run = await setup.signIn((line) => updatePhase(`${name}: ${line.slice(0, 200)}`));
+      const run = await setup.signIn((line) => updatePhase(`${name}: ${line.slice(0, 200)}`), cancel.signal);
+      if (cancel.signal.aborted) { cancelled(); return; }
       if (!run.ok) {
         audit.error('source', `${id}: sign-in failed: ${run.output}`);
         showMessage(`⚠ ${run.output}${turnOn ? ` · ${name} stays off` : ''}`, 10_000);
@@ -1290,29 +1339,39 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         return;
       }
       audit.log('source', `${id}: turned on`);
+      // A details pane opened while it signed in still shows it off; saving that would turn it off again.
+      setSourceDetails((cur) => (cur?.id === id && !cur.draft.enabled ? { ...cur, draft: { ...cur.draft, enabled: true } } : cur));
       fetchNow = true;
     } catch (err) {
-      audit.error('source', `${id}: sign-in: ${errorText(err)}`);
-      showMessage(`⚠ Sign-in failed: ${errorText(err)}`, 8000);
+      if (cancel.signal.aborted) cancelled();
+      else {
+        audit.error('source', `${id}: sign-in: ${errorText(err)}`);
+        showMessage(`⚠ Sign-in failed: ${errorText(err)}`, 8000);
+      }
     } finally {
+      signInAbort.current = undefined;
+      setSigningIn(undefined);
+      // A question asked while signing in is about that state, not the next one.
+      setConfirmKey((k) => (k === `x-${id}:cancel` ? undefined : k));
       releaseBusy();
     }
     if (fetchNow) await doFetch([id]);
   }, [experimental, sourceName, claimBusy, updatePhase, releaseBusy, onConfigChange, config.experimentalSources, doFetch, audit, showMessage]);
 
-  /** Turn an experimental source off for this profile; its stored items stay. */
+  /** Turn an experimental source off for this profile; its stored items stay, and a running fetch of it stops. */
   const turnOffExperimental = useCallback((id: string) => {
     const name = sourceName(id);
+    const wasFetching = fetchingExperimental(id);
     const err = onConfigChange({ experimentalSources: (config.experimentalSources ?? []).filter((s) => s !== id) });
     if (err) {
       audit.error('config', `turn off ${id}: ${err}`);
       showMessage(`⚠ Could not save: ${err}`, 6000);
       return;
     }
-    audit.log('source', `${id}: turned off`);
+    audit.log('source', `${id}: turned off${wasFetching ? ', stopping its fetch' : ''}`);
     const items = stats?.bySource[id] ?? 0;
-    showMessage(`${name} off${items ? ` · its ${items} items stay (x deletes them)` : ''}`, 5000);
-  }, [sourceName, onConfigChange, config.experimentalSources, stats, audit, showMessage]);
+    showMessage(`${name} off${wasFetching ? ' · its fetch was stopped' : ''}${items ? ` · its ${items} items stay (x deletes them)` : ''}`, 5000);
+  }, [sourceName, fetchingExperimental, onConfigChange, config.experimentalSources, stats, audit, showMessage]);
 
   /** Tab / Shift+Tab: step through the views in tab order (1–6), wrapping around. */
   const cycleView = (dir: 1 | -1) => {
@@ -1560,12 +1619,13 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         return;
       }
       const items = stats?.bySource[d.id] ?? 0;
+      const isExperimental = !!detailsSource.experimental;
       if (d.confirm === 'remove' && items > 0 && (input === 'x' || input === 'd')) {
         setSourceDetails(undefined);
         removeSource(d.id, input === 'd');
         return;
       }
-      if (input === 'x' && !removed) {
+      if (input === 'x' && !removed && !isExperimental) {
         if (d.confirm !== 'remove') { setSourceDetails({ ...d, confirm: 'remove' }); return; }
         setSourceDetails(undefined);
         removeSource(d.id, false);
@@ -1596,11 +1656,27 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       if (input === 's') {
         const result = sourceDraftPatch(appSettings, d.id, d.draft);
         if ('error' in result) { setSourceDetails({ ...ready, error: result.error }); return; }
+        const saved = savedDraft(d.id);
+        const turnOn = isExperimental && d.draft.enabled && !saved.enabled;
+        const turnOff = isExperimental && !d.draft.enabled && saved.enabled;
+        // s again confirms: turning it on signs in and agrees to the source's terms
+        if (turnOn && d.confirm !== 'consent') { setSourceDetails({ ...ready, error: undefined, confirm: 'consent' }); return; }
         setSourceDetails(undefined);
-        if (detailsChanged) {
+        const settingsChanged = isExperimental
+          ? JSON.stringify({ ...d.draft, enabled: saved.enabled }) !== JSON.stringify(saved)
+          : detailsChanged;
+        if (settingsChanged) {
           updateRemoteSettings(result.patch, 'source', `${d.id} details saved`);
           showMessage(`✓ Saved ${sourceName(d.id)}`);
         }
+        if (turnOff) turnOffExperimental(d.id);
+        if (turnOn) void signInExperimental(d.id, true);
+        return;
+      }
+      if (isExperimental && input === 'l') { setSourceDetails(ready); void signInExperimental(d.id, false); return; }
+      if (isExperimental && input === 'f' && !experimentalOn(config, d.id)) {
+        setSourceDetails(ready);
+        showMessage(`${sourceName(d.id)} is off · turn it on and save first`, 4000);
         return;
       }
       if (input === 'f') { setSourceDetails(ready); void doFetch([d.id]); return; }
@@ -1678,7 +1754,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         // Pasted text arrives in one chunk; drop line breaks
         if (input && !key.ctrl && !key.meta) setEditBuffer((b) => {
           const text = b + raw.replace(/[\r\n]/g, '');
-          return editRow?.kind === 'source' ? text.slice(0, MAX_SOURCE_LABEL_LENGTH) : text;
+          return editRow?.kind === 'source' || editRow?.kind === 'experimental' ? text.slice(0, MAX_SOURCE_LABEL_LENGTH) : text;
         });
         return;
       }
@@ -1733,6 +1809,32 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         return;
       }
 
+      /** e on a source row: type its label inline. */
+      const editLabel = (sourceId: string) => {
+        setEditBuffer(appSettings.sourceLabels[sourceId] ?? '');
+        setEditingKey(row.key);
+      };
+      /** d on a source row: pick its color. */
+      const pickColor = (sourceId: string) => {
+        const own = appSettings.sourceColors?.[sourceId] ?? '';
+        colorPicker.open({
+          title: sourceName(sourceId),
+          color: own,
+          fallback: DEFAULT_SOURCE_COLOR[sourceId] ?? DEFAULT_COLOR,
+          fallbackLabel: 'default',
+          sample: sourceName(sourceId),
+          onPick: (color) => {
+            if (color === own) return;
+            const { [sourceId]: _old, ...rest } = appSettings.sourceColors ?? {};
+            updateRemoteSettings(
+              { sourceColors: color ? { ...rest, [sourceId]: color } : rest },
+              'source',
+              `${sourceName(sourceId)} color = ${color || 'default'}`,
+            );
+          },
+        });
+      };
+
       if (row.kind === 'source') {
         const sourceId = row.source.id;
         const items = stats?.bySource[sourceId] ?? 0;
@@ -1765,26 +1867,9 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           else disabled.add(sourceId);
           updateRemoteSettings({ disabledSources: [...disabled] }, 'source', `${sourceName(sourceId)} ${enable ? 'enabled' : 'disabled'}`);
         } else if (input === 'e') {
-          setEditBuffer(appSettings.sourceLabels[sourceId] ?? '');
-          setEditingKey(row.key);
+          editLabel(sourceId);
         } else if (input === 'd') {
-          const own = appSettings.sourceColors?.[sourceId] ?? '';
-          colorPicker.open({
-            title: sourceName(sourceId),
-            color: own,
-            fallback: DEFAULT_SOURCE_COLOR[sourceId] ?? DEFAULT_COLOR,
-            fallbackLabel: 'default',
-            sample: sourceName(sourceId),
-            onPick: (color) => {
-              if (color === own) return;
-              const { [sourceId]: _old, ...rest } = appSettings.sourceColors ?? {};
-              updateRemoteSettings(
-                { sourceColors: color ? { ...rest, [sourceId]: color } : rest },
-                'source',
-                `${sourceName(sourceId)} color = ${color || 'default'}`,
-              );
-            },
-          });
+          pickColor(sourceId);
         } else if (input === 'f') {
           void doFetch([sourceId]);
         } else if (input === 'v') {
@@ -1804,13 +1889,27 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
 
       if (row.kind === 'experimental') {
         const id = row.source.id;
-        if (key.return || input === ' ') {
+        if (key.return) {
+          setConfirmKey(undefined);
+          setSourceDetails({ id, draft: savedDraft(id), focus: 0 });
+          return;
+        }
+        if (input === ' ') {
+          // Each question belongs to one state, so pressing space again after the state changed
+          // (signing in finished, the fetch ended) asks again instead of acting on the new state.
+          if (signingIn === id) {
+            if (confirmKey !== `${row.key}:cancel`) { setConfirmKey(`${row.key}:cancel`); return; }
+            setConfirmKey(undefined);
+            signInAbort.current?.abort();
+            return;
+          }
           if (experimentalOn(config, id)) {
+            if (fetchingExperimental(id) && confirmKey !== `${row.key}:off`) { setConfirmKey(`${row.key}:off`); return; }
             setConfirmKey(undefined);
             turnOffExperimental(id);
             return;
           }
-          // ↵ again confirms: turning it on signs in and agrees to the source's terms
+          // space again confirms: turning it on signs in and agrees to the source's terms
           if (confirmKey !== row.key) { setConfirmKey(row.key); return; }
           setConfirmKey(undefined);
           void signInExperimental(id, true);
@@ -1824,10 +1923,12 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           return;
         }
         setConfirmKey(undefined);
-        if (input === 'l') void signInExperimental(id, false);
+        if (input === 'e') editLabel(id);
+        else if (input === 'd') pickColor(id);
+        else if (input === 'l') void signInExperimental(id, false);
         else if (input === 'f') {
           if (experimentalOn(config, id)) void doFetch([id]);
-          else showMessage(`${sourceName(id)} is off · ↵ turns it on`, 4000);
+          else showMessage(`${sourceName(id)} is off · space turns it on`, 4000);
         } else if (input === 'v') {
           setShowSettings(false);
           applySourceFilter([id]);
@@ -2410,10 +2511,13 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           source={detailsSource}
           state={sourceDetails}
           own={!!userSource(appSettings, sourceDetails.id)}
+          consent={experimental[sourceDetails.id]?.consent}
+          isolation={experimental[sourceDetails.id]?.isolation}
           changed={detailsChanged}
           stats={stats}
           items={stats?.bySource[sourceDetails.id] ?? 0}
           lastFetch={lastFetch[sourceDetails.id]}
+          pending={pendingNote(sourceDetails.id)}
           height={availableH}
           columns={columns}
         />
@@ -2495,6 +2599,8 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           confirmKey={confirmKey}
           addStep={editingKey && addDraft ? addDraft.step : undefined}
           experimental={experimental}
+          signingIn={signingIn}
+          fetching={fetching}
           height={availableH}
           columns={columns}
         />
