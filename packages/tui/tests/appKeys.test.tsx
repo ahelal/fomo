@@ -506,21 +506,24 @@ describe('Config → sources', () => {
     await press('https://github.com/octo/app');
     await press('\r');
     await press('\r');
+    expect(frame()).toContain('changelog file path');
+    await press('CHANGELOG.md');
+    await press('\r');
     expect(updateSettings).toHaveBeenCalledWith({
-      userSources: [{ kind: 'github-releases', id: 'octo-app-releases', displayName: 'octo/app releases', repo: 'octo/app' }],
+      userSources: [{ kind: 'github-releases', id: 'octo-app-releases', displayName: 'octo/app releases', repo: 'octo/app', changelogPath: 'CHANGELOG.md' }],
     });
   });
 
   it('removes a built-in source on a second x and restores it', async () => {
     const { press, frame } = await renderApp();
-    await focusRow(press, 's-github');
+    await focusRow(press, 's-fomo-releases');
     await press('x');
     expect(frame()).toContain('press x again to remove');
     expect(updateSettings).not.toHaveBeenCalled();
     await press('x');
-    expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['github'], disabledSources: [] });
-    const rows = buildSettingsRows(SOURCES.filter((s) => s.id !== 'github'), undefined, undefined, 1);
-    for (let i = findRow(buildSettingsRows(SOURCES), 's-github') - 1; i < findRow(rows, 'restore-sources'); i++) await press('j');
+    expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['fomo-releases'], disabledSources: [] });
+    const rows = buildSettingsRows(SOURCES.filter((s) => s.id !== 'fomo-releases'), undefined, undefined, 1);
+    for (let i = findRow(buildSettingsRows(SOURCES), 's-fomo-releases') - 1; i < findRow(rows, 'restore-sources'); i++) await press('j');
     expect(frame()).toContain('Restore removed');
     expect(frame()).toContain('1 built-in source removed');
     await press('\r');
@@ -529,16 +532,16 @@ describe('Config → sources', () => {
   });
 
   it('picks a source color in the popup with d, and d in the popup goes back to the default', async () => {
-    const start = DEFAULT_SOURCE_COLOR.github ?? DEFAULT_COLOR;
+    const start = DEFAULT_SOURCE_COLOR['fomo-releases'] ?? DEFAULT_COLOR;
     const next = COLOR_PALETTE[moveInGrid(paletteIndex(start), 'right')]!;
     const { press, frame } = await renderApp();
-    await focusRow(press, 's-github');
+    await focusRow(press, 's-fomo-releases');
     await press('d');
     expect(frame()).toContain('Pick a color · ');
     await press('q'); // the picker keeps every key, so q doesn't quit
     await press('\u001B[C');
     await press('\r');
-    expect(updateSettings).toHaveBeenCalledWith({ sourceColors: { github: next } });
+    expect(updateSettings).toHaveBeenCalledWith({ sourceColors: { 'fomo-releases': next } });
     expect(frame()).not.toContain('Pick a color');
     await press('d');
     expect(frame()).toContain('Was     ■ ');
@@ -548,7 +551,7 @@ describe('Config → sources', () => {
 
   it('Esc closes only the color picker', async () => {
     const { press, frame } = await renderApp();
-    await focusRow(press, 's-github');
+    await focusRow(press, 's-fomo-releases');
     await press('d');
     await press('\u001B[C');
     await press('\u001B');
@@ -559,10 +562,10 @@ describe('Config → sources', () => {
   });
 
   it('picks the color in the source details and saves it with s', async () => {
-    const start = DEFAULT_SOURCE_COLOR.github ?? DEFAULT_COLOR;
+    const start = DEFAULT_SOURCE_COLOR['fomo-releases'] ?? DEFAULT_COLOR;
     const next = COLOR_PALETTE[moveInGrid(paletteIndex(start), 'right')]!;
     const { press, frame } = await renderApp();
-    await focusRow(press, 's-github');
+    await focusRow(press, 's-fomo-releases');
     await press('\r');
     await press('j');
     await press('j');
@@ -573,14 +576,14 @@ describe('Config → sources', () => {
     await press('\r');
     expect(frame()).toContain('unsaved');
     await press('s');
-    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ sourceColors: { github: next } }));
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ sourceColors: { 'fomo-releases': next } }));
   });
 
   it('space toggles a source and ↵ opens its details', async () => {
     const { press, frame } = await renderApp();
-    await focusRow(press, 's-github');
+    await focusRow(press, 's-fomo-releases');
     await press(' ');
-    expect(updateSettings).toHaveBeenCalledWith({ disabledSources: ['github'] });
+    expect(updateSettings).toHaveBeenCalledWith({ disabledSources: ['fomo-releases'] });
     await press('\r');
     expect(frame()).toContain('built-in');
     expect(frame()).toContain('Fetches');
@@ -589,7 +592,7 @@ describe('Config → sources', () => {
 
   it('edits the label of a built-in and saves with s', async () => {
     const { press, frame } = await renderApp();
-    await focusRow(press, 's-github');
+    await focusRow(press, 's-fomo-releases');
     await press('\r');
     await press('j');
     await press('\r');
@@ -597,13 +600,13 @@ describe('Config → sources', () => {
     await press('\r');
     expect(frame()).toContain('unsaved');
     await press('s');
-    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ sourceLabels: { github: 'GH' } }));
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ sourceLabels: { 'fomo-releases': 'GH' } }));
     expect(frame()).not.toContain('s save');
   });
 
   it('asks before dropping unsaved changes, and removes on a second x', async () => {
     const { press, frame } = await renderApp();
-    await focusRow(press, 's-github');
+    await focusRow(press, 's-fomo-releases');
     await press('\r');
     await press('\r');
     await press('\x1b');
@@ -612,13 +615,13 @@ describe('Config → sources', () => {
     await press('x');
     expect(frame()).toContain('press x again to remove');
     await press('x');
-    expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['github'], disabledSources: [] });
+    expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['fomo-releases'], disabledSources: [] });
     expect(frame()).not.toContain('s save');
   });
 
   describe('with stored items', () => {
     const deleteSourceUpdates = vi.fn(async () => 5);
-    const stats = { total: 5, byStatus: { unread: 5, read: 0 }, bySource: { github: 5 }, savedBySource: { github: 2 }, saved: 2 };
+    const stats = { total: 5, byStatus: { unread: 5, read: 0 }, bySource: { 'fomo-releases': 5 }, savedBySource: { 'fomo-releases': 2 }, saved: 2 };
     beforeEach(() => {
       deleteSourceUpdates.mockClear();
       Object.assign(service, { deleteSourceUpdates, getStats: async () => stats });
@@ -630,42 +633,42 @@ describe('Config → sources', () => {
 
     it('removes a source and deletes its items with x then d', async () => {
       const { press, frame } = await renderApp();
-      await focusRow(press, 's-github');
+      await focusRow(press, 's-fomo-releases');
       await press('x');
       expect(frame()).toContain('x again: remove, keep its 5 items · d: delete them too');
       await press('d');
-      expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['github'], disabledSources: [] });
-      expect(deleteSourceUpdates).toHaveBeenCalledWith('github');
+      expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['fomo-releases'], disabledSources: [] });
+      expect(deleteSourceUpdates).toHaveBeenCalledWith('fomo-releases');
     });
 
     it('keeps the items of a removed source, shows it greyed out, and deletes them later', async () => {
       const { press, frame } = await renderApp();
-      await focusRow(press, 's-github');
+      await focusRow(press, 's-fomo-releases');
       await press('x');
       await press('x');
-      expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['github'], disabledSources: [] });
+      expect(updateSettings).toHaveBeenCalledWith({ removedSources: ['fomo-releases'], disabledSources: [] });
       expect(deleteSourceUpdates).not.toHaveBeenCalled();
-      const retired = retiredSources({ ...DEFAULT_SETTINGS, removedSources: ['github'] }, stats.bySource);
-      const rows = buildSettingsRows(SOURCES.filter((s) => s.id !== 'github'), undefined, undefined, 1, retired);
-      for (let i = findRow(buildSettingsRows(SOURCES), 's-github') - 1; i < findRow(rows, 's-github'); i++) await press('j');
+      const retired = retiredSources({ ...DEFAULT_SETTINGS, removedSources: ['fomo-releases'] }, stats.bySource);
+      const rows = buildSettingsRows(SOURCES.filter((s) => s.id !== 'fomo-releases'), undefined, undefined, 1, retired);
+      for (let i = findRow(buildSettingsRows(SOURCES), 's-fomo-releases') - 1; i < findRow(rows, 's-fomo-releases'); i++) await press('j');
       expect(frame()).toContain('removed · 5 items still stored');
       await press('\r');
       expect(frame()).toContain('r restore');
       await press('d');
       expect(frame()).toContain('press d again to delete its 5 items (2 pending) and remove it for good');
       await press('d');
-      expect(deleteSourceUpdates).toHaveBeenCalledWith('github');
+      expect(deleteSourceUpdates).toHaveBeenCalledWith('fomo-releases');
     });
 
     it('deletes the items of an active source from its details with d d', async () => {
       const { press, frame } = await renderApp();
-      await focusRow(press, 's-github');
+      await focusRow(press, 's-fomo-releases');
       await press('\r');
       expect(frame()).toContain('d delete its 5 items');
       await press('d');
       expect(frame()).toContain('the next fetch adds them back as new');
       await press('d');
-      expect(deleteSourceUpdates).toHaveBeenCalledWith('github');
+      expect(deleteSourceUpdates).toHaveBeenCalledWith('fomo-releases');
       expect(updateSettings).not.toHaveBeenCalled();
       expect(frame()).toContain('s save');
     });

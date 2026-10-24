@@ -154,6 +154,12 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
                 <span>{own.kind === 'feed' ? 'Feed URLs (one per line) or GitHub repo URL' : own.kind === 'youtube' ? 'YouTube channel or playlist URL' : 'GitHub repo URL'}</span>
                 <textarea className="settings-panel__add-input" rows={3} value={draft.url} onChange={(e) => set({ url: e.target.value })} />
               </label>
+              {isRepo && (
+                <label className="source-details__field">
+                  <span>Changelog file path (optional)</span>
+                  <input className="settings-panel__add-input" value={draft.changelogPath} onChange={(e) => set({ changelogPath: e.target.value })} placeholder="CHANGELOG.md" />
+                </label>
+              )}
               {!isRepo && (
                 <label className="source-details__field">
                   <span>Keywords to keep (regex, optional)</span>

@@ -73,22 +73,18 @@ describe('extension validation', () => {
 });
 
 describe.runIf(process.platform === 'darwin')('real MXC workers', () => {
-  it('runs both Anthropic instances and Copilot CLI through private RPC', async () => {
+  it('runs both Anthropic instances through private RPC', async () => {
     mocks.http.mockImplementation(async (url: string) => {
-      if (url.includes('api.github.com')) return JSON.stringify([{ name: 'v1.2.3', tag_name: 'v1.2.3', html_url: 'https://github.com/github/copilot-cli/releases/tag/v1.2.3', published_at: '2026-01-01T00:00:00Z', body: 'placeholder' }]);
-      if (url.includes('changelog.md')) return '## 1.2.3\n- Real notes';
       const section = url.endsWith('/engineering') ? 'engineering' : 'news';
       return `<a href="/${section}/new"><h2>${section} article</h2><time>Oct 18, 2026</time></a>`;
     });
     const sources = host().sources();
-    const [news, engineering, copilot] = await Promise.all([
+    const [news, engineering] = await Promise.all([
       sources.anthropic.fetch({ sourceId: 'anthropic-news', options: { section: 'news' } }),
       sources.anthropic.fetch({ sourceId: 'anthropic-engineering', options: { section: 'engineering' } }),
-      sources['copilot-cli'].fetch({ sourceId: 'copilot-cli', options: {} }),
     ]);
     expect(news[0].title).toBe('news article');
     expect(engineering[0].title).toBe('engineering article');
-    expect(copilot[0].content).toBe('- Real notes');
     expect(mocks.workiq).not.toHaveBeenCalled();
   }, 20_000);
 

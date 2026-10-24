@@ -1,7 +1,7 @@
 import type { ScrapedItem, SourceDeps, SourcePlugin, SourceSpec } from '../types.js';
 import { parseFeed } from './feed.js';
 import { fetchText } from './http.js';
-import { fetchGithubReleases, releaseItems } from './github.js';
+import { fetchGithubReleaseItems } from './github.js';
 import { fetchYoutube } from './youtube.js';
 import { sourceInfo } from './specs.js';
 import { dedupByUrl } from './text.js';
@@ -45,7 +45,7 @@ function loader(spec: SourceSpec, deps: SourceDeps): () => Promise<ScrapedItem[]
         return dedupByUrl(lists.flat());
       };
     case 'github-releases':
-      return async () => releaseItems(await fetchGithubReleases(spec.repo));
+      return async () => fetchGithubReleaseItems(spec);
     case 'youtube':
       return async () => fetchYoutube(spec, deps.youtube);
     case 'custom': {

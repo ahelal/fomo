@@ -32,16 +32,17 @@ function AddSourceForm({ settings, onAdd }: { settings: AppSettings; onAdd(spec:
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [include, setInclude] = useState('');
+  const [changelogPath, setChangelogPath] = useState('');
   const [error, setError] = useState<string | undefined>();
   const guess = url.trim() ? newUserSource({ url }, settings) : undefined;
   const isRepo = guess && 'spec' in guess && guess.spec.kind === 'github-releases';
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const result = newUserSource({ url, name, include: isRepo ? undefined : include }, settings);
+    const result = newUserSource({ url, name, include: isRepo ? undefined : include, changelogPath: isRepo ? changelogPath : undefined }, settings);
     if ('error' in result) { setError(result.error); return; }
     onAdd(result.spec);
-    setUrl(''); setName(''); setInclude(''); setError(undefined);
+    setUrl(''); setName(''); setInclude(''); setChangelogPath(''); setError(undefined);
   };
 
   return (
@@ -67,6 +68,15 @@ function AddSourceForm({ settings, onAdd }: { settings: AppSettings; onAdd(spec:
           onChange={(e) => { setInclude(e.target.value); setError(undefined); }}
           placeholder="Keywords to keep (regex, optional)"
           aria-label="Keyword filter"
+        />
+      )}
+      {isRepo && (
+        <input
+          className="settings-panel__add-input"
+          value={changelogPath}
+          onChange={(e) => { setChangelogPath(e.target.value); setError(undefined); }}
+          placeholder="Changelog file path (optional, e.g. CHANGELOG.md)"
+          aria-label="Changelog file path"
         />
       )}
       <button className="btn" type="submit" disabled={!url.trim()}>+ Add source</button>

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 const catalog = [];
-for (const id of ['anthropic', 'copilot-cli', 'teams-meetings']) {
+for (const id of ['anthropic', 'teams-meetings']) {
   const directory = new URL(`./dist/${id}/`, import.meta.url);
   await mkdir(directory, { recursive: true });
   await build({

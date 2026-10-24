@@ -221,13 +221,14 @@ export const isPickerField = (field: ConfigField): field is PickerField =>
   (PICKER_FIELDS as readonly ConfigField[]).includes(field);
 
 /** Steps of adding a source: what is typed, and the footer prompt. */
-export type AddSourceStep = 'url' | 'name' | 'include';
-export interface AddSourceDraft { step: AddSourceStep; url: string; name: string }
+export type AddSourceStep = 'url' | 'name' | 'include' | 'changelog';
+export interface AddSourceDraft { step: AddSourceStep; url: string; name: string; changelogPath?: string }
 
 export const ADD_SOURCE_PROMPTS: Record<AddSourceStep, string> = {
   url: 'feed URL(s) or github.com/owner/repo — several feeds: separate with spaces',
   name: 'a name   (empty keeps the suggestion)',
   include: 'keywords to keep, as a regex, e.g. copilot|agents   (empty keeps everything)',
+  changelog: 'changelog file path (empty uses GitHub release notes)',
 };
 
 /** Starting text when editing a field, from the profile's stored config `file`. Secrets start empty so they are never shown. */

@@ -48,7 +48,7 @@ Add a spec to `BUILTIN_SOURCES` in `packages/core/src/scraper/specs.ts`:
 { kind: 'feed', id: 'my-blog', displayName: 'My Blog', urls: ['https://example.com/feed.xml'] },
 { kind: 'feed', id: 'vscode', displayName: 'VS Code Updates', urls: ['https://code.visualstudio.com/feed.xml'], category: 'release' },
 { kind: 'feed', id: 'sre', displayName: 'SRE Agent', urls: [FEED_A, FEED_B], include: '\\bsre\\s+agents?\\b' },
-{ kind: 'github-releases', id: 'my-tool', displayName: 'My Tool Releases', repo: 'owner/my-tool' },
+{ kind: 'github-releases', id: 'my-tool', displayName: 'My Tool Releases', repo: 'owner/my-tool', changelogPath: 'CHANGELOG.md' },
 { kind: 'youtube', id: 'github-yt', displayName: 'GitHub on YouTube', channel: '@GitHub' },
 ```
 
@@ -60,6 +60,7 @@ Add a spec to `BUILTIN_SOURCES` in `packages/core/src/scraper/specs.ts`:
 | `include`     | feed, youtube | Case-insensitive regex tested on title + content (YouTube: description) |
 | `category`    | feed   | Keep only items with this `<category>` (RSS) or `term` (Atom)          |
 | `repo`        | github-releases | `owner/repo`                                                  |
+| `changelogPath` | github-releases | Optional repository-relative Markdown file; matching version sections override release bodies |
 | `channel`     | youtube | `UC…` id, `@handle`, `c/Name` or `user/Name`                         |
 | `playlist`    | youtube | `PL…` playlist id (instead of `channel`)                             |
 | `shorts`      | youtube | `true` includes Shorts; by default a channel's videos and live streams |

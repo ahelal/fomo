@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import { colorName, DEFAULT_COLOR, isGithubRepoUrl, isYoutubeChannelUrl, timeAgo, type SourceDraft, type SourceFetchResult, type SourceInfo, type StatsResponse } from '@fomo/core';
 import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
 
-export type DetailsField = 'enabled' | 'label' | 'color' | 'name' | 'extensionName' | 'url' | 'include' | 'shorts';
+export type DetailsField = 'enabled' | 'label' | 'color' | 'name' | 'extensionName' | 'url' | 'include' | 'shorts' | 'changelogPath';
 
 /** State of the source details popup (Config → ↵ on a source). */
 export interface SourceDetailsState {
@@ -25,7 +25,11 @@ export function detailsFields(own: boolean, draft: SourceDraft): DetailsField[] 
   const fields: DetailsField[] = ['enabled', 'label', 'color'];
   fields.push('name');
   if (draft.extensionName !== undefined) fields.push('extensionName');
-  if (own) fields.push('url', ...(isGithubRepoUrl(draft.url) ? [] : ['include' as const]), ...(isYoutubeChannelUrl(draft.url) ? ['shorts' as const] : []));
+  if (own) fields.push(
+    'url',
+    ...(isGithubRepoUrl(draft.url) ? ['changelogPath' as const] : ['include' as const]),
+    ...(isYoutubeChannelUrl(draft.url) ? ['shorts' as const] : []),
+  );
   return fields;
 }
 
@@ -38,6 +42,7 @@ const FIELD_LABEL: Record<DetailsField, string> = {
   url: 'URL(s)',
   include: 'Keywords',
   shorts: 'Shorts',
+  changelogPath: 'Changelog file',
 };
 
 const KIND_LABEL: Record<SourceInfo['kind'], string> = {
@@ -91,6 +96,7 @@ export function SourceDetailsPane({ source, state, own, consent, isolation, chan
       case 'url': return { text: draft.url };
       case 'include': return draft.include ? { text: draft.include } : { text: '(none — keeps everything)', muted: true };
       case 'shorts': return draft.shorts ? { text: '[x] included' } : { text: '[ ] skipped (videos and live streams only)', muted: true };
+      case 'changelogPath': return draft.changelogPath ? { text: draft.changelogPath } : { text: '(none — uses release notes)', muted: true };
     }
   };
 
@@ -180,6 +186,7 @@ function field(f: DetailsField | undefined): string {
   switch (f) {
     case 'url': return 'feed URLs (separate with spaces), github.com/owner/repo or a YouTube channel/playlist URL';
     case 'include': return 'keywords to keep, as a regex (empty keeps everything)';
+    case 'changelogPath': return 'relative changelog file path (empty uses release notes)';
     case 'label': return 'a short label, max 10 characters (empty shows the name)';
     default: return 'a value';
   }

@@ -13,7 +13,7 @@ import { cleanMessage, decodeItems, decodeMerge, object, text } from './validati
 
 const require = createRequire(import.meta.url);
 type WorkIQConnection = Awaited<ReturnType<typeof openWorkIQ>>;
-const publicIds = ['anthropic', 'copilot-cli'];
+const publicIds = ['anthropic'];
 
 export async function snapshotExtension(id: string, catalogPath = require.resolve('@fomo/extensions/catalog')): Promise<{ directory: string; origins: string[]; mcp: string[]; digest: string }> {
   const catalog: unknown = JSON.parse(await readFile(catalogPath, 'utf8'));

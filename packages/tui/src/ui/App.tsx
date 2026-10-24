@@ -1176,6 +1176,11 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       if (draft.step === 'name') {
         const named = newUserSource({ url: draft.url, name: value }, appSettings);
         if ('error' in named) { fail(named.error); return; }
+        if (named.spec.kind === 'github-releases') {
+          setAddDraft({ step: 'changelog', url: draft.url, name: value });
+          setEditBuffer('');
+          return;
+        }
         // A keyword filter only applies to feeds and YouTube
         if (named.spec.kind === 'feed' || named.spec.kind === 'youtube') {
           setAddDraft({ ...draft, step: 'include', name: value });
@@ -1183,7 +1188,12 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           return;
         }
       }
-      const result = newUserSource({ url: draft.url, name: draft.step === 'name' ? value : draft.name, include: draft.step === 'include' ? value : undefined }, appSettings);
+      const result = newUserSource({
+        url: draft.url,
+        name: draft.step === 'name' ? value : draft.name,
+        include: draft.step === 'include' ? value : undefined,
+        changelogPath: draft.step === 'changelog' ? value : draft.changelogPath,
+      }, appSettings);
       if ('error' in result) { fail(result.error); return; }
       stopEditing();
       const { spec } = result;
