@@ -266,7 +266,7 @@ export const SettingsPane = React.memo(function SettingsPane({
         enabled ? 'enabled' : 'disabled',
         SOURCE_TYPE[row.source.kind],
         settings.sourceLabels[id] ?? '',
-        '#58a6ff',
+        settings.sourceColors?.[id] || DEFAULT_SOURCE_COLOR[id] || DEFAULT_COLOR,
       );
     }
 
