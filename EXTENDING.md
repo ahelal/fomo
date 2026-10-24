@@ -8,7 +8,7 @@ A source is a **spec**: plain data that says what to fetch. Specs of a few kinds
 | `feed`            | RSS 2.0, RSS 1.0 (RDF) or Atom; several URLs are merged  | Users in the app, or built-in       |
 | `github-releases` | Releases of a GitHub repository                          | Users in the app, or built-in       |
 | `youtube`         | A YouTube channel's or playlist's newest videos          | Users in the app, or built-in       |
-| `custom`          | Anything else (HTML pages, changelogs, APIs), in code    | Developers only                     |
+| `custom`          | Sandboxed ESM extension (HTML pages, changelogs, APIs)   | Bundled by developers for now       |
 
 Built-in specs live in `packages/core/src/scraper/specs.ts` (`BUILTIN_SOURCES`). Sources users add are saved in
 the shared settings (`userSources`), and built-ins they remove in `removedSources`, so a fix to a built-in still
@@ -30,8 +30,9 @@ reaches everyone who kept it.
 
   The source is fetched straight away. `x` on a source removes it (`x` again confirms); removed built-ins come
   back with **Restore removed**.
-- **Edit:** `↵` on a source (TUI) or a click on its name (web) opens its details: status, label, color and on/off
-  for every source, plus name, URLs, keyword filter and (YouTube channels) Shorts for your own (its id stays the same). `s` / **Save** saves.
+- **Edit:** `↵` on a source (TUI) or a click on its name (web) opens its details: status, name, label, color and on/off
+  for every source, plus URLs, keyword filter and (YouTube channels) Shorts for your own. Extension-backed sources
+  also have a separate extension display name, shown as `C/<name>`. IDs stay fixed; labels have a 10-character limit. `s` / **Save** saves.
   Built-in URLs ship with the app and are read-only.
 - **Stored items:** removing a source that has items asks whether to keep them (it then stays greyed out, and its
   items still show) or delete them too. **Delete its items** in the details (`d d` in the TUI) clears a source's
@@ -63,50 +64,74 @@ Add a spec to `BUILTIN_SOURCES` in `packages/core/src/scraper/specs.ts`:
 | `playlist`    | youtube | `PL…` playlist id (instead of `channel`)                             |
 | `shorts`      | youtube | `true` includes Shorts; by default a channel's videos and live streams |
 
-## 3. Add a custom (code) source
+## 3. Add a bundled code extension
 
-For sites without a feed, write a module in `packages/core/src/scraper/sources/custom/<name>.ts` that returns
-`ScrapedItem[]` and **throws** on failure (the factory adds the `[id] fetch failed:` prefix). Build it on the shared
-helpers instead of copying code:
-
-| Helper                                                     | File        |
-|------------------------------------------------------------|-------------|
-| `fetchText`, `fetchJson` (user agent, 15 s timeout, HTTP errors) | `scraper/http.ts`   |
-| `htmlToText`, `decodeEntities`, `parseDate`, `dedupByUrl`, `MAX_CONTENT` | `scraper/text.ts` |
-| `parseFeed(xml, { include, category })`                    | `scraper/feed.ts`   |
-| `fetchGithubReleases`, `releaseItems`, `stripMarkdown`     | `scraper/github.ts` |
+For sites without a feed, put the fetcher in `packages/extensions/src/<id>/index.ts`. It exports `fetch(ctx)`,
+returns `ScrapedItem[]`, and throws on failure. It runs in a separate OS sandbox, never in the core engine.
+Use the narrow `@fomo/core/extension-api` entry for types and pure helpers; importing runtime values from the
+main core entry can pull Azure and other host-only dependencies into the bundle.
 
 ```typescript
-// packages/core/src/scraper/sources/custom/my-site.ts
-import type { ScrapedItem } from '../../../types.js';
-import { fetchText } from '../../http.js';
-import { htmlToText, parseDate } from '../../text.js';
+import { htmlToText, parseDate, type ExtensionContext, type ScrapedItem } from '@fomo/core/extension-api';
 
-export async function fetchMySite(options: Record<string, string>): Promise<ScrapedItem[]> {
-  const html = await fetchText(`https://example.com/${options.section ?? 'news'}`);
-  // …parse html into items…
-  return [{ title: htmlToText(title), url, datePublished: parseDate(date), content: '' }];
+export async function fetch(ctx: ExtensionContext): Promise<ScrapedItem[]> {
+  const posts = await ctx.http.json<{ title: string; url: string; date: string }[]>('https://example.com/posts.json');
+  return posts.map((post) => ({
+    title: htmlToText(post.title), url: post.url, datePublished: parseDate(post.date),
+  }));
 }
 ```
 
-Register it in `packages/core/src/scraper/sources/custom/index.ts`:
+Alongside it, add `extension.json`:
 
-```typescript
-export const CUSTOM_MODULES = {
-  anthropic: fetchAnthropic,
-  'copilot-cli': fetchCopilotCli,
-  'my-site': fetchMySite,   // ← add here
-};
+```json
+{
+  "apiVersion": 1,
+  "id": "my-site",
+  "name": "My Site",
+  "version": "1.0.0",
+  "entry": "index.mjs",
+  "permissions": {
+    "http": ["https://example.com"],
+    "mcp": [],
+    "filesystem": { "readOnly": [], "readWrite": [] }
+  }
+}
 ```
 
-and point a spec at it in `BUILTIN_SOURCES` (`options` are passed to the function; set `preview: false` when the
-source has no body text):
+Add the ID to the build list in `packages/extensions/build.mjs` and the public adapter list in
+`packages/tui/src/extensions/host.ts`. Point a spec in `BUILTIN_SOURCES` at it (`options` become `ctx.options`;
+use `preview: false` for sources without body text):
 
 ```typescript
-{ kind: 'custom', id: 'my-site-news', displayName: 'My Site News', module: 'my-site', options: { section: 'news' }, preview: false },
+{ kind: 'custom', id: 'my-site-news', displayName: 'My Site News', extension: 'my-site', extensionName: 'My Site', options: { section: 'news' }, preview: false },
 ```
 
-Keep fetching code out of `specs.ts`: it is imported by the browser app.
+The build bundles ESM into `dist/<id>/index.mjs` and hashes both it and the manifest into `dist/catalog.json`.
+The host rejects changed bundles, unexpected files and symlinks, then snapshots the verified bytes for execution.
+Release hashes belong to the trusted FOMO installation; they are not a third-party publisher signature.
+Keep code out of browser-safe `specs.ts`. The old `module` spec field is recognized for compatibility but resolves
+only through an injected extension adapter; there is no in-process fallback.
+
+| API | Permission and limits |
+|-----|-----------------------|
+| `ctx.http.text/json(url)` | HTTPS GET only, exact granted origins, public DNS addresses pinned per hop, redirects revalidated, 4 MiB responses |
+| `ctx.mcp.call(binding, tool, args)` | Only the bundled `workiq` binding; host-approved read-only meeting/file operations, no arbitrary MCP servers |
+| `ctx.state.get/set(key, value)` | In-memory state scoped to this profile, source and bundle digest; bounded JSON, no token storage |
+| `ctx.log(message)` | Bounded, sanitized diagnostics |
+| `ctx.options`, `ctx.signal` | Source options and invocation context; revocation terminates the process and its broker requests |
+
+No subprocess/exec capability or general filesystem access is exposed. Empty filesystem declarations are
+currently required; user-selected folder grants and arbitrary third-party discovery/hash reapproval UI are
+not implemented. All three bundled extensions (Anthropic, Copilot CLI and Teams) use this same worker path.
+
+### Runtime and isolation status
+
+Use Node 24+ and pnpm 11.7.0. MXC 1.0.1 is pinned; the hardened policy is currently available only on macOS.
+Missing/unsupported containment reports a source error, never an unrestricted fallback. OS CPU and wall-clock
+limits, bounded RPC and the worker's V8 heap cap provide resource defenses, but **hard total/native-memory
+containment is not established**. Only trusted bundled artifacts are accepted pending the remaining trust and
+resource-limit work. The FOMO host and declarative feed/GitHub-release/YouTube implementations are not sandboxed.
 
 ## 4. Try it
 
@@ -137,21 +162,31 @@ must never run them. These are *experimental sources*:
 
 - **Registry:** `EXPERIMENTAL_SOURCE_INFOS` in `packages/core/src/experimental.ts` (id, name, where the data comes
   from; browser-safe, so the web app can name and color their items). Their items are stored like any other update.
-- **Provider:** an `ExperimentalProvider` (`id`, `fetch(signal)`, optional `merge`) written in the TUI under
-  `packages/tui/src/experimental/`, and registered with its sign-in and the consent text shown before turning it on
-  in `EXPERIMENTAL_SETUPS` (`packages/tui/src/experimental/index.ts`).
+- **Provider:** extension fetch and merge code lives in `packages/extensions/src/<id>/`; trusted local setup
+  and sign-in live in `packages/tui/src/experimental/`. `experimentalSetups(host)` binds each setup to the active
+  profile. `ExperimentalProvider.open()` keeps an operation-scoped worker alive through asynchronous merges and
+  `close()` tears it down, including on failure.
 - **Turning it on:** per profile, in `~/.fomo/config.json` (`experimentalSources: ["teams-meetings"]`), from
-  **Config → Experimental sources · this computer** (`↵` twice signs in and turns it on, `↵` turns it off, `l` signs in again,
-  `f`/`v`/`x` as for other sources). Only the profiles that turned one on fetch it; `FomoDirectService.setExperimentalProviders` gets the list.
+  **Config → Experimental sources · this computer** (`space` twice signs in and turns it on, `space` turns it off, `l` signs in again;
+  while it signs in or fetches, the row shows it and `space` twice cancels the sign-in or stops the fetch and turns it off;
+  `↵` details, `e` label, `d` color and `f`/`v`/`x` as for other sources). Its label, color and names are shared settings like any
+  source's; only on/off and the sign-in stay on this computer. Only the profiles that turned one on fetch it; `FomoDirectService.setExperimentalProviders` gets the list.
+  A fetch stopped by turning a source off reports `stopped` (not `error`) and leaves the source's last fetch record as it was.
 - **Keyed items:** give each item a stable `key` when its URL is shared or changes (a recurring meeting has one
   chat), and a `merge(existing, fetched)` that says what a fetch changes on the stored row (status, saved and topic
   are always kept). Experimental items are left out of duplicate detection.
 
-The first one is **Teams meetings** (`teams-meetings`, `src/experimental/teams.ts`): the meetings of the last 7 days
+The first one is **Teams meetings** (`teams-meetings`, `packages/extensions/src/teams-meetings/meetings.ts`): the meetings of the last 7 days
 you missed, or that have a recording or a transcript, one item per occurrence, linking to the Teams recap (or the
 meeting chat). It reads Microsoft Graph through [WorkIQ](https://www.npmjs.com/package/@microsoft/workiq)
-(`@microsoft/workiq`, pinned in the TUI), which keeps the Microsoft 365 sign-in itself: FOMO starts `workiq mcp` for a
-fetch and never sees a token.
+(`@microsoft/workiq`, pinned in the TUI). The host starts `workiq mcp` directly, outside FOMO's sandbox, using the
+host WorkIQ sign-in and filesystem/network permissions. The TUI labels this **UNSANDBOXED** and requires explicit
+consent. The MCP broker verifies `/me` and permits only read-only calendar/meeting requests bounded to the
+seven-day window, chats found through those calendar results, and read-only OneDrive/SharePoint search used to
+locate recording files; tokens never enter the extension.
+
+Profile-specific approval is kept under `~/.fomo/extension-state/<profile-name-hash>/workiq`. A profile rename
+requires consent again; WorkIQ's host sign-in remains in its normal host account store.
 
 For recorded or transcribed meetings, build the Recap URL the way Teams' own "share recap" links do, encoding each
 query value separately. These formats were verified in Teams but are not a documented Microsoft deep-link contract:

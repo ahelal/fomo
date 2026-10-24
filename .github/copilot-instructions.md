@@ -4,6 +4,7 @@
 - This is a pnpm/Turbo monorepo.
 - Main packages:
   - `packages/core/`: shared types, Azure Table stores, services, scrapers, source registry and the digest engine.
+  - `packages/extensions/`: bundled ESM fetchers (Anthropic, Copilot CLI and Teams), manifests and release hashes.
   - `packages/web/`: static React/Vite PWA that talks to Azure Table Storage directly with a SAS token (no server).
   - `packages/tui/`: Ink TUI (`fomo`, no subcommands, one flag: `-p <profile>`); setup, config, fetches, the GitHub Copilot SDK digest, link/backup/restore all live in the UI. A **profile** is one storage account plus its local settings: `~/.fomo/config.json` holds all of them (`packages/tui/src/config.ts`), `w` switches (`ui/hooks/useProfilePicker.ts`, `ui/Root.tsx` owns the session). The web stays one account per PWA.
 - Infra/deployment files: `infra/` (storage-only Bicep), `deploy.sh`.
@@ -19,7 +20,7 @@
 - Shared logic, data models, store access, digest and scraper implementations: `packages/core/src/**`.
 - UI components and frontend state: `packages/web/src/**`.
 - TUI screens, local config, Copilot adapter: `packages/tui/src/**` (config screen rows in `src/ui/settings.ts`).
-- New data source: add a `feed`/`github-releases` spec to `BUILTIN_SOURCES` in `packages/core/src/scraper/specs.ts` (users can also add these from the app; they are stored in `userSources`). Only for sites without a feed, add a code module in `packages/core/src/scraper/sources/custom/`, built on the helpers in `scraper/{http,text,feed,github}.ts`, register it in `sources/custom/index.ts`, and point a `custom` spec at it. See `EXTENDING.md`.
+- New data source: prefer a `feed`/`github-releases`/`youtube` spec in `BUILTIN_SOURCES`. For code-backed sources, add a bundled ESM extension under `packages/extensions/src/`, register its build and host adapter, and point a `custom` spec at its stable `extension` ID. Use the narrow `@fomo/core/extension-api` entry; never add an in-process fallback. See `EXTENDING.md`.
 - Experimental source (personal data behind a local sign-in, TUI only, off by default per profile): add its info to `EXPERIMENTAL_SOURCE_INFOS` in `packages/core/src/experimental.ts` and its provider + sign-in to `EXPERIMENTAL_SETUPS` in `packages/tui/src/experimental/index.ts`. Never make the web app fetch it.
 - Azure changes: `infra/**`, `deploy.sh`.
 
@@ -31,9 +32,10 @@
 - In list views, Shift+↑/↓ jumps `jumpStep(screenLines)` rows (5, or 10 on a tall screen) from `@fomo/core`.
 - Do not edit generated `dist/` output manually; rebuild instead.
 - If dependencies change, update `pnpm-lock.yaml` via `pnpm install`.
+- Code extensions require the verified MXC policy (currently macOS only). Teams WorkIQ is an explicit exception: it runs unsandboxed with the host account and host filesystem/network access, clearly labelled in the TUI; keep its MCP broker scope read-only and bounded, and never silently broaden that access. Third-party trust/folder grants and hard total-memory containment are not yet implemented.
 
 ## Build/test flow
-- Install once: `pnpm install`
+- Use Node 24+ and the pinned pnpm 11.7.0. Install once: `pnpm install`
 - Build all packages: `pnpm build`
 - Run tests: `pnpm test`
 - Local web: `pnpm --filter @fomo/web dev`, then open the link from the TUI (`c` → Link a device) (use Azurite with `UseDevelopmentStorage=true` for local data).

@@ -209,7 +209,9 @@ The popup shows the current color and, when there is none of its own, the color 
 
 ### Azure Deployment
 
-**Prerequisites:** Azure CLI (`az login`), `jq`, Node.js 22+ and pnpm.
+**Prerequisites:** Azure CLI (`az login`), `jq`, Node.js 24+ and the pinned pnpm 11.7.0.
+The hardened extension backend currently runs only on macOS with MXC Seatbelt available.
+Other platforms can still use stored items and declarative feeds, but code extensions fail explicitly.
 
 ```bash
 pnpm install
@@ -408,7 +410,7 @@ Press `c`. The bottom line shows the keys for the selected row. Each section hea
 | | Back up updates / Restore from backup | See [Backup & Restore](#backup--restore) |
 | **Sources** (shared with the web app) | One row per source, with its item count, when its newest item was added, and when it was last fetched (or the error of that fetch) | `Enter` details (status, label, color, on/off; name, URLs and filter for your own sources; `s` saves) · `Space` enable/disable · `e` label · `d` [color](#colors) · `f` fetch just this source (even if disabled) · `v` list only its updates · `x` remove (`x` again keeps its items, `d` deletes them too). A removed source whose items are kept stays greyed out until you delete them (`x` twice, or `d` twice in its details); in a source's details `d` twice deletes its items, so the next fetch brings them back as new. **+ Add source** adds a feed, GitHub repo or YouTube channel; **Restore removed** brings back removed built-ins |
 | **Display** (shared) | Preview position | `Enter` cycles right / bottom / off |
-| **Experimental sources · this computer** | One row per [experimental source](#experimental-sources), off by default, per profile | `Enter` twice: sign in and turn it on (then it is fetched) · `Enter` turns it off (its items stay) · `l` sign in again · `f` fetch it · `v` list its updates · `x` twice deletes its items |
+| **Experimental sources · this computer** | One row per [experimental source](#experimental-sources), off by default, per profile | `Enter` details (label, color, name, extension name, on/off; `s` saves) · `Space` twice: sign in and turn it on (then it is fetched; the row shows `sign-in…` until the sign-in finishes) · `Space` turns it off (its items stay) · while it signs in or fetches, `Space` twice cancels the sign-in or stops the fetch and turns it off · `e` label · `d` color · `l` sign in again · `f` fetch it · `v` list its updates · `x` twice deletes its items |
 | **This computer** (`~/.fomo/config.json`) | Connection string, Web app URL, Copilot model, Copilot account, Interests, Grouping hints, YouTube API key, Auto-fetch (minutes), Group after fetch, Max items per run, Link valid (days), Backup folder | `Enter` edits (Auto-fetch takes 5–1440 minutes or `off`; Group after fetch toggles; Copilot account opens a list of your `gh` accounts). Save an empty value to restore the default. The connection string and YouTube API key are masked, also while you type them and in the audit trail. Values set by an environment variable are tagged `[env]`. `o` on Web app URL opens it in the browser. With several [profiles](#profiles-several-storage-accounts) the section title names the one being edited; every setting here belongs to it. |
 
 ### Backup & Restore
@@ -482,10 +484,13 @@ Most sources need no code:
   web app) to see its status and edit it.
 - **Built-in:** add a `feed`, `github-releases` or `youtube` spec to `BUILTIN_SOURCES` in
   `packages/core/src/scraper/specs.ts`.
-- **Custom code** (sites without a feed): add a module in `packages/core/src/scraper/sources/custom/`, register it in
-  its `index.ts`, and point a `custom` spec at it.
+- **Custom code** (sites without a feed): bundled ESM extensions live in `packages/extensions/`, outside the
+  fetch engine. A `custom` spec references their stable extension ID; the TUI runs them in an MXC sandbox.
+  Third-party installation and permission/reapproval UI are not available yet.
 
-See [EXTENDING.md](EXTENDING.md) for the spec fields and the shared helpers for custom sources.
+See [EXTENDING.md](EXTENDING.md) for the API, build layout and current isolation limits.
+Source display names and extension names can be edited independently; IDs never change. Config shows the
+extension as `C/<name>`. Short labels are limited to 10 characters and retain their configured color.
 
 ### YouTube
 
@@ -514,9 +519,16 @@ the profiles where you turned them on (**Config → Experimental sources**). The
 |--------|----|----------------|
 | Teams meetings | `teams-meetings` | Teams meetings of the last 7 days that you missed, or that have a recording or a transcript; one item per occurrence, linking directly to the meeting recap when recorded or transcribed, otherwise to the meeting chat |
 
-**Teams meetings** reads Microsoft 365 through [WorkIQ](https://www.npmjs.com/package/@microsoft/workiq), which is
-installed with the TUI. Turning it on accepts the WorkIQ EULA and runs `workiq auth login` (a browser window or the
-system account picker may open); WorkIQ keeps the sign-in, FOMO never sees a token. Recap links are built like the
+**Teams meetings** runs its fetch, classification and merge code in a bundled extension. The pinned WorkIQ
+process runs **outside FOMO's sandbox**, using the host WorkIQ sign-in and host filesystem/network permissions.
+The TUI labels it **UNSANDBOXED** and asks for explicit consent before enabling it. FOMO's MCP broker only allows
+the configured read-only Graph operations for recent meetings, chats and transcripts, plus read-only
+OneDrive/SharePoint search used to locate recording files; the extension never receives WorkIQ tokens.
+Profile-specific approval is stored under
+`~/.fomo/extension-state/<profile-name-hash>/workiq`; renaming a profile requires approval again. Disabling the
+source or changing profiles revokes its active fetches.
+
+Recap links are built like the
 links Teams shares: the meeting chat, the occurrence ID and the recording file, which FOMO takes from the meeting chat
 or, when the chat is closed to you, finds with a file search (this takes a few seconds per meeting on the first
 fetch). Without the file, a recurring meeting's link also has the series ID, so it opens that day's recap with a list
@@ -530,6 +542,15 @@ appeared later, without creating duplicate items or changing their read/saved st
 
 ## Security
 
+- **Code-backed sources:** Anthropic (news and engineering), Copilot CLI and Teams run in checksum-verified,
+  read-only snapshots under deny-by-default MXC policies. Workers cannot fork processes, access host credentials
+  or connect directly to the network. Public HTTPS requests go through a bounded, origin-allowlisted broker
+  that validates and pins DNS addresses and rechecks redirects. WorkIQ alone has separate HTTPS access and its
+  own private profile directory; it is not an unrestricted host MCP connection.
+- **Current limits:** only bundled extensions are accepted. CPU/wall time, messages and response sizes are bounded;
+  the worker's 128 MiB V8 heap setting is **not** a hard total-memory cap. Arbitrary extension installs, approved
+  user-folder grants, other OS backends and sandboxing the whole FOMO process remain future work.
+  RSS/Atom, GitHub-release and YouTube fetchers still use their existing trusted implementation.
 - **TUI:** uses the storage connection string (account key). Keep `~/.fomo/config.json` private (it is created with mode `600`); with several [profiles](#profiles-several-storage-accounts) it holds the key of each account, and the [YouTube API key](#youtube) if you set one. Restrict that key to the YouTube Data API v3 only.
 - **Web app:** uses an **account SAS token** limited to the Table service and entity operations (`ss=t`, `srt=o`, `sp=raud`), HTTPS only, and valid for **Link valid (days)** (default 365).
   - It can read and update your FOMO tables, but it cannot create or delete tables or touch blobs.
