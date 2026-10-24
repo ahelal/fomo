@@ -10,6 +10,6 @@ describe('source details fields', () => {
     expect(detailsFields(true, draft('https://www.youtube.com/playlist?list=PL123456789012'))).not.toContain('shorts');
     expect(detailsFields(true, draft('https://example.com/rss'))).toEqual(['enabled', 'label', 'color', 'name', 'url', 'include']);
     expect(detailsFields(true, draft('https://github.com/o/r'))).toEqual(['enabled', 'label', 'color', 'name', 'url']);
-    expect(detailsFields(false, draft(''))).toEqual(['enabled', 'label', 'color']);
+    expect(detailsFields(false, draft(''))).toEqual(['enabled', 'label', 'color', 'name']);
   });
 });

@@ -169,6 +169,10 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const sources = useMemo<SourceInfo[]>(() => sourceInfos(fomo.settings), [fomo.settings]);
+  const sourceLabels = useMemo(
+    () => ({ ...fomo.settings.sourceNames, ...fomo.settings.sourceLabels }),
+    [fomo.settings.sourceNames, fomo.settings.sourceLabels],
+  );
 
   // Lists are loaded without content; fetch the body of the update being viewed.
   useEffect(() => {
@@ -209,8 +213,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   }, [fomo, clearSelection]);
 
   const sourceName = useCallback(
-    (id: string) => fomo.settings.sourceLabels[id] ?? sources.find((s) => s.id === id)?.displayName ?? experimentalSourceInfo(id)?.displayName ?? id,
-    [fomo.settings.sourceLabels, sources],
+    (id: string) => fomo.settings.sourceLabels[id] ?? fomo.settings.sourceNames[id] ?? sources.find((s) => s.id === id)?.displayName ?? experimentalSourceInfo(id)?.displayName ?? id,
+    [fomo.settings.sourceLabels, fomo.settings.sourceNames, sources],
   );
 
   /** Pick which sources to show; counts are for the current view and search. */
@@ -642,7 +646,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const handleSetSourceLabel = useCallback(
     (sourceId: string, label: string) => {
       const newLabels = { ...fomo.settings.sourceLabels };
-      if (label && label !== sourceId) newLabels[sourceId] = label;
+      const boundedLabel = label.slice(0, 10);
+      if (boundedLabel && boundedLabel !== sourceId) newLabels[sourceId] = boundedLabel;
       else delete newLabels[sourceId];
       void fomo.updateSettings({ sourceLabels: newLabels });
     },
@@ -722,7 +727,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           <TopicPane
             entry={digestTopic}
             mode={isSaved ? 'saved' : 'digest'}
-            sourceLabels={fomo.settings.sourceLabels}
+            sourceLabels={sourceLabels}
             onOpenItem={(u) => openTopicItem(digestTopic.topic.id, u)}
             onMarkRead={() => digestMarkRead(digestRow)}
             onToggleRead={() => toggleDigestRead(digestRow)}
@@ -897,7 +902,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
               onSelect={(row) => setDigestKey(row.key)}
               onToggle={(topicId) => setTopicExpanded(topicId, !expanded.has(topicId))}
               onToggleRead={toggleDigestRead}
-              sourceLabels={fomo.settings.sourceLabels}
+              sourceLabels={sourceLabels}
               sourceColors={fomo.settings.sourceColors}
               onRefresh={handleRefresh}
               search={fomo.search}
@@ -910,7 +915,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
               updates={fomo.updates}
               selectedId={selected?.id}
               onSelect={setSelected}
-              sourceLabels={fomo.settings.sourceLabels}
+              sourceLabels={sourceLabels}
               sourceColors={fomo.settings.sourceColors}
               onSwipeAction={handleSwipeAction}
               onRefresh={handleRefresh}

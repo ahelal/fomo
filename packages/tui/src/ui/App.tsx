@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TopicSort, UpdateSort } from '@fomo/core';
-import { DEFAULT_SETTINGS, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, isExperimentalSource } from '@fomo/core';
+import { DEFAULT_SETTINGS, MAX_SOURCE_LABEL_LENGTH, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, isExperimentalSource } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult, DigestInspection } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, readConfigFile, tildify, type LocalConfig } from '../config.js';
@@ -159,6 +159,10 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   const [settingsFocusIndex, setSettingsFocusIndex] = useState(0);
   const [appSettings, setAppSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
   const sources = useMemo<SourceInfo[]>(() => sourceInfos(appSettings), [appSettings]);
+  const sourceLabels = useMemo(
+    () => ({ ...appSettings.sourceNames, ...appSettings.sourceLabels }),
+    [appSettings.sourceNames, appSettings.sourceLabels],
+  );
   const removedCount = appSettings.removedSources?.length ?? 0;
   /** Removed sources whose updates are still stored. */
   const retired = useMemo<SourceInfo[]>(() => retiredSources(appSettings, stats?.bySource), [appSettings, stats?.bySource]);
@@ -172,11 +176,11 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   const settingsRows = useMemo(() => {
     const terms = searchTerms(settingsSearch);
     const matches = terms.length === 0 ? undefined : (row: SettingsRow) => {
-      const text = settingsRowText(row, config, configFile, profile, (id) => appSettings.sourceLabels[id] ?? '').toLowerCase();
+      const text = settingsRowText(row, config, configFile, profile, (id) => sourceLabels[id] ?? '').toLowerCase();
       return terms.every((t) => text.includes(t));
     };
     return buildSettingsRows(sources, collapsedSections, matches, removedCount, retired, shownProfile);
-  }, [sources, collapsedSections, settingsSearch, config, configFile, profile, shownProfile, appSettings.sourceLabels, removedCount, retired]);
+  }, [sources, collapsedSections, settingsSearch, config, configFile, profile, shownProfile, sourceLabels, removedCount, retired]);
 
   /** Collapse or expand a config section; the focus stays on its header. */
   const setSectionCollapsed = useCallback((header: string, collapsed: boolean) => {
@@ -472,8 +476,8 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   }, []);
 
   const sourceName = useCallback(
-    (id: string) => appSettings.sourceLabels[id] || sources.find((s) => s.id === id)?.displayName || experimentalSourceInfo(id)?.displayName || id,
-    [appSettings.sourceLabels, sources],
+    (id: string) => appSettings.sourceLabels[id] || appSettings.sourceNames[id] || sources.find((s) => s.id === id)?.displayName || experimentalSourceInfo(id)?.displayName || id,
+    [appSettings.sourceLabels, appSettings.sourceNames, sources],
   );
 
   // One fetch / regroup / restore at a time; a second digest run would plan the same items twice.
@@ -1160,7 +1164,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
 
     if (row.kind === 'source') {
       const sourceId = row.source.id;
-      const label = text.trim();
+      const label = text.trim().slice(0, MAX_SOURCE_LABEL_LENGTH);
       const newLabels = { ...appSettings.sourceLabels, [sourceId]: label };
       // An empty label (or the id itself) resets to the default
       if (label === '' || label === sourceId) delete newLabels[sourceId];
@@ -1546,7 +1550,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           setSourceDetails({ ...d, draft, editing: undefined, error: undefined, focus: Math.min(d.focus, detailsFields(own, draft).length - 1) });
           return;
         }
-        const next = editText(d.editing, raw, key);
+        const next = editText(d.editing, raw, key, field === 'label' ? MAX_SOURCE_LABEL_LENGTH : undefined);
         if (next !== undefined) setSourceDetails({ ...d, editing: next });
         return;
       }
@@ -1672,7 +1676,10 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         if (key.return) { if (editRow) commitEdit(editRow, editBuffer); return; }
         if (key.backspace || key.delete) { setEditBuffer((b) => b.slice(0, -1)); return; }
         // Pasted text arrives in one chunk; drop line breaks
-        if (input && !key.ctrl && !key.meta) setEditBuffer((b) => b + raw.replace(/[\r\n]/g, ''));
+        if (input && !key.ctrl && !key.meta) setEditBuffer((b) => {
+          const text = b + raw.replace(/[\r\n]/g, '');
+          return editRow?.kind === 'source' ? text.slice(0, MAX_SOURCE_LABEL_LENGTH) : text;
+        });
         return;
       }
 
@@ -2243,7 +2250,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         selectedIndex={selectedIndex}
         height={height}
         columns={width}
-        sourceLabels={appSettings.sourceLabels}
+        sourceLabels={sourceLabels}
         sourceColors={appSettings.sourceColors}
         search={search || undefined}
       />
@@ -2254,7 +2261,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         selectedIndex={selectedIndex}
         height={height}
         columns={width}
-        sourceLabels={appSettings.sourceLabels}
+        sourceLabels={sourceLabels}
         sourceColors={appSettings.sourceColors}
       />
     );
@@ -2292,7 +2299,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           height={height}
           columns={width}
           position={position}
-          sourceLabels={appSettings.sourceLabels}
+          sourceLabels={sourceLabels}
         />
       );
     }

@@ -26,7 +26,9 @@ export const BUILTIN_SOURCES: readonly SourceSpec[] = [
 
 const BUILTIN_IDS = new Set(BUILTIN_SOURCES.map((s) => s.id));
 
-type SourceSettings = Pick<AppSettings, 'userSources' | 'removedSources'>;
+type SourceSettings = Pick<AppSettings, 'userSources' | 'removedSources'> & Partial<Pick<AppSettings, 'sourceNames'>>;
+
+export const MAX_SOURCE_LABEL_LENGTH = 10;
 
 /** Built-ins the user kept, then the user's own sources. */
 export function activeSourceSpecs(settings: Partial<SourceSettings> = {}): SourceSpec[] {
@@ -35,10 +37,10 @@ export function activeSourceSpecs(settings: Partial<SourceSettings> = {}): Sourc
   return [...BUILTIN_SOURCES.filter((s) => !removed.has(s.id)), ...user];
 }
 
-export function sourceInfo(spec: SourceSpec): SourceInfo {
+export function sourceInfo(spec: SourceSpec, sourceNames: Partial<AppSettings['sourceNames']> = {}): SourceInfo {
   return {
     id: spec.id,
-    displayName: spec.displayName,
+    displayName: sourceNames[spec.id] || spec.displayName,
     capabilities: { preview: spec.kind === 'custom' ? spec.preview !== false : true },
     kind: spec.kind,
     builtin: BUILTIN_IDS.has(spec.id),
@@ -55,7 +57,7 @@ function sourceFilter(spec: SourceSpec): string | undefined {
 }
 
 export function sourceInfos(settings: Partial<SourceSettings> = {}): SourceInfo[] {
-  return activeSourceSpecs(settings).map(sourceInfo);
+  return activeSourceSpecs(settings).map((spec) => sourceInfo(spec, settings.sourceNames));
 }
 
 /** What the user types to add a source. */
@@ -149,11 +151,12 @@ export interface SourceDraft {
 /** The current values of a source, to start editing it. */
 export function sourceDraft(settings: Pick<AppSettings, 'disabledSources' | 'sourceLabels' | 'sourceColors'> & Partial<SourceSettings>, id: SourceId): SourceDraft {
   const own = userSource(settings, id);
+  const sourceName = BUILTIN_SOURCES.find((spec) => spec.id === id)?.displayName ?? id;
   return {
     enabled: !settings.disabledSources.includes(id),
     label: settings.sourceLabels[id] ?? '',
     color: settings.sourceColors?.[id] ?? '',
-    ...(own ? sourceEditInput(own) : { name: '', url: '', include: '', shorts: false }),
+    ...(own ? sourceEditInput(own) : { name: settings.sourceNames?.[id] ?? sourceName, url: '', include: '', shorts: false }),
   };
 }
 
@@ -172,14 +175,24 @@ export function isYoutubeChannelUrl(url: string): boolean {
 
 /** Settings patch that saves an edited draft of source `id`. */
 export function sourceDraftPatch(settings: AppSettings, id: SourceId, draft: SourceDraft): { patch: Partial<AppSettings> } | { error: string } {
+  const label = draft.label.trim();
+  if (label.length > MAX_SOURCE_LABEL_LENGTH) {
+    return { error: `Label must be ${MAX_SOURCE_LABEL_LENGTH} characters or fewer` };
+  }
   const patch: Partial<AppSettings> = {};
   const own = userSource(settings, id);
   if (own) {
     const edited = editUserSource(own, { url: draft.url, name: draft.name, include: isGithubRepoUrl(draft.url) ? undefined : draft.include, shorts: draft.shorts });
     if ('error' in edited) return edited;
     Object.assign(patch, updateSourcePatch(settings, edited.spec));
+  } else {
+    const sourceNames = { ...settings.sourceNames };
+    const defaultName = BUILTIN_SOURCES.find((spec) => spec.id === id)?.displayName ?? id;
+    const name = draft.name.trim();
+    if (name && name !== defaultName) sourceNames[id] = name;
+    else delete sourceNames[id];
+    patch.sourceNames = sourceNames;
   }
-  const label = draft.label.trim();
   const sourceLabels = { ...settings.sourceLabels };
   if (label && label !== id) sourceLabels[id] = label;
   else delete sourceLabels[id];
@@ -221,7 +234,7 @@ export function removeSourcePatch(
  * their updates are deleted. Includes updates of sources that no longer exist at all.
  */
 export function retiredSources(
-  settings: Partial<SourceSettings> & Partial<Pick<AppSettings, 'sourceLabels'>>,
+  settings: Partial<SourceSettings> & Partial<Pick<AppSettings, 'sourceLabels' | 'sourceNames'>>,
   bySource: Record<SourceId, number> = {},
 ): SourceInfo[] {
   const active = new Set(activeSourceSpecs(settings).map((s) => s.id));
@@ -230,16 +243,17 @@ export function retiredSources(
     .sort()
     .map((id) => {
       const builtin = BUILTIN_SOURCES.find((s) => s.id === id);
-      if (builtin) return { ...sourceInfo(builtin), removed: true };
-      return { id, displayName: settings.sourceLabels?.[id] ?? id, capabilities: { preview: true }, kind: 'feed', builtin: false, removed: true };
+      if (builtin) return { ...sourceInfo(builtin, settings.sourceNames), removed: true };
+      return { id, displayName: settings.sourceNames?.[id] ?? settings.sourceLabels?.[id] ?? id, capabilities: { preview: true }, kind: 'feed', builtin: false, removed: true };
     });
 }
 
 /** Settings patch that forgets the label and color of a source that is gone for good. */
-export function forgetSourcePatch(settings: Pick<AppSettings, 'sourceLabels' | 'sourceColors'>, id: SourceId): Partial<AppSettings> {
+export function forgetSourcePatch(settings: Pick<AppSettings, 'sourceLabels' | 'sourceColors' | 'sourceNames'>, id: SourceId): Partial<AppSettings> {
   const { [id]: _label, ...sourceLabels } = settings.sourceLabels;
   const { [id]: _color, ...sourceColors } = settings.sourceColors;
-  return { sourceLabels, sourceColors };
+  const { [id]: _name, ...sourceNames } = settings.sourceNames;
+  return { sourceLabels, sourceColors, sourceNames };
 }
 
 /** Settings patch that brings back every removed built-in. */

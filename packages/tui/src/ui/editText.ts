@@ -1,11 +1,11 @@
 import type { Key } from 'ink';
 
 /** `value` after a keystroke in a one-line text field, or undefined when the key isn't text. */
-export function editText(value: string, input: string, key: Key): string | undefined {
+export function editText(value: string, input: string, key: Key, maxLength = Infinity): string | undefined {
   if (key.backspace || key.delete) return value.slice(0, -1);
   if (key.ctrl && input === 'u') return '';
   if (!input || key.ctrl || key.meta || key.tab || key.escape) return undefined;
-  return value + input.replace(/[\r\n]+/g, ' ');
+  return (value + input.replace(/[\r\n]+/g, ' ')).slice(0, maxLength);
 }
 
 /** The line the cursor ends, or undefined while the cursor is inside the line. */

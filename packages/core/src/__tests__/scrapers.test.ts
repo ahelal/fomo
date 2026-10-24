@@ -667,11 +667,16 @@ describe('source specs', () => {
   it('saves a draft of the details popup', () => {
     const mine = { kind: 'feed' as const, id: 'mine', displayName: 'Mine', urls: ['https://a.example/rss'] };
     const current = settings({ userSources: [mine], sourceColors: { github: '#3fb950' } });
-    expect(sourceDraft(current, 'github')).toEqual({ enabled: true, label: '', color: '#3fb950', name: '', url: '', include: '', shorts: false });
+    expect(sourceDraft(current, 'github')).toEqual({ enabled: true, label: '', color: '#3fb950', name: 'GitHub Changelog', url: '', include: '', shorts: false });
     expect(sourceDraft(current, 'mine')).toMatchObject({ name: 'Mine', url: 'https://a.example/rss' });
 
     const builtin = sourceDraftPatch(current, 'github', { ...sourceDraft(current, 'github'), enabled: false, label: '🐙', color: '' });
-    expect(builtin).toEqual({ patch: { sourceLabels: { github: '🐙' }, sourceColors: {}, disabledSources: ['github'] } });
+    expect(builtin).toEqual({ patch: { sourceNames: {}, sourceLabels: { github: '🐙' }, sourceColors: {}, disabledSources: ['github'] } });
+
+    const renamed = sourceDraftPatch(current, 'github', { ...sourceDraft(current, 'github'), name: 'GitHub' });
+    expect(renamed).toEqual({ patch: { sourceNames: { github: 'GitHub' }, sourceLabels: {}, sourceColors: { github: '#3fb950' }, disabledSources: [] } });
+    expect(sourceInfos({ ...current, sourceNames: { github: 'GitHub' } }).find((s) => s.id === 'github')?.displayName).toBe('GitHub');
+    expect(sourceDraftPatch(current, 'github', { ...sourceDraft(current, 'github'), label: '12345678901' })).toHaveProperty('error');
 
     const own = sourceDraftPatch(current, 'mine', { ...sourceDraft(current, 'mine'), url: 'https://a.example/rss\nhttps://b.example/rss', include: 'ai' });
     expect(own).toMatchObject({ patch: { userSources: [{ id: 'mine', urls: ['https://a.example/rss', 'https://b.example/rss'], include: 'ai' }] } });
@@ -716,7 +721,7 @@ describe('source specs', () => {
       ['mine', 'Mine', false, true],
       ['orphan', 'orphan', false, true],
     ]);
-    expect(forgetSourcePatch({ ...kept, sourceColors: { mine: '#fff' } }, 'mine')).toEqual({ sourceLabels: {}, sourceColors: {} });
+    expect(forgetSourcePatch({ ...kept, sourceColors: { mine: '#fff' } }, 'mine')).toEqual({ sourceLabels: {}, sourceColors: {}, sourceNames: {} });
     expect(removeSourcePatch(base, 'mine').sourceLabels).toBeUndefined();
   });
 

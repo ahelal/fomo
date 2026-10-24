@@ -34,6 +34,7 @@ export {
   userSource,
   sourceDraft,
   sourceDraftPatch,
+  MAX_SOURCE_LABEL_LENGTH,
   isGithubRepoUrl,
   isYoutubeChannelUrl,
   type SourceDraft,

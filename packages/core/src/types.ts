@@ -478,8 +478,10 @@ export interface AppSettings {
   previewPosition: PreviewPosition;
   /** Default page size for listing updates. */
   pageSize: number;
-  /** Custom display labels per source (e.g. { github: "🐙 GH" }). Falls back to source id. */
+  /** Short display labels per source (e.g. { github: "🐙 GH" }). Falls back to its configured name. */
   sourceLabels: Record<SourceId, string>;
+  /** Custom source names, independent of the optional short labels. */
+  sourceNames: Record<SourceId, string>;
   /** Custom display colors per source (e.g. { github: "#58a6ff" }). Falls back to default cyan. */
   sourceColors: Record<SourceId, string>;
   /** Sources added by the user from the app. */
@@ -493,6 +495,7 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
   previewPosition: 'right',
   pageSize: 50,
   sourceLabels: {},
+  sourceNames: {},
   sourceColors: {},
   userSources: [],
   removedSources: [],

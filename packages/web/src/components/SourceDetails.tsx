@@ -115,8 +115,8 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
         <div className="settings-panel__section">
           <h3>Look</h3>
           <label className="source-details__field">
-            <span>Label</span>
-            <input className="settings-panel__add-input" value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={source.displayName} />
+            <span>Label (max 10 characters)</span>
+            <input className="settings-panel__add-input" maxLength={10} value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={source.displayName} />
           </label>
           <div className="source-details__color">
             <span>Color</span>
@@ -138,12 +138,12 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
 
         <div className="settings-panel__section">
           <h3>Source</h3>
+          <label className="source-details__field">
+            <span>Name</span>
+            <input className="settings-panel__add-input" value={draft.name} onChange={(e) => set({ name: e.target.value })} />
+          </label>
           {own ? (
             <>
-              <label className="source-details__field">
-                <span>Name</span>
-                <input className="settings-panel__add-input" value={draft.name} onChange={(e) => set({ name: e.target.value })} />
-              </label>
               <label className="source-details__field">
                 <span>{own.kind === 'feed' ? 'Feed URLs (one per line) or GitHub repo URL' : own.kind === 'youtube' ? 'YouTube channel or playlist URL' : 'GitHub repo URL'}</span>
                 <textarea className="settings-panel__add-input" rows={3} value={draft.url} onChange={(e) => set({ url: e.target.value })} />
@@ -165,7 +165,7 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
             <dl className="source-details__facts">
               <dt>Fetches</dt><dd className="source-details__location">{source.location ?? 'custom code in the app'}</dd>
               {source.filter && <><dt>Keeps</dt><dd>{source.filter}</dd></>}
-              <dt /><dd className="settings-panel__hint">Built-in: its address is maintained with the app.</dd>
+              <dt /><dd className="settings-panel__hint">Built-in source addresses are maintained with the app.</dd>
             </dl>
           )}
         </div>

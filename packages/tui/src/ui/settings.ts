@@ -305,7 +305,7 @@ export function rowHint(row: SettingsRow | undefined): string {
       return row.action === 'profiles' ? '↵ open the profile list' : '↵ run';
     case 'source': return row.source.removed
       ? '↵ details   v show its updates   x delete its items (removes it for good)'
-      : '↵ details & edit   space on/off   e label   d color   f fetch now   v show its updates   x remove';
+      : '↵ details & edit   space on/off   e label (max 10)   d color   f fetch now   v show its updates   x remove';
     case 'add-source': return '↵ add an RSS/Atom feed, a GitHub repository or a YouTube channel';
     case 'restore-sources': return '↵ bring back the removed built-in sources';
     case 'experimental': return '↵ on/off (on asks to sign in)   l sign in again   f fetch now   v show its updates   x delete its items';

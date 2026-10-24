@@ -138,6 +138,7 @@ export function SettingsPanel({ settings, sources, stats, onToggleSource, onSetP
                     {isEditing ? (
                       <input
                         className="settings-panel__label-input"
+                        maxLength={10}
                         value={editBuffer}
                         onChange={(e) => setEditBuffer(e.target.value)}
                         onKeyDown={(e) => {

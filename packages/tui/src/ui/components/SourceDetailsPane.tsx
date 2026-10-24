@@ -20,7 +20,8 @@ export interface SourceDetailsState {
 /** The rows of the popup: name, URLs and filter only for the user's own sources (no filter for a repository; Shorts for a YouTube channel). */
 export function detailsFields(own: boolean, draft: SourceDraft): DetailsField[] {
   const fields: DetailsField[] = ['enabled', 'label', 'color'];
-  if (own) fields.push('name', 'url', ...(isGithubRepoUrl(draft.url) ? [] : ['include' as const]), ...(isYoutubeChannelUrl(draft.url) ? ['shorts' as const] : []));
+  fields.push('name');
+  if (own) fields.push('url', ...(isGithubRepoUrl(draft.url) ? [] : ['include' as const]), ...(isYoutubeChannelUrl(draft.url) ? ['shorts' as const] : []));
   return fields;
 }
 
@@ -151,7 +152,7 @@ function field(f: DetailsField | undefined): string {
   switch (f) {
     case 'url': return 'feed URLs (separate with spaces), github.com/owner/repo or a YouTube channel/playlist URL';
     case 'include': return 'keywords to keep, as a regex (empty keeps everything)';
-    case 'label': return 'a short label (empty shows the name)';
+    case 'label': return 'a short label, max 10 characters (empty shows the name)';
     default: return 'a value';
   }
 }
