@@ -1,5 +1,5 @@
 import React from 'react';
-import { IMPORTANCE_LABEL, type DigestEntry, type Update } from '@fomo/core';
+import { formatDate, IMPORTANCE_LABEL, type DigestEntry, type Update } from '@fomo/core';
 
 interface Props {
   entry: DigestEntry;
@@ -41,7 +41,7 @@ export function TopicPane({ entry, sourceLabels = {}, onOpenItem, onMarkRead, on
         </div>
         <div className="detail-pane__meta-row">
           <span>Latest</span>
-          <span className="detail-pane__meta-val">{entry.latestDate.slice(0, 10)}</span>
+          <span className="detail-pane__meta-val">{formatDate(entry.latestDate)}</span>
         </div>
       </div>
 
@@ -70,7 +70,7 @@ export function TopicPane({ entry, sourceLabels = {}, onOpenItem, onMarkRead, on
         {items.map((u) => (
           <div key={u.id} className="topic-pane__item">
             <button className="topic-pane__item-title" onClick={() => onOpenItem(u)}>
-              <span className="topic-pane__item-meta">{u.datePublished.slice(0, 10)} · {label(u.source)}</span>
+              <span className="topic-pane__item-meta">{formatDate(u.datePublished)} · {label(u.source)}</span>
               <span>
                 {saved
                   ? u.status === 'unread' && <span className="digest-row__unread" title="Unread">● </span>

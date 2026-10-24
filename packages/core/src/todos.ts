@@ -151,7 +151,7 @@ export function dueTone(todo: Pick<Todo, 'dueDate' | 'status'>, now = new Date()
   return days < 0 ? 'overdue' : 'soon';
 }
 
-/** Short due text: `3d overdue`, `today`, `tomorrow`, `in 5d`, or the date (`Mar 4`) further out. */
+/** Short due text: `3d overdue`, `today`, `tomorrow`, `in 5d`, or the date (`Mar 4`, `Jan 2 '27` in another year) further out. */
 export function dueLabel(dueDate: string | undefined, now = new Date()): string {
   const days = daysUntil(dueDate, now);
   if (days === undefined) return '';
@@ -161,7 +161,7 @@ export function dueLabel(dueDate: string | undefined, now = new Date()): string 
   if (days < 14) return `in ${days}d`;
   const due = localDay(dueDate!)!;
   const label = `${MONTHS[due.getMonth()]} ${due.getDate()}`;
-  return due.getFullYear() === now.getFullYear() ? label : `${label} ${due.getFullYear()}`;
+  return due.getFullYear() === now.getFullYear() ? label : `${label} '${String(due.getFullYear() % 100).padStart(2, '0')}`;
 }
 
 /**

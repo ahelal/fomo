@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { IMPORTANCE_LABEL, type DigestEntry } from '@fomo/core';
+import { formatDate, IMPORTANCE_LABEL, type DigestEntry } from '@fomo/core';
 
 const IMPORTANCE_COLOR = { high: '#f0883e', medium: '#58a6ff', low: '#8b949e' } as const;
 
@@ -46,7 +46,7 @@ export function TopicPane({ entry, height, columns, position = 'bottom', sourceL
           </Box>
         )}
         <Text color="#8b949e" wrap="truncate">
-          {`${count} · ${sources} · latest ${entry.latestDate.slice(0, 10)}`}
+          {`${count} · ${sources} · latest ${formatDate(entry.latestDate)}`}
         </Text>
       </Box>
       <Box paddingX={2} flexShrink={0}>
@@ -76,7 +76,7 @@ export function TopicPane({ entry, height, columns, position = 'bottom', sourceL
             {saved && (
               <Box flexShrink={0}><Text color="#58a6ff">{u.status === 'unread' ? '● ' : '  '}</Text></Box>
             )}
-            <Box flexShrink={0}><Text color="#8b949e">{`${u.datePublished.slice(0, 10)}  `}</Text></Box>
+            <Box flexShrink={0}><Text color="#8b949e">{`${formatDate(u.datePublished)}  `}</Text></Box>
             <Text color="#c9d1d9" wrap="truncate">{u.title}</Text>
           </Box>
           {u.summary && (

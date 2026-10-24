@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { folderColor, normalizeFolder, type Reference, type ReferenceRow } from '@fomo/core';
+import { folderColor, formatDate, normalizeFolder, type Reference, type ReferenceRow } from '@fomo/core';
 import { REF_FIELDS, REF_FOLDER_COLOR, type RefField, type ReferencesViewState } from '../hooks/useReferences.js';
 import {
   ACCENT,
@@ -114,7 +114,7 @@ function Details({ row, columns, confirmDelete, folderColorOf }: { row?: Referen
       <Text key="m" color={confirmDelete === ref.id ? ERROR : MUTED} wrap="truncate-end">
         {confirmDelete === ref.id
           ? ' d again to delete · any other key cancels'
-          : ` ${ref.folder || 'top level'} · added ${ref.createdAt.slice(0, 10)}  [↵/o] open  [y] copy link  [e] edit  [c] color  [d] delete`}
+          : ` ${ref.folder || 'top level'} · added ${formatDate(ref.createdAt)}  [↵/o] open  [y] copy link  [e] edit  [c] color  [d] delete`}
       </Text>,
     );
   }

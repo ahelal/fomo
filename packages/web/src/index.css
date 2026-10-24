@@ -253,7 +253,7 @@ body {
 }
 .updates-header {
   display: grid;
-  grid-template-columns: 140px 100px 40px 70px 1fr;
+  grid-template-columns: 140px 80px 40px 70px 1fr;
   gap: 12px;
   padding: 4px 12px;
   border-bottom: 1px solid var(--border);
@@ -273,7 +273,7 @@ body {
 }
 .update-row__inner {
   display: grid;
-  grid-template-columns: 140px 100px 40px 70px 1fr;
+  grid-template-columns: 140px 80px 40px 70px 1fr;
   gap: 12px;
   padding: 5px 12px;
   cursor: pointer;
@@ -350,7 +350,7 @@ body {
 .digest-header,
 .digest-row__inner {
   display: grid;
-  grid-template-columns: 20px 1fr 40px 160px 100px 28px;
+  grid-template-columns: 20px 1fr 40px 160px 80px 28px;
   gap: 12px;
   align-items: center;
 }

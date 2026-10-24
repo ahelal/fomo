@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Update, Status } from '@fomo/core';
+import { formatDate, formatDateTime, type Update, type Status } from '@fomo/core';
 import { DuplicateLinks } from './DuplicateLinks.js';
 
 interface Props {
@@ -53,8 +53,14 @@ export function DetailPane({
         </div>
         <div className="detail-pane__meta-row">
           <span>Published</span>
-          <span className="detail-pane__meta-val">{update.datePublished.slice(0, 10)}</span>
+          <span className="detail-pane__meta-val">{formatDate(update.datePublished)}</span>
         </div>
+        {update.dateAdded && (
+          <div className="detail-pane__meta-row">
+            <span>Fetched</span>
+            <span className="detail-pane__meta-val">{formatDateTime(update.dateAdded)}</span>
+          </div>
+        )}
         <div className="detail-pane__meta-row">
           <span>Status</span>
           <span className="detail-pane__meta-val">{update.status}{update.saved ? ' ⭐' : ''}</span>

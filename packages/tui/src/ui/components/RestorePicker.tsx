@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { formatDateTime } from '@fomo/core';
 import { tildify } from '../../config.js';
 
 export interface BackupFile {
@@ -41,7 +42,7 @@ export function RestorePicker({ dir, files, focusIndex, confirming, height, colu
             <Text key={file.path} wrap="truncate">
               <Text color="#1c7cd6" backgroundColor={bg}>{focused ? '▸ ' : '  '}</Text>
               <Text color="#f0f6fc" backgroundColor={bg}>{name}</Text>
-              <Text color="#8b949e" backgroundColor={bg}>{`  ${file.mtime.toLocaleString()}  ${formatSize(file.size).padStart(8)}`}</Text>
+              <Text color="#8b949e" backgroundColor={bg}>{`  ${formatDateTime(file.mtime)}  ${formatSize(file.size).padStart(8)}`}</Text>
             </Text>
           );
         })}

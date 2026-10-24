@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Box, Text } from 'ink';
-import { formatUpdateTime, type Update } from '@fomo/core';
+import { formatDate, formatUpdateTime, type Update } from '@fomo/core';
 
 const STATUS_ICON: Record<string, { icon: string; color: string }> = {
   unread: { icon: '●', color: '#58a6ff' },
@@ -63,7 +63,7 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
 
   // Column widths
   const sourceW = 13;
-  const dateW = 12;
+  const dateW = 10;
   const statusW = 4;
   const timeW = 8;
   const prefixW = 3;
@@ -109,7 +109,7 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
         const isSelected = realIdx === selectedIndex;
         const { unread: isUnread, status: statusLabel, statusColor, textColor } = updateLook(update);
         const sourceColor = sourceColors[update.source] ?? DEFAULT_SOURCE_COLOR[update.source] ?? '#58a6ff';
-        const dateStr = update.datePublished.slice(0, 10);
+        const dateStr = formatDate(update.datePublished);
         const source = (sourceLabels[update.source] ?? update.source).slice(0, 11).padEnd(sourceW);
         const rowTitleW = update.duplicateOf ? titleW - DUP_BADGE.length : titleW;
         const titleRaw = update.title.length > rowTitleW

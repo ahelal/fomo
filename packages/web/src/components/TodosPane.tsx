@@ -16,6 +16,7 @@ import {
   sortLabel,
   todoCounts,
   todoFilterLabel,
+  formatDate,
   type FomoService,
   type Todo,
   type TodoFilter,
@@ -304,7 +305,7 @@ export function TodoDetails({ todo, color, actions }: { todo: Todo; color?: stri
         </span>
         {' · '}
         {todo.dueDate
-          ? <span className={`todo-due--${dueTone(todo)}`}>due {todo.dueDate} ({dueLabel(todo.dueDate)})</span>
+          ? <span className={`todo-due--${dueTone(todo)}`}>due {formatDate(todo.dueDate)} ({dueLabel(todo.dueDate)})</span>
           : 'no due date'}
         {' · '}
         {todo.folder ? `${todo.folder}/` : 'top level'}

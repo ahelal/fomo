@@ -43,7 +43,8 @@ describe('DuplicateLinks', () => {
     expect(html).toContain('>original<');
     expect(html).toContain('>Hacker News<');
     expect(html).toContain('other source');
-    expect(html).toContain('2025-03-04');
+    expect(html).toContain('25-03-04');
+    expect(html).not.toContain('2025-03-04');
   });
 
   it('shows the copies on the original, in the order given', () => {

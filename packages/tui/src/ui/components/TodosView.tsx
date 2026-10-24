@@ -7,6 +7,7 @@ import {
   dueTone,
   folderColor,
   nextTodoStatus,
+  formatDate,
   normalizeFolder,
   todoFilterLabel,
   TODO_STATUS_COLOR,
@@ -173,7 +174,7 @@ function Details({ row, columns, confirmDelete, folderColors, folderColorOf }: {
   } else {
     const todo = row.item;
     const notes = todo.description.split(/\r\n?|\n/);
-    const due = todo.dueDate ? `due ${todo.dueDate} (${dueLabel(todo.dueDate)})` : 'no due date';
+    const due = todo.dueDate ? `due ${formatDate(todo.dueDate)} (${dueLabel(todo.dueDate)})` : 'no due date';
     const inherited = folderColor(folderColors, todo.folder);
     lines.push(
       <Text key="d" color={TEXT} wrap="truncate-end">

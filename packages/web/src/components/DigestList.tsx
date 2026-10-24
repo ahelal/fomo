@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { soloUpdate, type DigestRow, type Update } from '@fomo/core';
+import { formatDate, soloUpdate, type DigestRow, type Update } from '@fomo/core';
 import { usePullToRefresh } from '../hooks/usePullToRefresh.js';
 import { DupBadge } from './UpdatesTable.js';
 
@@ -121,7 +121,7 @@ export function DigestList({
                 </span>
                 <span />
                 <span className="digest-row__sources" style={colorStyle(u.source)}>{label(u.source)}</span>
-                <span className="digest-row__date">{u.datePublished.slice(0, 10)}</span>
+                <span className="digest-row__date">{formatDate(u.datePublished)}</span>
                 {readButton(row)}
               </div>
             </div>
@@ -158,7 +158,7 @@ export function DigestList({
               <span className="digest-row__sources" style={single ? colorStyle(single) : undefined}>
                 {single ? label(single) : entry.sources.map(label).join(', ')}
               </span>
-              <span className="digest-row__date">{entry.latestDate.slice(0, 10)}</span>
+              <span className="digest-row__date">{formatDate(entry.latestDate)}</span>
               {readButton(row)}
             </div>
           </div>

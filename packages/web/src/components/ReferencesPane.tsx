@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   REFERENCE_SORTS,
   buildReferenceRows,
+  formatDate,
   isDefaultSort,
   nextSort,
   rowFolder,
@@ -172,7 +173,7 @@ export function ReferencesPane({ service, active }: Props) {
               <p className="tree-details__title" style={tree.colorOf(row.item) ? { color: tree.colorOf(row.item) } : undefined}>{row.item.title}</p>
               <a className="tree-details__url" href={row.item.url} target="_blank" rel="noreferrer noopener">{row.item.url}</a>
               {row.item.description && <p className="tree-details__desc">{row.item.description}</p>}
-              <p className="tree-details__meta">{row.item.folder || 'top level'} · filed {row.item.createdAt.slice(0, 10)}</p>
+              <p className="tree-details__meta">{row.item.folder || 'top level'} · filed {formatDate(row.item.createdAt)}</p>
               <div className="tree-details__actions">
                 <button type="button" className="btn btn--primary" onClick={() => openUrl(row.item.url)}>o · Open ↗</button>
                 <button type="button" className="btn" onClick={() => editLink(row.item)}>e · Edit</button>

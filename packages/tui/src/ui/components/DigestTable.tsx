@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Box, Text } from 'ink';
-import { formatUpdateTime, soloUpdate, type DigestEntry, type DigestRow } from '@fomo/core';
+import { formatDate, formatUpdateTime, soloUpdate, type DigestEntry, type DigestRow } from '@fomo/core';
 import { DEFAULT_SOURCE_COLOR, DUP_BADGE, DUP_COLOR, updateLook } from './UpdatesTable.js';
 
 interface Props {
@@ -22,7 +22,7 @@ interface Props {
 
 const SEL_BG = '#1c2d4f';
 const SOURCE_W = 13;
-const DATE_W = 12;
+const DATE_W = 10;
 const COUNT_W = 5;
 const TIME_W = 8;
 const READ_COLOR = '#8b949e';
@@ -147,7 +147,7 @@ export function DigestTable({
                 {bar}
                 <Text color="#30363d" backgroundColor={bg}>{'└ '}</Text>
                 <Text color={color(u.source)} bold={look.unread} backgroundColor={bg}>{label(u.source).padEnd(SOURCE_W)}</Text>
-                <Text color={look.textColor} bold={look.unread} backgroundColor={bg}>{u.datePublished.slice(0, 10).padEnd(DATE_W)}</Text>
+                <Text color={look.textColor} bold={look.unread} backgroundColor={bg}>{formatDate(u.datePublished).padEnd(DATE_W)}</Text>
                 <Text color={look.statusColor} backgroundColor={bg}>{look.status.padEnd(COUNT_W)}</Text>
                 <Text color={look.textColor} backgroundColor={bg}>{formatUpdateTime(u).padEnd(TIME_W)}</Text>
                 {u.duplicateOf && <Text color={DUP_COLOR} backgroundColor={bg}>{DUP_BADGE}</Text>}
@@ -192,7 +192,7 @@ export function DigestTable({
               {bar}
               <Text color={solo ? '#8b949e' : '#58a6ff'} backgroundColor={bg}>{marker}</Text>
               <Text color={sourceColor} bold={unread} backgroundColor={bg}>{sourceText.padEnd(SOURCE_W)}</Text>
-              <Text color={textColor} bold={unread} backgroundColor={bg}>{entry.latestDate.slice(0, 10).padEnd(DATE_W)}</Text>
+              <Text color={textColor} bold={unread} backgroundColor={bg}>{formatDate(entry.latestDate).padEnd(DATE_W)}</Text>
               <Text color={countColor} bold={!soloLook && unread} backgroundColor={bg}>{count.padEnd(COUNT_W)}</Text>
               <Text color={textColor} backgroundColor={bg}>{(solo ? formatUpdateTime(solo) : '').padEnd(TIME_W)}</Text>
               {importance === 'high' && <Text color={unread ? '#f0883e' : READ_COLOR} bold={unread} backgroundColor={bg}>{'▲ '}</Text>}

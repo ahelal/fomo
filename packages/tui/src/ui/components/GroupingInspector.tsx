@@ -1,13 +1,14 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import stringWidth from 'string-width';
+import { formatDateTime } from '@fomo/core';
 import type { DigestInspection } from '@fomo/core/digest';
 
 export function inspectionText(inspection: DigestInspection | undefined, inputs: boolean): string {
   if (!inspection) return 'No grouping run recorded. Press r to regroup unread and pending items.';
   const titles = new Map(inspection.items.map((item) => [item.id, item.title]));
   const lines = [
-    `Run started: ${inspection.startedAt}`,
+    `Run started: ${formatDateTime(inspection.startedAt) || inspection.startedAt}`,
     `Frozen guidance: ${inspection.guidance || '(none)'}`,
     'Similarity scores are lexical overlap, not confidence. Rationales are model statements, not internal reasoning.',
     '',

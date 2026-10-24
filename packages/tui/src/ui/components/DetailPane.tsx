@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { formatUpdateTime, type Update } from '@fomo/core';
+import { formatDate, formatDateTime, formatUpdateTime, type Update } from '@fomo/core';
 import { textWidth } from '../text.js';
 import { DUP_COLOR } from './UpdatesTable.js';
 
@@ -80,6 +80,7 @@ export function DetailPane({
   const badge = STATUS_BADGE[update.status] ?? { label: '???', color: 'white' };
   const sourceColor = SOURCE_COLOR[update.source] ?? '#58a6ff';
   const time = formatUpdateTime(update);
+  const fetched = formatDateTime(update.dateAdded);
 
   const content = update.content
     ? update.content
@@ -131,13 +132,13 @@ export function DetailPane({
         </Text>
       </Box>
 
-      {/* Meta: source + date */}
+      {/* Meta: source, dates, length */}
       <Box paddingX={2} flexShrink={0}>
         <Text color="#8b949e" wrap="truncate">
           {'Source '}
           <Text color={sourceColor} bold>{update.source}</Text>
           {'   Published '}
-          <Text color="#c9d1d9">{update.datePublished.slice(0, 10)}</Text>
+          <Text color="#c9d1d9">{formatDate(update.datePublished)}</Text>
           {time && (
             <>
               {update.durationSeconds ? '   Length ' : '   Reading '}
@@ -148,6 +149,12 @@ export function DetailPane({
             <>
               {'   '}
               <Text color={DUP_COLOR} bold>{`duplicate of ${update.duplicateOf.slice(0, update.duplicateOf.indexOf('__'))}`}</Text>
+            </>
+          )}
+          {fetched && (
+            <>
+              {'   Fetched '}
+              <Text color="#c9d1d9">{fetched}</Text>
             </>
           )}
         </Text>
@@ -242,7 +249,7 @@ export function DetailPane({
                     {'  '}
                     <Text color={colorOf(other.source)} bold>{labelOf(other.source)}</Text>
                     {other.source !== update.source && <Text color={DUP_COLOR} bold>{'  other source'}</Text>}
-                    <Text color="#8b949e">{`   ${other.datePublished.slice(0, 10)}   `}</Text>
+                    <Text color="#8b949e">{`   ${formatDate(other.datePublished)}   `}</Text>
                     {listed?.has(other.id)
                       ? <Text color="#58a6ff" bold>{'d jump'}</Text>
                       : <Text color="#8b949e" dimColor>{'not in this view'}</Text>}

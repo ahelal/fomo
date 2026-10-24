@@ -43,9 +43,17 @@ describe('DetailPane refresh (u)', () => {
   });
 
   it('shows the reading time or the video length', () => {
-    expect(pane({ update: { ...POST, readingTimeMinutes: 9 } })).toMatch(/Published 2026-10-01\s+Reading ~9m/);
+    expect(pane({ update: { ...POST, readingTimeMinutes: 9 } })).toMatch(/Published 26-10-01\s+Reading ~9m/);
     expect(pane({ update: { ...POST, durationSeconds: 849 } })).toMatch(/Length 15m/);
     expect(pane({})).not.toMatch(/Reading ~|Length /);
+  });
+
+  it('shows when it was fetched, with the time, after the publish date', () => {
+    const fetchedAt = new Date(2026, 9, 2, 8, 7);
+    const out = pane({ update: { ...POST, dateAdded: fetchedAt.toISOString(), readingTimeMinutes: 9 } });
+    expect(out).toMatch(/Published 26-10-01\s+Reading ~9m\s+Fetched 26-10-02 08:07/);
+    expect(out).not.toContain('2026');
+    expect(pane({ update: { ...POST, dateAdded: '' } })).not.toContain('Fetched');
   });
 
   it('points to u when there is no preview', () => {

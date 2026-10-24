@@ -138,7 +138,7 @@ describe('due dates', () => {
     expect(dueLabel('2026-03-05', NOW)).toBe('tomorrow');
     expect(dueLabel('2026-03-17', NOW)).toBe('in 13d');
     expect(dueLabel('2026-03-18', NOW)).toBe('Mar 18');
-    expect(dueLabel('2027-01-02', NOW)).toBe('Jan 2 2027');
+    expect(dueLabel('2027-01-02', NOW)).toBe("Jan 2 '27");
     expect(dueLabel(undefined, NOW)).toBe('');
     expect(dueLabel('soon', NOW)).toBe('');
   });

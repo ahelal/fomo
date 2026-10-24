@@ -84,7 +84,7 @@ describe('TodoDetails', () => {
     const html = renderToStaticMarkup(<TodoDetails todo={TODO} color="#f85149" />);
     expect(html).toContain('<p class="tree-details__title" style="color:#f85149">Ship folders</p>');
     expect(text(html)).toContain('◑ In progress');
-    expect(html).toContain('<span class="todo-due--overdue">due 2026-03-02 (2d overdue)</span>');
+    expect(html).toContain('<span class="todo-due--overdue">due 26-03-02 (2d overdue)</span>');
     expect(text(html)).toContain('work/fomo/');
     expect(text(html)).toContain('No notes — e to add them.');
   });

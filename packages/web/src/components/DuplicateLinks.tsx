@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Update } from '@fomo/core';
+import { formatDate, type Update } from '@fomo/core';
 
 interface Props {
   /** Source of the update being viewed, to flag a duplicate that comes from another one. */
@@ -33,7 +33,7 @@ export function DuplicateLinks({ source, duplicates, listed, onJump, labelOf, co
                 </span>
                 <span className="dup-link__source" style={color ? { color } : undefined}>{labelOf(d.source)}</span>
                 {d.source !== source && <span className="dup-link__other">other source</span>}
-                <span className="dup-link__date">{d.datePublished.slice(0, 10)}</span>
+                <span className="dup-link__date">{formatDate(d.datePublished)}</span>
                 {listed.has(d.id) ? (
                   <button className="btn dup-link__jump" onClick={() => onJump(d.id)} title="Jump to it in this view (d)">
                     d · Jump

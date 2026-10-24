@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { formatUpdateTime, type Update } from '@fomo/core';
+import { formatDate, formatUpdateTime, type Update } from '@fomo/core';
 import { usePullToRefresh } from '../hooks/usePullToRefresh.js';
 
 /** Marks an update that repeats an earlier one, naming the source of the original. */
@@ -113,7 +113,7 @@ export function UpdatesTable({ updates, selectedId, onSelect, sourceLabels = {},
           >
             <div className="update-row__inner" onClick={() => onSelect(u)}>
               <span className="update-row__source" style={sourceColors[u.source] ? { color: sourceColors[u.source] } : undefined}>{sourceLabels[u.source] ?? u.source}</span>
-              <span className="update-row__date">{u.datePublished.slice(0, 10)}</span>
+              <span className="update-row__date">{formatDate(u.datePublished)}</span>
               <span className={`update-row__status-dot update-row__status-dot--${STATUS_ICON[u.status]?.cls ?? u.status}`}>
                 {u.saved ? '⭐' : ''}{STATUS_ICON[u.status]?.icon ?? u.status}
               </span>

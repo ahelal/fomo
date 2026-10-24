@@ -67,15 +67,15 @@ describe('DetailPane duplicates', () => {
   it('links a copy to its original, with the source and whether d can jump to it', () => {
     const out = pane({ update: withContent(COPY), duplicates: [ORIGINAL], listed: new Set([ORIGINAL.id]) });
     expect(out).toContain('duplicates');
-    expect(out).toMatch(/original\s+Hacker News\s+other source\s+2026-10-01\s+d jump/);
+    expect(out).toMatch(/original\s+Hacker News\s+other source\s+26-10-01\s+d jump/);
     expect(out).toContain('Alpha original');
     expect(out).toContain('The body of the post');
   });
 
   it('links an original to its copies, and says when they are not in this view', () => {
     const out = pane({ update: withContent(ORIGINAL), duplicates: [COPY, COPY_2], listed: new Set([COPY_2.id]) });
-    expect(out).toMatch(/duplicate\s+YouTube\s+other source\s+2026-10-01\s+not in this view/);
-    expect(out).toMatch(/duplicate\s+Hacker News\s+2026-10-01\s+d jump/);
+    expect(out).toMatch(/duplicate\s+YouTube\s+other source\s+26-10-01\s+not in this view/);
+    expect(out).toMatch(/duplicate\s+Hacker News\s+26-10-01\s+d jump/);
     // Only a copy from a source other than the original's is marked
     expect(times(out, 'other source')).toBe(1);
     expect(out).toContain('Gamma copy');
