@@ -262,10 +262,7 @@ The backup format is `{ version: 1, exportedAt, count, entities: [...] }`.
 |--------|----|----------------|
 | FOMO Releases | `fomo-releases` | Releases of `ahelal/fomo` |
 
-New accounts start with only FOMO Releases. When an existing account upgrades, its previous built-in
-feeds become its own sources (editable and removable, with their labels, colors and items kept).
-The former Copilot CLI source migrates to an editable GitHub releases source configured with
-`changelog.md`. Anthropic sources, which run bundled extension code, stay built-in.
+FOMO includes only FOMO Releases by default.
 
 ### Adding a New Source
 
