@@ -1,5 +1,5 @@
 import type { AppSettings, SourceId, SourceInfo, SourceSpec, UserSourceSpec } from '../types.js';
-import { EXPERIMENTAL_SOURCE_INFOS, isExperimentalSource } from '../experimental.js';
+import { EXPERIMENTAL_SOURCE_INFOS, experimentalSourceInfo, isExperimentalSource } from '../experimental.js';
 import { parseYoutubeUrl, youtubeName, youtubeUrl } from './youtube.js';
 
 const AZURE_UPDATES_FEED = 'https://www.microsoft.com/releasecommunications/api/v2/azure/rss';
@@ -10,10 +10,10 @@ export const BUILTIN_SOURCES: readonly SourceSpec[] = [
   { kind: 'feed', id: 'github-blog', displayName: 'GitHub Blog', urls: ['https://github.blog/feed/'] },
   { kind: 'feed', id: 'azure', displayName: 'Azure Updates', urls: [AZURE_UPDATES_FEED] },
   { kind: 'feed', id: 'vscode', displayName: 'VS Code Updates', urls: ['https://code.visualstudio.com/feed.xml'], category: 'release' },
-  { kind: 'custom', id: 'copilot-cli', displayName: 'Copilot CLI Releases', module: 'copilot-cli' },
+  { kind: 'custom', id: 'copilot-cli', displayName: 'Copilot CLI Releases', extension: 'copilot-cli', extensionName: 'Copilot CLI' },
   { kind: 'feed', id: 'theregister', displayName: 'The Register', urls: ['https://www.theregister.com/headlines.atom'] },
-  { kind: 'custom', id: 'anthropic-news', displayName: 'Anthropic News', module: 'anthropic', options: { section: 'news' }, preview: false },
-  { kind: 'custom', id: 'anthropic-engineering', displayName: 'Anthropic Engineering', module: 'anthropic', options: { section: 'engineering' }, preview: false },
+  { kind: 'custom', id: 'anthropic-news', displayName: 'Anthropic News', extension: 'anthropic', extensionName: 'Anthropic', options: { section: 'news' }, preview: false },
+  { kind: 'custom', id: 'anthropic-engineering', displayName: 'Anthropic Engineering', extension: 'anthropic', extensionName: 'Anthropic', options: { section: 'engineering' }, preview: false },
   {
     kind: 'feed',
     id: 'azure-sre-agent',
@@ -26,7 +26,7 @@ export const BUILTIN_SOURCES: readonly SourceSpec[] = [
 
 const BUILTIN_IDS = new Set(BUILTIN_SOURCES.map((s) => s.id));
 
-type SourceSettings = Pick<AppSettings, 'userSources' | 'removedSources'> & Partial<Pick<AppSettings, 'sourceNames'>>;
+type SourceSettings = Pick<AppSettings, 'userSources' | 'removedSources'> & Partial<Pick<AppSettings, 'sourceNames' | 'extensionNames'>>;
 
 export const MAX_SOURCE_LABEL_LENGTH = 10;
 
@@ -37,13 +37,22 @@ export function activeSourceSpecs(settings: Partial<SourceSettings> = {}): Sourc
   return [...BUILTIN_SOURCES.filter((s) => !removed.has(s.id)), ...user];
 }
 
-export function sourceInfo(spec: SourceSpec, sourceNames: Partial<AppSettings['sourceNames']> = {}): SourceInfo {
+export function sourceInfo(
+  spec: SourceSpec,
+  sourceNames: Partial<AppSettings['sourceNames']> = {},
+  extensionNames: Partial<AppSettings['extensionNames']> = {},
+): SourceInfo {
+  const extensionId = spec.kind === 'custom' ? ('extension' in spec ? spec.extension : spec.module) : undefined;
+  const extensionName = extensionId
+    ? extensionNames[extensionId] || ('extensionName' in spec ? spec.extensionName : undefined) || extensionId
+    : undefined;
   return {
     id: spec.id,
     displayName: sourceNames[spec.id] || spec.displayName,
     capabilities: { preview: spec.kind === 'custom' ? spec.preview !== false : true },
     kind: spec.kind,
     builtin: BUILTIN_IDS.has(spec.id),
+    ...(extensionId ? { extensionId, extensionName } : {}),
     location: spec.kind === 'feed' ? spec.urls.join(' ') : spec.kind === 'github-releases' ? `github.com/${spec.repo}` : spec.kind === 'youtube' ? youtubeUrl(spec) : undefined,
     filter: sourceFilter(spec),
   };
@@ -57,7 +66,7 @@ function sourceFilter(spec: SourceSpec): string | undefined {
 }
 
 export function sourceInfos(settings: Partial<SourceSettings> = {}): SourceInfo[] {
-  return activeSourceSpecs(settings).map((spec) => sourceInfo(spec, settings.sourceNames));
+  return activeSourceSpecs(settings).map((spec) => sourceInfo(spec, settings.sourceNames, settings.extensionNames));
 }
 
 /** What the user types to add a source. */
@@ -133,7 +142,7 @@ export function updateSourcePatch(settings: SourceSettings, spec: UserSourceSpec
   return { userSources: settings.userSources.map((s) => (s.id === spec.id ? spec : s)) };
 }
 
-/** What the source details popup edits; `url`, `name` and `include` only apply to the user's own sources. */
+/** What the source details popup edits; URLs and filters only apply to user-defined feeds. */
 export interface SourceDraft {
   enabled: boolean;
   /** Short label shown instead of the name; empty uses the name. */
@@ -141,6 +150,8 @@ export interface SourceDraft {
   /** Empty keeps the default color. */
   color: string;
   name: string;
+  /** Display name of the extension shared by its source instances. */
+  extensionName?: string;
   /** Feed URLs separated by spaces or new lines, a GitHub repository URL, or a YouTube channel or playlist URL. */
   url: string;
   include: string;
@@ -148,15 +159,32 @@ export interface SourceDraft {
   shorts: boolean;
 }
 
-/** The current values of a source, to start editing it. */
+/** The name a built-in or experimental source ships with, and the extension it runs. */
+function sourceDefaults(id: SourceId): { name: string; extensionId?: string; extensionName?: string } {
+  const spec = BUILTIN_SOURCES.find((s) => s.id === id);
+  if (spec?.kind === 'custom') {
+    const extensionId = 'extension' in spec ? spec.extension : spec.module;
+    return { name: spec.displayName, extensionId, extensionName: ('extensionName' in spec ? spec.extensionName : undefined) ?? extensionId };
+  }
+  if (spec) return { name: spec.displayName };
+  const info = experimentalSourceInfo(id);
+  if (info?.extensionId) return { name: info.displayName, extensionId: info.extensionId, extensionName: info.extensionName ?? info.extensionId };
+  return { name: info?.displayName ?? id };
+}
+
+/**
+ * The current values of a source, to start editing it. An experimental source is turned on per profile on
+ * one computer, not in these settings: the caller sets its `enabled`.
+ */
 export function sourceDraft(settings: Pick<AppSettings, 'disabledSources' | 'sourceLabels' | 'sourceColors'> & Partial<SourceSettings>, id: SourceId): SourceDraft {
   const own = userSource(settings, id);
-  const sourceName = BUILTIN_SOURCES.find((spec) => spec.id === id)?.displayName ?? id;
+  const { name, extensionId, extensionName } = sourceDefaults(id);
   return {
     enabled: !settings.disabledSources.includes(id),
     label: settings.sourceLabels[id] ?? '',
     color: settings.sourceColors?.[id] ?? '',
-    ...(own ? sourceEditInput(own) : { name: settings.sourceNames?.[id] ?? sourceName, url: '', include: '', shorts: false }),
+    ...(extensionId ? { extensionName: settings.extensionNames?.[extensionId] ?? extensionName ?? extensionId } : {}),
+    ...(own ? sourceEditInput(own) : { name: settings.sourceNames?.[id] ?? name, url: '', include: '', shorts: false }),
   };
 }
 
@@ -173,7 +201,10 @@ export function isYoutubeChannelUrl(url: string): boolean {
   return !!target && 'channel' in target;
 }
 
-/** Settings patch that saves an edited draft of source `id`. */
+/**
+ * Settings patch that saves an edited draft of source `id`. An experimental source's `enabled` is not saved
+ * here (it is turned on per profile on one computer).
+ */
 export function sourceDraftPatch(settings: AppSettings, id: SourceId, draft: SourceDraft): { patch: Partial<AppSettings> } | { error: string } {
   const label = draft.label.trim();
   if (label.length > MAX_SOURCE_LABEL_LENGTH) {
@@ -181,27 +212,36 @@ export function sourceDraftPatch(settings: AppSettings, id: SourceId, draft: Sou
   }
   const patch: Partial<AppSettings> = {};
   const own = userSource(settings, id);
+  const defaults = sourceDefaults(id);
   if (own) {
     const edited = editUserSource(own, { url: draft.url, name: draft.name, include: isGithubRepoUrl(draft.url) ? undefined : draft.include, shorts: draft.shorts });
     if ('error' in edited) return edited;
     Object.assign(patch, updateSourcePatch(settings, edited.spec));
   } else {
     const sourceNames = { ...settings.sourceNames };
-    const defaultName = BUILTIN_SOURCES.find((spec) => spec.id === id)?.displayName ?? id;
     const name = draft.name.trim();
-    if (name && name !== defaultName) sourceNames[id] = name;
+    if (name && name !== defaults.name) sourceNames[id] = name;
     else delete sourceNames[id];
     patch.sourceNames = sourceNames;
+  }
+  const { extensionId } = defaults;
+  if (extensionId && draft.extensionName !== undefined) {
+    const extensionNames = { ...settings.extensionNames };
+    const name = draft.extensionName.trim();
+    if (name && name !== defaults.extensionName) extensionNames[extensionId] = name;
+    else delete extensionNames[extensionId];
+    patch.extensionNames = extensionNames;
   }
   const sourceLabels = { ...settings.sourceLabels };
   if (label && label !== id) sourceLabels[id] = label;
   else delete sourceLabels[id];
-  const disabled = new Set(settings.disabledSources);
-  if (draft.enabled) disabled.delete(id);
-  else disabled.add(id);
   const sourceColors = { ...settings.sourceColors };
   if (draft.color) sourceColors[id] = draft.color;
   else delete sourceColors[id];
+  if (isExperimentalSource(id)) return { patch: { ...patch, sourceLabels, sourceColors } };
+  const disabled = new Set(settings.disabledSources);
+  if (draft.enabled) disabled.delete(id);
+  else disabled.add(id);
   return { patch: { ...patch, sourceLabels, sourceColors, disabledSources: [...disabled] } };
 }
 
@@ -234,7 +274,7 @@ export function removeSourcePatch(
  * their updates are deleted. Includes updates of sources that no longer exist at all.
  */
 export function retiredSources(
-  settings: Partial<SourceSettings> & Partial<Pick<AppSettings, 'sourceLabels' | 'sourceNames'>>,
+  settings: Partial<SourceSettings> & Partial<Pick<AppSettings, 'sourceLabels' | 'sourceNames' | 'extensionNames'>>,
   bySource: Record<SourceId, number> = {},
 ): SourceInfo[] {
   const active = new Set(activeSourceSpecs(settings).map((s) => s.id));
@@ -243,7 +283,7 @@ export function retiredSources(
     .sort()
     .map((id) => {
       const builtin = BUILTIN_SOURCES.find((s) => s.id === id);
-      if (builtin) return { ...sourceInfo(builtin, settings.sourceNames), removed: true };
+      if (builtin) return { ...sourceInfo(builtin, settings.sourceNames, settings.extensionNames), removed: true };
       return { id, displayName: settings.sourceNames?.[id] ?? settings.sourceLabels?.[id] ?? id, capabilities: { preview: true }, kind: 'feed', builtin: false, removed: true };
     });
 }

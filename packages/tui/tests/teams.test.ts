@@ -23,8 +23,8 @@ import {
   type ChatMessage,
   type Meeting,
   type MeetingArtifact,
-} from '../src/experimental/teams.js';
-import { fileHits, graphPath, graphResult, type FileHit, type GraphResult, type WorkIQ } from '../src/experimental/workiq.js';
+} from '../../extensions/src/teams-meetings/meetings.js';
+import { fileHits, graphPath, graphResult, type FileHit, type GraphResult, type WorkIQ } from '../../extensions/src/teams-meetings/workiq.js';
 import { experimentalProviders, type ExperimentalSetups } from '../src/experimental/index.js';
 
 const ME = 'me-id';

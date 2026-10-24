@@ -19,7 +19,8 @@ import {
 import type { SummarizerCache } from '../copilot.js';
 import type { AuditLog } from '../audit.js';
 import { createGroupingHistory } from '../groupingHistory.js';
-import { experimentalProviders } from '../experimental/index.js';
+import { experimentalProviders, experimentalSetups } from '../experimental/index.js';
+import { ExtensionHost } from '../extensions/host.js';
 import { App, type DigestRunOptions } from './App.js';
 import { SetupScreen } from './components/SetupScreen.js';
 import type { ProfileControls } from './hooks/useProfilePicker.js';
@@ -90,29 +91,45 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
     profiles: readProfiles() ?? [{ name: initialProfile }],
   }));
   const { profile, config, profiles, notice } = session;
+  const extensionHost = useMemo(() => new ExtensionHost(profile, (message) => audit?.log('extension', message)), [profile, config.connectionString, audit]);
+  const experimental = useMemo(() => experimentalSetups(extensionHost), [extensionHost]);
   const groupingHistory = useMemo(() => createGroupingHistory(profile), [profile]);
   // The YouTube key is applied in place below, so changing it keeps the service (and the app) as they are.
-  const { service, error } = useMemo(() => createService(config.connectionString, config.youtubeApiKey), [config.connectionString]);
+  const { service, error } = useMemo(() => createService(config.connectionString, config.youtubeApiKey), [profile, config.connectionString]);
   useLayoutEffect(() => { service?.setYoutubeApiKey(config.youtubeApiKey); }, [service, config.youtubeApiKey]);
 
   // Before the children's effects, so that nothing they log goes untagged.
   useLayoutEffect(() => stampAudit(audit, profile, profiles), [audit, profile, profiles]);
   // Also before the children's effects, so that their first fetch runs the profile's experimental sources.
-  useLayoutEffect(() => service?.setExperimentalProviders(experimentalProviders(config.experimentalSources)), [service, config.experimentalSources]);
+  useLayoutEffect(() => {
+    service?.setSourceExtensions(extensionHost.sources());
+    return () => {
+      service?.setSourceExtensions({});
+      service?.setExperimentalProviders([]);
+      void extensionHost.dispose().catch((err) => audit?.error('extension', err));
+    };
+  }, [service, extensionHost, audit]);
+  useLayoutEffect(() => {
+    extensionHost.setTeamsEnabled(config.experimentalSources?.includes('teams-meetings') ?? false);
+    service?.setExperimentalProviders(experimentalProviders(config.experimentalSources, experimental));
+  }, [service, extensionHost, experimental, config.experimentalSources]);
 
   /** Save a change to the profile in use; returns an error message when the file can't be written. */
   const updateConfig = useCallback((patch: Partial<LocalConfig>): string | undefined => {
     try {
       const next = saveConfig(profile, patch);
       // Right away, so a fetch started in the same handler (turning a source on) runs it.
-      if ('experimentalSources' in patch) service?.setExperimentalProviders(experimentalProviders(next.experimentalSources));
+      if ('experimentalSources' in patch) {
+        extensionHost.setTeamsEnabled(next.experimentalSources?.includes('teams-meetings') ?? false);
+        service?.setExperimentalProviders(experimentalProviders(next.experimentalSources, experimental));
+      }
       const list = readProfiles();
       setSession((s) => ({ ...s, config: next, profiles: list ?? s.profiles, notice: undefined }));
       return undefined;
     } catch (err) {
       return errorText(err);
     }
-  }, [profile, service]);
+  }, [profile, service, extensionHost, experimental]);
 
   const switchTo = useCallback((name: string): string | undefined => {
     if (name === profile) return undefined;
@@ -162,7 +179,10 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
       audit?.log('profile', `renamed ${from} → ${to}`);
       // The backup folder can get pinned to the old name, so the config is read again.
       const next = from === profile ? loadConfig(to) : undefined;
-      setSession((s) => ({ profile: active, config: next ?? s.config, profiles: list }));
+      setSession((s) => ({
+        profile: active, config: next ?? s.config, profiles: list,
+        notice: from === profile ? `✓ Renamed “${from}” to “${to}”` : s.notice,
+      }));
       return undefined;
     } catch (err) {
       return errorText(err);
@@ -247,9 +267,10 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
 
   return (
     <App
-      key={config.connectionString}
+      key={`${profile}:${config.connectionString}`}
       service={service}
       config={config}
+      experimental={experimental}
       onConfigChange={updateConfig}
       profiles={controls}
       notice={notice}

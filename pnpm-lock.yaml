@@ -41,14 +41,36 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/extensions:
+    dependencies:
+      '@fomo/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      esbuild:
+        specifier: 0.27.5
+        version: 0.27.5
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/tui:
     dependencies:
       '@fomo/core':
         specifier: workspace:*
         version: link:../core
+      '@fomo/extensions':
+        specifier: workspace:*
+        version: link:../extensions
       '@github/copilot-sdk':
         specifier: ^1.0.15
         version: 1.0.15
+      '@microsoft/mxc-sdk':
+        specifier: 1.0.1
+        version: 1.0.1
       '@microsoft/workiq':
         specifier: 1.0.1
         version: 1.0.1
@@ -1150,6 +1172,10 @@ packages:
     resolution: {integrity: sha1-nTgKsOqLz7oW9P7aLJ6jYw/1Yg8=}
     cpu: [x64]
     os: [win32]
+
+  '@microsoft/mxc-sdk@1.0.1':
+    resolution: {integrity: sha512-2cP925G5+lQyKzjBVha8uNtVd7XESgDBtgi1yCYYSo9M3xiFyZWtCO4SWPGTk509rdI6nqjyGcZxvEP3t6l8Hg==}
+    engines: {node: '>=24.0.0'}
 
   '@microsoft/workiq@1.0.1':
     resolution: {integrity: sha512-syOh4Py5hR3rh7kRHzYipxU2tJMzUfu7VBJ5bTzXCEh2S0BXVCZVu6TWmFYMmkTk8QEreMaqPMWQEy4aMBd/Xg==}
@@ -2310,6 +2336,12 @@ packages:
     resolution: {integrity: sha1-FuAD0NtKwk/Z3xaO34cWJd7q498=}
     engines: {node: '>=18'}
 
+  node-addon-api@7.1.1:
+    resolution: {integrity: sha1-Grpmk7DyVSWKBJ1iEykykyKq1Vg=}
+
+  node-pty@1.1.0:
+    resolution: {integrity: sha1-Fhk21FpHdRwuO2lMNl5zAXQXqIc=}
+
   node-releases@2.0.57:
     resolution: {integrity: sha512-kQK9LGGFiHtrWiNhZtA7Qbw17AQz+dmsEKODRIVTXA9+e5MS/2gZEBhYJt13GrAz5/IOZKddH/0Z3TP/Zgo+yw==}
     engines: {node: '>=18'}
@@ -2526,6 +2558,11 @@ packages:
 
   semver@6.3.1:
     resolution: {integrity: sha1-VW0u+GiRRuRtzqS/3QlfNDTf/LQ=}
+    hasBin: true
+
+  semver@7.8.5:
+    resolution: {integrity: sha1-ObZGA33VDBT7RR5+TKxY7YuGP2k=}
+    engines: {node: '>=10'}
     hasBin: true
 
   send@1.2.1:
@@ -4038,6 +4075,12 @@ snapshots:
   '@koromix/koffi-win32-x64@3.2.1':
     optional: true
 
+  '@microsoft/mxc-sdk@1.0.1':
+    dependencies:
+      koffi: 3.2.1
+      node-pty: 1.1.0
+      semver: 7.8.5
+
   '@microsoft/workiq@1.0.1': {}
 
   '@modelcontextprotocol/sdk@1.32.1(zod@4.3.6)':
@@ -5269,6 +5312,12 @@ snapshots:
     dependencies:
       content-type: 2.1.0
 
+  node-addon-api@7.1.1: {}
+
+  node-pty@1.1.0:
+    dependencies:
+      node-addon-api: 7.1.1
+
   node-releases@2.0.57: {}
 
   object-assign@4.1.1: {}
@@ -5518,6 +5567,8 @@ snapshots:
       loose-envify: 1.4.0
 
   semver@6.3.1: {}
+
+  semver@7.8.5: {}
 
   send@1.2.1:
     dependencies:

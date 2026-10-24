@@ -1,14 +1,13 @@
-import type { ScrapedItem } from '../../../types.js';
-import { fetchText } from '../../http.js';
-import { decodeEntities, dedupByUrl, htmlToText, parseDate } from '../../text.js';
+import { decodeEntities, dedupByUrl, htmlToText, parseDate, type ScrapedItem, type ExtensionContext } from '@fomo/core/extension-api';
 
 const BASE_URL = 'https://www.anthropic.com';
 
 /** Posts linked from an anthropic.com listing page; `options.section` is the path, e.g. `news`. */
-export async function fetchAnthropic(options: Record<string, string>): Promise<ScrapedItem[]> {
-  const section = options.section;
+export async function fetch(ctx: ExtensionContext): Promise<ScrapedItem[]> {
+  const section = ctx.options.section;
   if (!section) throw new Error('anthropic: missing the section option');
-  return parsePosts(await fetchText(`${BASE_URL}/${section}`, { Accept: 'text/html' }), section);
+  if (section !== 'news' && section !== 'engineering') throw new Error('anthropic: invalid section option');
+  return parsePosts(await ctx.http.text(`${BASE_URL}/${section}`), section);
 }
 
 export function parsePosts(html: string, section: string): ScrapedItem[] {

@@ -1,5 +1,5 @@
 import type { KeyedChange } from './store/tables.js';
-import type { ScrapedItem, SourceInfo, Update } from './types.js';
+import type { AppSettings, ScrapedItem, SourceInfo, Update } from './types.js';
 
 export type { KeyedChange };
 
@@ -20,10 +20,21 @@ export const EXPERIMENTAL_SOURCE_INFOS: readonly SourceInfo[] = [
     kind: 'custom',
     builtin: false,
     experimental: true,
-    location: 'Microsoft 365 via WorkIQ',
+    extensionId: 'teams-meetings',
+    extensionName: 'Teams meetings',
+    location: 'UNSANDBOXED WorkIQ; host filesystem and network access',
     filter: 'missed, recorded or transcribed meetings of the last 7 days',
   },
 ];
+
+/** The experimental sources with the names the user gave them and their extensions. */
+export function experimentalSourceInfos(settings: Partial<Pick<AppSettings, 'sourceNames' | 'extensionNames'>> = {}): SourceInfo[] {
+  return EXPERIMENTAL_SOURCE_INFOS.map((info) => ({
+    ...info,
+    displayName: settings.sourceNames?.[info.id] || info.displayName,
+    ...(info.extensionId ? { extensionName: settings.extensionNames?.[info.extensionId] || info.extensionName || info.extensionId } : {}),
+  }));
+}
 
 export function experimentalSourceInfo(id: string): SourceInfo | undefined {
   return EXPERIMENTAL_SOURCE_INFOS.find((s) => s.id === id);
@@ -42,5 +53,9 @@ export interface ExperimentalProvider {
    * What a keyed item that is already stored changes, or undefined to leave it as it is.
    * Default: the fetched title, URL, content and date.
    */
-  merge?(existing: Update, fetched: ScrapedItem): KeyedChange | undefined;
+  merge?(existing: Update, fetched: ScrapedItem): KeyedChange | undefined | Promise<KeyedChange | undefined>;
+  /** One operation's worker, kept alive through its keyed merges. */
+  open?(): Promise<ExperimentalProvider>;
+  assertActive?(): void;
+  close?(): Promise<void>;
 }

@@ -1,0 +1,12 @@
+{
+  "apiVersion": 1,
+  "id": "copilot-cli",
+  "name": "Copilot CLI",
+  "version": "1.0.0",
+  "entry": "index.mjs",
+  "permissions": {
+    "http": ["https://api.github.com", "https://raw.githubusercontent.com"],
+    "mcp": [],
+    "filesystem": { "readOnly": [], "readWrite": [] }
+  }
+}

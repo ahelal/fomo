@@ -109,6 +109,35 @@ describe('UpdateStore.insertUpdate', () => {
       await store.insertUpdate(meeting, { key: 'k', merge: () => ({ title: 'Planning (moved)' }) });
       expect(merged.map((m) => m.entity)).toEqual([{ partitionKey: 'teams-meetings', rowKey: await hashUrl('k'), title: 'Planning (moved)' }]);
     });
+
+    it('awaits sandbox merges and propagates failures without writing success-shaped results', async () => {
+      const { store, merged } = keyedStore({ partitionKey: 'teams-meetings', rowKey: 'r', ...meeting, etag: 'e1' });
+      await store.insertUpdate(meeting, { key: 'k', merge: async () => ({ title: 'From the worker' }) });
+      expect(merged[0].entity.title).toBe('From the worker');
+      await expect(store.insertUpdate(meeting, { key: 'k', merge: async () => { throw new Error('worker revoked'); } })).rejects.toThrow('worker revoked');
+      expect(merged).toHaveLength(1);
+      await expect(store.insertUpdate(meeting, { key: 'k', merge: async () => ({ title: 'Unsafe', saved: false }) })).rejects.toThrow('protected field');
+      expect(merged).toHaveLength(1);
+    });
+
+    it('recomputes a merge after an ETag conflict and reports exhausted conflicts', async () => {
+      const store = new UpdateStore(conn);
+      let reads = 0;
+      let writes = 0;
+      let conflict = true;
+      Object.defineProperty(store, 'client', { value: {
+        createEntity: async () => { throw Object.assign(new Error('exists'), { statusCode: 409 }); },
+        getEntity: async () => ({ ...meeting, partitionKey: 'teams-meetings', rowKey: 'r', content: `revision-${++reads}`, etag: `e${reads}` }),
+        updateEntity: async () => { if (++writes === 1 || conflict) throw Object.assign(new Error('conflict'), { statusCode: 412 }); },
+      } });
+      const seen: string[] = [];
+      const merge = async (existing: { content: string }) => { seen.push(existing.content); return { title: 'Changed' }; };
+      await expect(store.insertUpdate(meeting, { key: 'k', merge })).rejects.toThrow('conflict');
+      expect(reads).toBe(3);
+      conflict = false;
+      await expect(store.insertUpdate(meeting, { key: 'k', merge })).resolves.toBe(false);
+      expect(seen).toEqual(['revision-1', 'revision-2', 'revision-3', 'revision-4']);
+    });
   });
 });
 

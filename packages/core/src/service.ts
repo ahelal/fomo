@@ -21,6 +21,7 @@ import type {
   SourceFetchResult,
   ReferenceSuggestion,
   ScrapedItem,
+  SourceDeps,
 } from './types.js';
 
 /** A source as `fetch` runs it: a scraper, or an experimental provider. */
@@ -64,19 +65,39 @@ export class FomoDirectService extends FomoStorageService {
   private experimentalProviders: readonly ExperimentalProvider[] = [];
   private youtube?: YoutubeApi;
   private youtubeApiKey?: string;
+  private extensions: SourceDeps['extensions'] = {};
+  /** Bumped whenever a provider is turned on, off or replaced: what an in-flight `fetch` re-checks before it stores. */
+  private readonly providerGenerations = new Map<string, number>();
 
   constructor(
     conn: StoreConnection,
-    options: { experimental?: readonly ExperimentalProvider[]; youtubeApiKey?: string } = {},
+    options: { experimental?: readonly ExperimentalProvider[]; youtubeApiKey?: string; extensions?: SourceDeps['extensions'] } = {},
   ) {
     super(conn);
     this.setExperimentalProviders(options.experimental ?? []);
     this.setYoutubeApiKey(options.youtubeApiKey);
+    this.setSourceExtensions(options.extensions ?? {});
   }
 
   /** The experimental sources `fetch` runs (the ones the user turned on), replacing the previous ones. */
   setExperimentalProviders(providers: readonly ExperimentalProvider[]): void {
-    this.experimentalProviders = providers.filter((p) => isExperimentalSource(p.id));
+    const next = providers.filter((p) => isExperimentalSource(p.id));
+    const before = new Map(this.experimentalProviders.map((p) => [p.id, p]));
+    const after = new Map(next.map((p) => [p.id, p]));
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      // Only the source that changed loses its in-flight results; the others keep fetching.
+      if (before.get(id) !== after.get(id)) this.providerGenerations.set(id, this.providerGeneration(id) + 1);
+    }
+    this.experimentalProviders = next;
+  }
+
+  /** The sources backed by extensions; each launch is authorized by the host, so a change here does not cancel a fetch. */
+  setSourceExtensions(extensions: SourceDeps['extensions']): void {
+    this.extensions = extensions;
+  }
+
+  private providerGeneration(id: string): number {
+    return this.providerGenerations.get(id) ?? 0;
   }
 
   /** Fetch YouTube sources with the YouTube Data API using this key; none uses the public feeds. */
@@ -187,7 +208,7 @@ export class FomoDirectService extends FomoStorageService {
     await this.ensureInit();
 
     const settings = await this.store.getSettings();
-    const deps = { youtube: this.youtube };
+    const deps = { youtube: this.youtube, extensions: this.extensions };
     let sources: Fetcher[] = getAllSources(settings, deps);
     let providers = this.experimentalProviders;
 
@@ -211,6 +232,9 @@ export class FomoDirectService extends FomoStorageService {
       }
     }
     sources = [...sources, ...providers.map((p): Fetcher => ({ id: p.id, fetch: () => p.fetch(), provider: p }))];
+    // What each experimental provider was authorized as when this fetch started. Ordinary sources have no such
+    // authorization to lose, so turning an experimental source on or off never fails them.
+    const generations = new Map(providers.map((p) => [p.id, this.providerGeneration(p.id)]));
 
     let totalAdded = 0;
     const results: Record<string, SourceFetchResult> = {};
@@ -230,13 +254,18 @@ export class FomoDirectService extends FomoStorageService {
     await Promise.all(
       sources.map(async (source) => {
         const result: SourceFetchResult = { fetched: 0, added: 0 };
-        const provider = source.provider;
+        let provider = source.provider;
+        const revoked = (): boolean => source.provider !== undefined && this.providerGeneration(source.id) !== generations.get(source.id);
 
         try {
-          const items = await source.fetch();
+          if (provider?.open) provider = await provider.open();
+          const items = await (provider ? provider.fetch() : source.fetch());
+          if (revoked()) throw new Error('Source authorization changed during fetch');
           result.fetched = items.length;
 
           for (const item of items) {
+            if (revoked()) throw new Error('Source authorization changed during fetch');
+            provider?.assertActive?.();
             const datePublished = item.datePublished.toISOString();
             const check: DuplicateCheck = provider
               ? { kind: 'new' }
@@ -257,22 +286,38 @@ export class FomoDirectService extends FomoStorageService {
             };
             const key = item.key;
             const merge = provider?.merge;
+            if (revoked()) throw new Error('Source authorization changed before storage');
+            provider?.assertActive?.();
             const inserted = key
               ? await this.store.insertUpdate(update, {
                   key,
-                  ...(merge ? { merge: (existing: Update) => merge.call(provider, existing, item) } : {}),
+                  ...(merge ? { merge: async (existing: Update) => {
+                    const change = await merge.call(provider, existing, item);
+                    if (revoked()) throw new Error('Source authorization changed during merge');
+                    provider?.assertActive?.();
+                    return change;
+                  } } : {}),
                 })
               : await this.store.insertUpdate(update);
             if (inserted) result.added++;
           }
         } catch (err) {
-          result.error = err instanceof Error ? err.message : String(err);
+          // Turned off (or off and on again) meanwhile: the user stopped it, which is not a failure.
+          if (revoked()) result.stopped = true;
+          else result.error = err instanceof Error ? err.message : String(err);
+        } finally {
+          try { await provider?.close?.(); } catch (err) {
+            result.error = `${result.error ? `${result.error}; ` : ''}could not close source worker: ${err instanceof Error ? err.message : String(err)}`;
+          }
         }
 
-        try {
-          await this.store.recordFetch(source.id, result.error);
-        } catch {
-          // best-effort — the fetch itself already happened
+        // A stopped fetch did not run to its end: the source's last fetch time and error stay as they were.
+        if (!result.stopped) {
+          try {
+            await this.store.recordFetch(source.id, result.error);
+          } catch {
+            // best-effort — the fetch itself already happened
+          }
         }
 
         results[source.id] = result;

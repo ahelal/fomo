@@ -92,10 +92,20 @@ export interface SourcePlugin {
   fetch(): Promise<ScrapedItem[]>;
 }
 
-/** Shared clients sources fetch with. All optional: without them sources use public pages and feeds. */
+/** Host-controlled adapter for fetching through an approved, isolated extension. */
+export interface SourceExtension {
+  fetch(input: {
+    sourceId: SourceId;
+    options: Readonly<Record<string, string>>;
+  }): Promise<ScrapedItem[]>;
+}
+
+/** Optional host clients. Code-backed sources require an extension adapter; they have no in-process fallback. */
 export interface SourceDeps {
   /** YouTube Data API client (the TUI makes one when a key is set). */
   youtube?: YoutubeApi;
+  /** Host-approved extension adapters, keyed by immutable extension ID. */
+  extensions?: Readonly<Record<string, SourceExtension>>;
 }
 
 interface SourceSpecBase {
@@ -138,15 +148,26 @@ export interface YoutubeSourceSpec extends SourceSpecBase {
   include?: string;
 }
 
-/** A source written in code: `module` names a file in `scraper/sources/custom/`. Built-in only. */
-export interface CustomSourceSpec extends SourceSpecBase {
+/** An installed extension source. The extension ID is stable; display names live in settings. */
+export interface ExtensionSourceSpec extends SourceSpecBase {
   kind: 'custom';
-  module: string;
+  extension: string;
+  /** Manifest name used until the user sets an extension display-name override. */
+  extensionName?: string;
   options?: Record<string, string>;
   /** Defaults to true. */
   preview?: boolean;
 }
 
+/** Legacy source spec retained while older settings and built-ins are migrated. */
+export interface LegacyCustomSourceSpec extends SourceSpecBase {
+  kind: 'custom';
+  module: string;
+  options?: Record<string, string>;
+  preview?: boolean;
+}
+
+export type CustomSourceSpec = ExtensionSourceSpec | LegacyCustomSourceSpec;
 export type SourceSpec = FeedSourceSpec | GithubReleasesSourceSpec | YoutubeSourceSpec | CustomSourceSpec;
 export type SourceKind = SourceSpec['kind'];
 /** Kinds users can add from the app; `custom` needs code. */
@@ -164,6 +185,10 @@ export interface SourceInfo {
   location?: string;
   /** What a feed keeps, for display: its keyword regex and/or category. */
   filter?: string;
+  /** Immutable code identity; display names are independently configurable. */
+  extensionId?: string;
+  /** User-facing extension name, used in the source type label. */
+  extensionName?: string;
   /** Removed, but some of its updates are still stored (see `retiredSources`). */
   removed?: boolean;
   /** An experimental source fetched by the terminal app only, when turned on there (see `experimental.ts`). */
@@ -204,6 +229,11 @@ export interface SourceFetchResult {
   /** Items skipped because the same page is already stored (under another URL or source). */
   duplicates?: number;
   error?: string;
+  /**
+   * The source was turned off while it was fetched (an experimental source): the rest of what it fetched was
+   * dropped and its fetch history kept as it was. Not an error.
+   */
+  stopped?: boolean;
 }
 
 export interface FetchResponse {
@@ -482,6 +512,8 @@ export interface AppSettings {
   sourceLabels: Record<SourceId, string>;
   /** Custom source names, independent of the optional short labels. */
   sourceNames: Record<SourceId, string>;
+  /** Custom extension display names, independent of stable extension IDs. */
+  extensionNames: Record<string, string>;
   /** Custom display colors per source (e.g. { github: "#58a6ff" }). Falls back to default cyan. */
   sourceColors: Record<SourceId, string>;
   /** Sources added by the user from the app. */
@@ -496,6 +528,7 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
   pageSize: 50,
   sourceLabels: {},
   sourceNames: {},
+  extensionNames: {},
   sourceColors: {},
   userSources: [],
   removedSources: [],

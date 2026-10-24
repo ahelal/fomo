@@ -1,5 +1,6 @@
-import { TEAMS_MEETINGS_SOURCE, type ExperimentalProvider, type KeyedChange, type ScrapedItem, type Update } from '@fomo/core';
-import { connectWorkIQ, graphPath, type FileHit, type GraphResult, type WorkIQ } from './workiq.js';
+import type { ExperimentalProvider, KeyedChange, ScrapedItem, Update } from '@fomo/core';
+import { graphPath, type FileHit, type GraphResult, type WorkIQ } from './workiq.js';
+import { TEAMS_MEETINGS_SOURCE, type Json } from '@fomo/core/extension-api';
 
 /**
  * Experimental source: Teams meetings of the last days that I missed, or that have a recording or a
@@ -560,6 +561,7 @@ export interface TeamsMeetingsOptions {
   connect?: (signal?: AbortSignal) => Promise<WorkIQ>;
   now?: () => Date;
   days?: number;
+  state?: Json;
 }
 
 /**
@@ -645,13 +647,34 @@ async function searchRecordingFiles(wq: WorkIQ, meetings: Meeting[], memory: Sea
   });
 }
 
-export function teamsMeetingsProvider(options: TeamsMeetingsOptions = {}): ExperimentalProvider {
-  const connect = options.connect ?? connectWorkIQ;
+export function teamsMeetingsProvider(options: TeamsMeetingsOptions = {}): ExperimentalProvider & { snapshot(): Json } {
+  const connect = options.connect ?? (async () => { throw new Error('Teams meetings requires a sandbox-bound WorkIQ client'); });
   const cache = new Map<string, RecordingFile | null>();
   const searched: SearchMemory = { found: new Map(), missing: new Map(), pausedUntil: 0 };
+  let account = '';
+  if (options.state && typeof options.state === 'object' && !Array.isArray(options.state)) {
+    const state = options.state;
+    const file = (v: Json): v is { driveId: string; driveItemId: string } => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.driveId === 'string' && typeof v.driveItemId === 'string';
+    account = typeof state.account === 'string' ? state.account : '';
+    if (Array.isArray(state.cache)) for (const row of state.cache) {
+      if (Array.isArray(row) && typeof row[0] === 'string' && (row[1] === null || file(row[1]))) cache.set(row[0], row[1]);
+    }
+    if (Array.isArray(state.found)) for (const row of state.found) {
+      if (Array.isArray(row) && typeof row[0] === 'string' && file(row[1])) searched.found.set(row[0], row[1]);
+    }
+    if (Array.isArray(state.missing)) for (const row of state.missing) {
+      if (Array.isArray(row) && typeof row[0] === 'string' && typeof row[1] === 'number') searched.missing.set(row[0], row[1]);
+    }
+    if (typeof state.pausedUntil === 'number') searched.pausedUntil = state.pausedUntil;
+  }
   return {
     id: TEAMS_MEETINGS_SOURCE,
     merge: mergeMeeting,
+    snapshot: () => ({
+      account, cache: [...cache].map(([key, value]) => [key, value ? { ...value } : null]),
+      found: [...searched.found].map(([key, value]) => [key, { ...value }]),
+      missing: [...searched.missing], pausedUntil: searched.pausedUntil,
+    }),
     async fetch(signal) {
       const now = options.now?.() ?? new Date();
       const since = new Date(now.getTime() - (options.days ?? TEAMS_WINDOW_DAYS) * DAY_MS);
@@ -660,6 +683,9 @@ export function teamsMeetingsProvider(options: TeamsMeetingsOptions = {}): Exper
         const [meResult] = await wq.fetch(['/me?$select=id'], signal);
         const me = (meResult?.data as { id?: string } | undefined)?.id;
         if (meResult?.statusCode !== 200 || !me) throw failure('profile', meResult ?? { statusCode: 0 });
+        if (account !== me) {
+          cache.clear(); searched.found.clear(); searched.missing.clear(); searched.pausedUntil = 0; account = me;
+        }
 
         const window = `startDateTime=${iso(since)},endDateTime=${iso(now)}`;
         const [events, recordings, transcripts] = await Promise.all([

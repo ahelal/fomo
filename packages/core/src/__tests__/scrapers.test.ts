@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { parseChangelog } from '../scraper/sources/custom/copilot-cli.js';
-import { parsePosts } from '../scraper/sources/custom/anthropic.js';
 import { getAllSources, getSource, getSourceIds, createSource } from '../scraper/registry.js';
 import {
   activeSourceSpecs,
@@ -19,6 +17,7 @@ import {
   userSource,
 } from '../scraper/specs.js';
 import { parseFeed } from '../scraper/feed.js';
+import { experimentalSourceInfos } from '../experimental.js';
 import { DEFAULT_SETTINGS, type AppSettings, type SourcePlugin } from '../types.js';
 
 const builtin = (id: string): SourcePlugin => getSource(id)!;
@@ -344,82 +343,6 @@ describe('copilot-cli source', () => {
   });
 });
 
-describe('copilot-cli source fetch', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('parses GitHub releases API correctly', async () => {
-    const releases = [
-      {
-        name: 'v1.0.27',
-        tag_name: 'v1.0.27',
-        html_url: 'https://github.com/github/copilot-cli/releases/tag/v1.0.27',
-        published_at: '2026-04-15T00:00:00Z',
-        created_at: '2026-04-15T00:00:00Z',
-        body: '## What\'s Changed\n\n* **New feature**: Added thinking effort\n* Fixed [bug](https://github.com/issue/1)',
-      },
-    ];
-
-    mockCopilotCli(releases, null);
-
-    const items = await copilotCliSource.fetch();
-    expect(items).toHaveLength(1);
-    expect(items[0].title).toBe('v1.0.27');
-    expect(items[0].url).toBe('https://github.com/github/copilot-cli/releases/tag/v1.0.27');
-    expect(items[0].content).toContain('New feature');
-    // Markdown should be stripped
-    expect(items[0].content).not.toContain('**');
-    expect(items[0].content).not.toContain('##');
-  });
-
-  it('uses the changelog section for the release version', async () => {
-    const changelog = [
-      '# Changelog',
-      '',
-      '## 1.0.94 - 2026-10-08',
-      '',
-      '- Add Claude Haiku 5.5 to model selection',
-      '- `copilot mcp add` recovers cleanly',
-      '',
-      '## 1.0.93 - 2026-10-07',
-      '',
-      '- Add enterprise permissions.limitTo',
-    ].join('\n');
-    const releases = [
-      release('v1.0.95-0', 'Fixes and changes'),
-      release('v1.0.94', '2026-10-08'),
-      release('v1.0.94-2', 'Fixes and changes'),
-      release('v1.0.94-1', '**Fixed**\n- Sessions sidebar row switches reliably'),
-    ];
-    mockCopilotCli(releases, changelog);
-
-    const items = await copilotCliSource.fetch();
-    const byTitle = Object.fromEntries(items.map((i) => [i.title, i.content]));
-    expect(byTitle['1.0.94']).toBe('- Add Claude Haiku 5.5 to model selection\n- copilot mcp add recovers cleanly');
-    expect(byTitle['1.0.94-2']).toContain('Add Claude Haiku 5.5');
-    expect(byTitle['1.0.94-1']).toBe('Fixed\n- Sessions sidebar row switches reliably');
-    expect(byTitle['1.0.95-0']).toBe('Fixes and changes');
-  });
-
-  it('falls back to release bodies when the changelog is unavailable', async () => {
-    mockCopilotCli([release('v1.0.94', '2026-10-08\n\n- Something new')], new Error('offline'));
-    const items = await copilotCliSource.fetch();
-    expect(items[0].content).toContain('Something new');
-  });
-
-  it('parses changelog headings', () => {
-    const sections = parseChangelog('## 1.0.2 - 2026-01-02\n\n- two\n\n## v1.0.1\n- one\n');
-    expect(sections.get('1.0.2')).toBe('- two');
-    expect(sections.get('1.0.1')).toBe('- one');
-  });
-
-  it('reports failures', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
-    await expect(copilotCliSource.fetch()).rejects.toThrow('[copilot-cli] fetch failed: offline');
-  });
-});
-
 function release(tag: string, body: string) {
   return {
     name: tag.replace(/^v/, ''),
@@ -429,17 +352,6 @@ function release(tag: string, body: string) {
     created_at: '2026-10-08T00:00:00Z',
     body,
   };
-}
-
-function mockCopilotCli(releases: unknown[], changelog: string | null | Error) {
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-    const url = String(input);
-    if (url.includes('changelog.md')) {
-      if (changelog instanceof Error) throw changelog;
-      return changelog === null ? new Response('', { status: 404 }) : new Response(changelog, { status: 200 });
-    }
-    return new Response(JSON.stringify(releases), { status: 200 });
-  });
 }
 
 describe('theregister source', () => {
@@ -613,7 +525,14 @@ describe('source specs', () => {
   it('describes sources for the UI', () => {
     const infos = sourceInfos();
     expect(infos.find((s) => s.id === 'github')).toMatchObject({ kind: 'feed', builtin: true, capabilities: { preview: true } });
-    expect(infos.find((s) => s.id === 'anthropic-news')).toMatchObject({ kind: 'custom', capabilities: { preview: false } });
+    expect(infos.find((s) => s.id === 'anthropic-news')).toMatchObject({
+      kind: 'custom',
+      capabilities: { preview: false },
+      extensionId: 'anthropic',
+      extensionName: 'Anthropic',
+    });
+    expect(sourceInfos({ extensionNames: { anthropic: 'Claude news' } }).find((s) => s.id === 'anthropic-news'))
+      .toMatchObject({ extensionId: 'anthropic', extensionName: 'Claude news' });
   });
 
   it('builds a feed source from a URL', () => {
@@ -686,6 +605,54 @@ describe('source specs', () => {
     expect(sourceDraftPatch(current, 'mine', { ...sourceDraft(current, 'mine'), url: '' })).toHaveProperty('error');
   });
 
+  it('renames an extension display name independently of its source name and ID', () => {
+    const current = settings();
+    const draft = sourceDraft(current, 'anthropic-news');
+    expect(draft).toMatchObject({ name: 'Anthropic News', extensionName: 'Anthropic' });
+    const result = sourceDraftPatch(current, 'anthropic-news', {
+      ...draft,
+      name: 'AI company news',
+      extensionName: 'Claude research',
+    });
+    expect(result).toMatchObject({
+      patch: {
+        sourceNames: { 'anthropic-news': 'AI company news' },
+        extensionNames: { anthropic: 'Claude research' },
+      },
+    });
+    expect(sourceInfos({ extensionNames: { anthropic: 'Claude research' } })
+      .find((source) => source.id === 'anthropic-engineering'))
+      .toMatchObject({ id: 'anthropic-engineering', extensionId: 'anthropic', extensionName: 'Claude research' });
+  });
+
+  it('edits an experimental source like a built-in, leaving it on or off per computer', () => {
+    const current = settings({ disabledSources: ['github'] });
+    const draft = sourceDraft(current, 'teams-meetings');
+    expect(draft).toMatchObject({ name: 'Teams meetings', extensionName: 'Teams meetings', label: '', color: '' });
+    const result = sourceDraftPatch(current, 'teams-meetings', {
+      ...draft,
+      enabled: false,
+      label: 'Mtg',
+      color: '#3fb950',
+      name: 'Calls',
+      extensionName: 'WorkIQ',
+    });
+    expect(result).toEqual({
+      patch: {
+        sourceNames: { 'teams-meetings': 'Calls' },
+        extensionNames: { 'teams-meetings': 'WorkIQ' },
+        sourceLabels: { 'teams-meetings': 'Mtg' },
+        sourceColors: { 'teams-meetings': '#3fb950' },
+      },
+    });
+    expect(sourceDraftPatch(current, 'teams-meetings', draft)).toEqual({
+      patch: { sourceNames: {}, extensionNames: {}, sourceLabels: {}, sourceColors: {} },
+    });
+    expect(experimentalSourceInfos({ sourceNames: { 'teams-meetings': 'Calls' }, extensionNames: { 'teams-meetings': 'WorkIQ' } }))
+      .toEqual([expect.objectContaining({ id: 'teams-meetings', displayName: 'Calls', extensionName: 'WorkIQ', experimental: true })]);
+    expect(experimentalSourceInfos()[0]).toMatchObject({ displayName: 'Teams meetings', extensionName: 'Teams meetings' });
+  });
+
   it('describes feed filters', () => {
     const infos = sourceInfos();
     expect(infos.find((s) => s.id === 'vscode')?.filter).toBe('category “release”');
@@ -756,7 +723,23 @@ describe('user sources fetch', () => {
 
   it('reports an unknown custom module', async () => {
     const source = createSource({ kind: 'custom', id: 'x', displayName: 'X', module: 'nope' });
-    await expect(source.fetch()).rejects.toThrow('[x] fetch failed: unknown custom module “nope”');
+    await expect(source.fetch()).rejects.toThrow('[x] fetch failed: extension “nope” is not available');
+  });
+
+  it('fetches extension sources through the injected host adapter', async () => {
+    const fetch = vi.fn().mockResolvedValue([{ title: 'Hello', url: 'https://example.com', datePublished: new Date('2026-01-01') }]);
+    const source = createSource(
+      { kind: 'custom', id: 'hello-source', displayName: 'Hello', extension: 'hello-extension', options: { mode: 'latest' } },
+      { extensions: { 'hello-extension': { fetch } } },
+    );
+
+    await expect(source.fetch()).resolves.toMatchObject([{ title: 'Hello' }]);
+    expect(fetch).toHaveBeenCalledWith({ sourceId: 'hello-source', options: { mode: 'latest' } });
+  });
+
+  it('reports an unavailable extension rather than treating it as an empty fetch', async () => {
+    const source = createSource({ kind: 'custom', id: 'hello-source', displayName: 'Hello', extension: 'missing' });
+    await expect(source.fetch()).rejects.toThrow('[hello-source] fetch failed: extension “missing” is not available');
   });
 });
 
@@ -782,17 +765,5 @@ describe('feed parser', () => {
     </item></channel></rss>`);
     expect(item?.readingTimeMinutes).toBe(4);
     expect(item?.content?.length).toBeLessThan(words.length);
-  });
-});
-
-describe('anthropic custom module', () => {
-  it('reads post links of a section with their titles and dates', () => {
-    const html = `
-      <a href="/news/post-one"><span class="Card__title">Post one &amp; more</span><time>Oct 18, 2026</time></a>
-      <a href="/news/post-one">duplicate</a>
-      <a href="/research/other"><span class="x__title">Other</span></a>`;
-    expect(parsePosts(html, 'news')).toEqual([
-      { title: 'Post one & more', url: 'https://www.anthropic.com/news/post-one', datePublished: new Date('Oct 18, 2026') },
-    ]);
   });
 });

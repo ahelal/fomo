@@ -145,6 +145,7 @@ export {
   TEAMS_MEETINGS_SOURCE,
   EXPERIMENTAL_SOURCE_INFOS,
   experimentalSourceInfo,
+  experimentalSourceInfos,
   isExperimentalSource,
   type ExperimentalProvider,
   type KeyedChange,

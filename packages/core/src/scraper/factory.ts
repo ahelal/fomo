@@ -5,7 +5,6 @@ import { fetchGithubReleases, releaseItems } from './github.js';
 import { fetchYoutube } from './youtube.js';
 import { sourceInfo } from './specs.js';
 import { dedupByUrl } from './text.js';
-import { CUSTOM_MODULES } from './sources/custom/index.js';
 import { errorMessage } from '../util.js';
 
 /**
@@ -50,10 +49,11 @@ function loader(spec: SourceSpec, deps: SourceDeps): () => Promise<ScrapedItem[]
     case 'youtube':
       return async () => fetchYoutube(spec, deps.youtube);
     case 'custom': {
-      const fetcher = CUSTOM_MODULES[spec.module];
+      const extensionId = 'extension' in spec ? spec.extension : spec.module;
+      const extension = deps.extensions?.[extensionId];
       return async () => {
-        if (!fetcher) throw new Error(`unknown custom module “${spec.module}”`);
-        return fetcher(spec.options ?? {});
+        if (extension) return extension.fetch({ sourceId: spec.id, options: spec.options ?? {} });
+        throw new Error(`extension “${extensionId}” is not available; use the TUI with a supported sandbox`);
       };
     }
   }

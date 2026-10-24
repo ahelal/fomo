@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FomoDirectService, extractText, extractTitle } from '../service.js';
+import type { ExperimentalProvider } from '../experimental.js';
 
 // Mock the store and scrapers
 vi.mock('../store/tables.js', () => {
@@ -14,6 +15,7 @@ vi.mock('../store/tables.js', () => {
     setSaved: vi.fn(),
     setPageInfo: vi.fn().mockResolvedValue(undefined),
     insertUpdate: vi.fn().mockResolvedValue(true),
+    recordFetch: vi.fn().mockResolvedValue(undefined),
     listDuplicateRows: vi.fn().mockResolvedValue([]),
     listDuplicateCopies: vi.fn().mockResolvedValue([]),
     setDuplicateOf: vi.fn().mockResolvedValue(undefined),
@@ -157,7 +159,7 @@ describe('FomoDirectService', () => {
   it('hands sources a YouTube Data API client only while a key is set', async () => {
     const { getAllSources, getSource } = await import('../scraper/registry.js') as any;
     await svc.fetch();
-    expect(getAllSources.mock.calls.at(-1)[1]).toEqual({ youtube: undefined });
+    expect(getAllSources.mock.calls.at(-1)[1]).toEqual({ youtube: undefined, extensions: {} });
 
     const keyed = new FomoDirectService('UseDevelopmentStorage=true', { youtubeApiKey: 'k' });
     await keyed.fetch({ sources: ['mock-source'] });
@@ -165,7 +167,7 @@ describe('FomoDirectService', () => {
 
     keyed.setYoutubeApiKey('  ');
     await keyed.fetch();
-    expect(getAllSources.mock.calls.at(-1)[1]).toEqual({ youtube: undefined });
+    expect(getAllSources.mock.calls.at(-1)[1]).toEqual({ youtube: undefined, extensions: {} });
   });
 
   it('persists reading time and video duration from scraped items', async () => {
@@ -353,7 +355,7 @@ describe('FomoDirectService', () => {
       fetch: vi.fn().mockResolvedValue([meeting]),
       merge: vi.fn().mockReturnValue({ content: 'Missed · 1 recording' }),
     });
-    const withProvider = (p: ReturnType<typeof provider>) =>
+    const withProvider = (p: ExperimentalProvider) =>
       new FomoDirectService('UseDevelopmentStorage=true', { experimental: [p] });
 
     it('stores items under their key, merged by the provider, outside duplicate detection', async () => {
@@ -375,7 +377,7 @@ describe('FomoDirectService', () => {
       expect(call[0].duplicateOf).toBeUndefined();
       expect(call[1].key).toBe(meeting.key);
       const existing = { id: 'teams-meetings__k', content: 'Missed' };
-      expect(call[1].merge(existing)).toEqual({ content: 'Missed · 1 recording' });
+      expect(await call[1].merge(existing)).toEqual({ content: 'Missed · 1 recording' });
       expect(p.merge).toHaveBeenCalledWith(existing, meeting);
       // The ordinary page is still checked, against pages only.
       const page = __mockStore.insertUpdate.mock.calls.find((c: any[]) => c[0].source === 'mock-source');
@@ -408,6 +410,7 @@ describe('FomoDirectService', () => {
     });
 
     it('reports a provider failure as that source\'s error', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
       const p = provider();
       p.fetch.mockRejectedValueOnce(new Error('Sign in to WorkIQ again'));
 
@@ -415,6 +418,120 @@ describe('FomoDirectService', () => {
 
       expect(result.results['teams-meetings']).toEqual({ fetched: 0, added: 0, error: 'Sign in to WorkIQ again' });
       expect(result.results['mock-source'].added).toBe(1);
+      expect(__mockStore.recordFetch).toHaveBeenCalledWith('teams-meetings', 'Sign in to WorkIQ again');
+    });
+
+    it('opens and closes an operation-scoped provider for each fetch, including failures', async () => {
+      const session = { ...provider(), close: vi.fn(async () => {}), assertActive: vi.fn() };
+      const factory = { ...provider(), open: vi.fn(async () => session) };
+      const s = withProvider(factory);
+      await s.fetch({ sources: ['teams-meetings'] });
+      expect(factory.fetch).not.toHaveBeenCalled();
+      expect(session.assertActive).toHaveBeenCalled();
+      expect(session.close).toHaveBeenCalledOnce();
+      session.fetch.mockRejectedValueOnce(new Error('worker crashed'));
+      const result = await s.fetch({ sources: ['teams-meetings'] });
+      expect(result.results['teams-meetings'].error).toBe('worker crashed');
+      expect(factory.open).toHaveBeenCalledTimes(2);
+      expect(session.close).toHaveBeenCalledTimes(2);
+    });
+
+    const recorded = async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      return __mockStore.recordFetch.mock.calls.map((c: unknown[]) => c[0]);
+    };
+
+    it('stops, without storing its items or recording an error, when the provider is turned off during its fetch', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      const session = { ...provider(), close: vi.fn(async () => {}) };
+      const factory = { ...provider(), open: async () => session };
+      const s = withProvider(factory);
+      session.fetch.mockImplementationOnce(async () => {
+        s.setExperimentalProviders([]);
+        return [meeting];
+      });
+      const result = await s.fetch({ sources: ['teams-meetings'] });
+      expect(result.results['teams-meetings']).toEqual({ fetched: 0, added: 0, stopped: true });
+      expect(__mockStore.insertUpdate).not.toHaveBeenCalled();
+      expect(await recorded()).not.toContain('teams-meetings');
+      expect(session.close).toHaveBeenCalledOnce();
+    });
+
+    it('stops an asynchronous merge after revocation and closes the provider', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      const session = { ...provider(), merge: vi.fn(async () => ({ content: 'Updated' })), close: vi.fn(async () => {}) };
+      const factory = { ...provider(), open: async () => session };
+      const s = withProvider(factory);
+      session.merge.mockImplementationOnce(async () => {
+        s.setExperimentalProviders([]);
+        return { content: 'stale result' };
+      });
+      __mockStore.insertUpdate.mockImplementationOnce(async (_update: unknown, options: { merge(existing: unknown): Promise<unknown> }) => {
+        await options.merge({ id: 'teams-meetings__k', content: 'Missed' });
+        return false;
+      });
+      const result = await s.fetch({ sources: ['teams-meetings'] });
+      expect(result.results['teams-meetings']).toEqual({ fetched: 1, added: 0, stopped: true });
+      expect(await recorded()).not.toContain('teams-meetings');
+      expect(session.close).toHaveBeenCalledOnce();
+    });
+
+    it('does not fail ordinary sources when an experimental source is turned off during the fetch', async () => {
+      const { __mockSource } = await import('../scraper/registry.js') as any;
+      const s = withProvider(provider());
+      __mockSource.fetch.mockImplementationOnce(async () => {
+        s.setExperimentalProviders([]);
+        return [{ title: 'Slow page', url: 'https://example.com/slow', datePublished: new Date('2025-01-01'), content: 'x' }];
+      });
+
+      const result = await s.fetch();
+
+      expect(result.results['mock-source']).toEqual({ fetched: 1, added: 1 });
+      expect(result.results['teams-meetings']).toEqual({ fetched: 0, added: 0, stopped: true });
+      expect(await recorded()).toEqual(['mock-source']);
+    });
+
+    it('stops a provider that was turned off and on again during the fetch, keeping none of its results', async () => {
+      const { __mockStore } = await import('../store/tables.js') as any;
+      const p = provider();
+      const s = withProvider(p);
+      p.fetch.mockImplementationOnce(async () => {
+        s.setExperimentalProviders([]);
+        s.setExperimentalProviders([p]);
+        return [meeting];
+      });
+
+      const result = await s.fetch({ sources: ['teams-meetings'] });
+
+      expect(result.results['teams-meetings']).toEqual({ fetched: 0, added: 0, stopped: true });
+      expect(__mockStore.insertUpdate).not.toHaveBeenCalled();
+    });
+
+    it('still reports an error when the worker of a stopped fetch cannot be closed', async () => {
+      const session = { ...provider(), close: vi.fn(async () => { throw new Error('still running'); }) };
+      const factory = { ...provider(), open: async () => session };
+      const s = withProvider(factory);
+      session.fetch.mockImplementationOnce(async () => {
+        s.setExperimentalProviders([]);
+        return [meeting];
+      });
+      const result = await s.fetch({ sources: ['teams-meetings'] });
+      expect(result.results['teams-meetings']).toEqual({ fetched: 0, added: 0, stopped: true, error: 'could not close source worker: still running' });
+    });
+
+    it('keeps a fetch running when the same providers are set again or the extensions are replaced', async () => {
+      const p = provider();
+      const s = withProvider(p);
+      p.fetch.mockImplementationOnce(async () => {
+        s.setExperimentalProviders([p]);
+        s.setSourceExtensions({});
+        return [meeting];
+      });
+
+      const result = await s.fetch();
+
+      expect(result.results['teams-meetings']).toEqual({ fetched: 1, added: 1 });
+      expect(result.results['mock-source']).toEqual({ fetched: 1, added: 1 });
     });
   });
 

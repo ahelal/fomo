@@ -20,6 +20,7 @@ vi.mock('@fomo/core/service', async () => {
     setYoutubeApiKey = (key?: string) => { if (key !== fake.youtubeKeys.at(-1)) fake.youtubeKeys.push(key); };
     getSettings = async () => ({ ...DEFAULT_SETTINGS });
     setExperimentalProviders = () => {};
+    setSourceExtensions = () => {};
     getSources = async () => [];
     getDigest = async () => ({ entries: [], pending: 0 });
     listUpdates = async () => ({ updates: [], total: 0 });

@@ -169,7 +169,7 @@ export interface InsertOptions {
    * For a keyed row that already exists: the fields to change, given what is stored, or undefined to
    * leave it as it is. Default: the fetched title, URL, content and date. Status, saved flag and topic stay.
    */
-  merge?: (existing: Update) => KeyedChange | undefined;
+  merge?: (existing: Update) => KeyedChange | undefined | Promise<KeyedChange | undefined>;
 }
 
 // ─── Store ─────────────────────────────────────────────────────────────────
@@ -250,12 +250,15 @@ export class UpdateStore {
   private async mergeKeyed(
     partitionKey: string,
     rowKey: string,
-    merge: (existing: Update) => KeyedChange | undefined,
+    merge: NonNullable<InsertOptions['merge']>,
   ): Promise<void> {
-    try {
+    for (let attempt = 0; attempt < 3; attempt++) {
       const entity = await this.client.getEntity<UpdateEntity>(partitionKey, rowKey);
-      const change = merge(entityToUpdate(entity));
+      const change = await merge(entityToUpdate(entity));
       if (!change) return;
+      if (Object.keys(change).some((key) => !['title', 'url', 'content', 'datePublished', 'durationSeconds'].includes(key))) {
+        throw new Error('Keyed merge attempted to change a protected field');
+      }
       const patch: KeyedChange = {};
       if (change.title && change.title !== entity.title) patch.title = change.title;
       if (change.url && change.url !== entity.url) patch.url = change.url;
@@ -266,9 +269,12 @@ export class UpdateStore {
         if (next !== (entity.content ?? '')) patch.content = next;
       }
       if (Object.keys(patch).length === 0) return;
-      await this.client.updateEntity({ partitionKey, rowKey, ...patch }, 'Merge', { etag: entity.etag });
-    } catch {
-      // best-effort — the next fetch merges again
+      try {
+        await this.client.updateEntity({ partitionKey, rowKey, ...patch }, 'Merge', { etag: entity.etag });
+        return;
+      } catch (error) {
+        if (!isTableError(error, 412) || attempt === 2) throw error;
+      }
     }
   }
 

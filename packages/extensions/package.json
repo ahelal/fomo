@@ -1,0 +1,22 @@
+{
+  "name": "@fomo/extensions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./catalog": "./dist/catalog.json"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@fomo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.5",
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}

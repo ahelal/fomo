@@ -6,7 +6,7 @@ import { activeSourceSpecs } from './specs.js';
  * The sources to fetch: built-ins (`specs.ts`) minus the ones the user removed, plus the user's own.
  *
  * To add a built-in, append a spec to `BUILTIN_SOURCES` in `specs.ts`. If no spec kind fits,
- * write a module in `sources/custom/` on the shared helpers and register it in `sources/custom/index.ts`.
+ * ship a sandboxed extension in `packages/extensions/` and inject its adapter from the TUI.
  */
 type SourceSettings = Partial<Pick<AppSettings, 'userSources' | 'removedSources'>>;
 

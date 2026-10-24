@@ -85,7 +85,7 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
         </div>
         <p className="source-details__badges">
           {removed ? <span className="source-details__badge">Removed</span> : <>
-            <span className="source-details__badge">{KIND_LABEL[source.kind]}</span>
+            <span className="source-details__badge">{source.extensionId ? `C/${source.extensionName ?? source.extensionId}` : KIND_LABEL[source.kind]}</span>
             <span className="source-details__badge">{source.builtin ? 'Built-in' : 'Yours'}</span>
           </>}
           <span className="source-details__id">{source.id}</span>
@@ -142,6 +142,12 @@ export function SourceDetails({ source, settings, stats, onSave, onRemove, onDel
             <span>Name</span>
             <input className="settings-panel__add-input" value={draft.name} onChange={(e) => set({ name: e.target.value })} />
           </label>
+          {draft.extensionName !== undefined && (
+            <label className="source-details__field">
+              <span>Extension name</span>
+              <input className="settings-panel__add-input" value={draft.extensionName} onChange={(e) => set({ extensionName: e.target.value })} />
+            </label>
+          )}
           {own ? (
             <>
               <label className="source-details__field">
