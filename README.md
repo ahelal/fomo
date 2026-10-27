@@ -65,6 +65,7 @@ packages/
 - **FOMO is local-first.** The TUI fetches sources and runs the digest on your computer; Azure hosts the data and static web app, not a FOMO service.
 - **Copilot turns a feed into a reading queue.** Related updates are grouped into topics, with summaries and an importance rating. You can steer grouping and importance to match your interests.
 - **The browser is a companion reader.** It reads and updates the same stored items as the TUI, but it does not fetch sources or call Copilot.
+- **Previews have their own reading focus.** In both apps, Tab switches between the list and an open preview; a blue border or highlight marks the active pane. Up/down navigates the list or scrolls the preview without changing the selected item. Preview text keeps its paragraphs and bullets, including release notes.
 - **Profiles keep accounts separate.** Each profile points to its own storage account and local preferences, so work and personal feeds stay distinct.
 
 ## Profiles

@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { type Ref } from 'react';
 import { Box, Text } from 'ink';
-import { formatDate, formatDateTime, formatUpdateTime, type Update } from '@fomo/core';
-import { textWidth } from '../text.js';
+import { formatDate, formatDateTime, formatUpdateTime, previewText, type Update } from '@fomo/core';
+import { PreviewViewport, type PreviewLine, type PreviewScroll } from './PreviewViewport.js';
 import { DUP_COLOR } from './UpdatesTable.js';
 
 interface Props {
@@ -15,6 +15,8 @@ interface Props {
   height: number;
   columns: number;
   position?: 'bottom' | 'right';
+  focused?: boolean;
+  scrollRef?: Ref<PreviewScroll>;
   /** The other updates of this one's duplicate group (the original first), also those outside the current view. */
   duplicates?: Update[];
   /** Ids of `duplicates` that are listed in the current view, which `d` jumps to. */
@@ -50,20 +52,6 @@ export function duplicateRows(count: number, room: number): { shown: number; row
   return { shown: 0, rows: 0 };
 }
 
-/** Rows `text` takes when word-wrapped to `width` columns. */
-function wrappedRows(text: string, width: number): number {
-  let rows = 1;
-  let used = 0;
-  for (const word of text.split(/\s+/).filter(Boolean)) {
-    const w = textWidth(word);
-    if (used === 0) used = w;
-    else if (used + 1 + w <= width) used += 1 + w;
-    else { rows++; used = w; }
-    while (used > width) { rows++; used -= width; }
-  }
-  return rows;
-}
-
 export function DetailPane({
   update,
   loading = false,
@@ -72,6 +60,8 @@ export function DetailPane({
   height,
   columns,
   position = 'bottom',
+  focused = false,
+  scrollRef,
   duplicates = [],
   listed,
   labelOf = (source) => source,
@@ -82,46 +72,29 @@ export function DetailPane({
   const time = formatUpdateTime(update);
   const fetched = formatDateTime(update.dateAdded);
 
-  const content = update.content
-    ? update.content
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-    : '';
-
-  const hasContent = content.length > 0;
+  const content = previewText(update.content);
 
   // Title, source, status, URL and divider (+ the top divider at the bottom); the rest is the body.
   const fixedRows = position === 'bottom' ? 6 : 5;
   // The duplicates take what is left after a row of preview.
   const links = duplicateRows(duplicates.length, height - fixedRows - 1);
-  const bodyRows = Math.max(1, height - fixedRows - links.rows);
   const gist = update.gist;
-  // The saved summary goes first: its sentence, then as many bullets as fit above a divider and a line of preview.
-  const gistWidth = Math.max(columns - 6, 10);
-  const points: string[] = [];
-  let gistRows = 0;
+  const lines: PreviewLine[] = [];
   if (gist) {
-    gistRows = wrappedRows(gist.summary, gistWidth);
-    for (const point of gist.points) {
-      const n = wrappedRows(point, gistWidth);
-      if (gistRows + n > bodyRows - 2) break;
-      points.push(point);
-      gistRows += n;
-    }
+    lines.push({ text: `✦ ${gist.summary}`, color: '#f0f6fc', bold: true });
+    lines.push(...gist.points.map((point) => ({ text: `• ${point}` })), { text: '' });
   }
-  const contentLines = gist ? bodyRows - gistRows - 1 : bodyRows;
-  const maxContentLen = columns * Math.max(1, contentLines);
-  const truncatedContent = content.length > maxContentLen
-    ? content.slice(0, maxContentLen - 1) + '…'
-    : content;
+  lines.push({
+    text: content || (loading ? 'Loading…' : `No preview — press u to fetch content${gist ? ' or ' : ', g to summarise or '}o to open in browser`),
+    color: content ? '#c9d1d9' : '#8b949e',
+  });
 
   return (
     <Box flexDirection="column" height={height} overflowY="hidden">
       {/* Top divider */}
       {position === 'bottom' && (
         <Box paddingX={1} flexShrink={0}>
-          <Text color="#30363d">{'─'.repeat(Math.max(columns - 2, 10))}</Text>
+          <Text color={focused ? '#58a6ff' : '#30363d'}>{'─'.repeat(Math.max(columns - 2, 10))}</Text>
         </Box>
       )}
 
@@ -179,59 +152,18 @@ export function DetailPane({
         <Text color="#58a6ff" underline wrap="truncate">{update.url}</Text>
       </Box>
 
-      {/* Content divider */}
-      <Box paddingX={2} flexShrink={0}>
-        <Text color="#30363d">{'─'.repeat(Math.max(columns - 6, 10))}</Text>
-      </Box>
-
-      {/* Saved Copilot summary */}
-      {gist && (
-        <>
-          <Box paddingX={2} flexShrink={0}>
-            <Box flexShrink={0}><Text color={GIST_COLOR} bold>{'✦ '}</Text></Box>
-            <Text color="#f0f6fc" wrap="wrap">{gist.summary}</Text>
-          </Box>
-          {points.map((point, i) => (
-            <Box key={i} paddingX={2} flexShrink={0}>
-              <Box flexShrink={0}><Text color={GIST_COLOR}>{'• '}</Text></Box>
-              <Text color="#c9d1d9" wrap="wrap">{point}</Text>
-            </Box>
-          ))}
-          {contentLines > 0 && (
-            <Box paddingX={2} flexShrink={0}>
-              <Text color="#30363d">{'┄'.repeat(Math.max(columns - 6, 10))}</Text>
-            </Box>
-          )}
-        </>
-      )}
-
-      {/* Content preview */}
-      {contentLines > 0 && (
-        <Box paddingX={2} flexGrow={1} overflowY="hidden">
-          {hasContent ? (
-            <Text wrap="wrap" color="#c9d1d9">
-              {truncatedContent}
-            </Text>
-          ) : loading ? (
-            <Text color="#8b949e">Loading…</Text>
-          ) : (
-            <Text wrap="wrap" color="#8b949e">
-              {'No preview — press '}
-              <Text color="#58a6ff" bold>u</Text>
-              {gist ? ' to fetch content or ' : ' to fetch content, '}
-              {!gist && <Text color="#58a6ff" bold>g</Text>}
-              {!gist && ' to summarise or '}
-              <Text color="#58a6ff" bold>o</Text>
-              {' to open in browser'}
-            </Text>
-          )}
-        </Box>
-      )}
+      <PreviewViewport
+        key={update.id}
+        lines={lines}
+        height={height - fixedRows + 1 - links.rows}
+        columns={columns}
+        focused={focused}
+        scrollRef={scrollRef}
+      />
 
       {/* Duplicates: the original of this update, or its copies, wherever they are */}
       {links.shown > 0 && (
         <>
-          {contentLines <= 0 && <Box flexGrow={1} />}
           <Box paddingX={2} flexShrink={0}>
             <Text wrap="truncate">
               <Text color="#30363d">{'─ '}</Text>

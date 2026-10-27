@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDate, formatDateTime, type Update, type Status } from '@fomo/core';
+import { formatDate, formatDateTime, previewText, type Update, type Status } from '@fomo/core';
 import { DuplicateLinks } from './DuplicateLinks.js';
 
 interface Props {
@@ -27,20 +27,12 @@ const NO_IDS: ReadonlySet<string> = new Set();
 const sourceId = (source: string) => source;
 const noColor = () => undefined;
 
-function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 1000);
-}
-
 export function DetailPane({
   update, onSetStatus, onToggleSaved, contentLoading, onReadAndNext, onNextUnread, onOpen, onFileReference, onClose,
   duplicates = [], listed = NO_IDS, onJumpDuplicate, labelOf = sourceId, colorOf = noColor,
 }: Props) {
-  const hasContent = !!update.content;
-  const content = hasContent ? stripHtml(update.content) : '';
+  const content = previewText(update.content);
+  const hasContent = !!content;
 
   return (
     <div className="detail-pane">

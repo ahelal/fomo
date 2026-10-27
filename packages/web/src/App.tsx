@@ -138,6 +138,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const fomo = useFomo(service);
 
   const [selected, setSelected] = useState<Update | undefined>();
+  const [focusedPane, setFocusedPane] = useState<'list' | 'preview'>('list');
+  const listPaneRef = useRef<HTMLDivElement>(null);
+  const previewPaneRef = useRef<HTMLDivElement>(null);
   const [digestKey, setDigestKey] = useState<string | undefined>();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
@@ -164,6 +167,16 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const digestTopic = digestRow?.kind === 'topic' && digestRow.entry.items.length > 1 ? digestRow.entry : undefined;
   const detailUpdate = isGrouped ? rowUpdate(digestRow) : pane ? undefined : selected;
   const hasSelection = isGrouped ? !!digestRow : !!selected;
+  const showPreview = hasSelection && !pane && previewPosition !== 'off';
+  const previewKey = isGrouped ? digestRow?.key : selected?.id;
+
+  useEffect(() => {
+    if (previewPaneRef.current) previewPaneRef.current.scrollTop = 0;
+  }, [previewKey]);
+
+  useEffect(() => {
+    if (!showPreview) setFocusedPane('list');
+  }, [showPreview]);
 
   const swipeBackRef = useRef({ startX: 0, startY: 0 });
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -454,8 +467,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   // ── Keyboard shortcuts (aligned with the TUI) ──
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const target = e.target as HTMLElement;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
       const key = shortcutKey(e.key);
       // Shift+↑/↓ jumps several rows (more on a tall window).
       const step = e.shiftKey && (key === 'ArrowDown' || key === 'ArrowUp') ? jumpStep(screenLines()) : 1;
@@ -511,6 +525,15 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       if (key in FILTER_KEYS && !(key === '6' && fomo.filter === 'todos')) { setFilter(FILTER_KEYS[key]!); return; }
       // Tab / Shift+Tab step through the views in tab order (1–6), wrapping around.
       if (key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (showPreview) {
+          // Keep native Tab navigation available to links and action buttons.
+          if (target.closest('a, button')) return;
+          e.preventDefault();
+          const next = focusedPane === 'list' ? 'preview' : 'list';
+          setFocusedPane(next);
+          (next === 'preview' ? previewPaneRef : listPaneRef).current?.focus({ preventScroll: true });
+          return;
+        }
         e.preventDefault();
         const views = Object.values(FILTER_KEYS);
         const i = views.indexOf(fomo.filter);
@@ -524,6 +547,22 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       }
 
       if (pane) return;
+
+      if (showPreview && focusedPane === 'preview') {
+        const preview = previewPaneRef.current;
+        if (preview) {
+          const direction = key === 'ArrowDown' || key === 'j' || key === 'PageDown' ? 1
+            : key === 'ArrowUp' || key === 'k' || key === 'PageUp' ? -1 : 0;
+          if (direction) {
+            e.preventDefault();
+            const distance = key === 'PageDown' || key === 'PageUp'
+              ? 24 * jumpStep(screenLines())
+              : 24 * step;
+            preview.scrollTop += direction * distance;
+            return;
+          }
+        }
+      }
 
       if (key === 'b') {
         const update = isGrouped ? rowUpdate(digestRow) : selected;
@@ -621,6 +660,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   }, [
     fomo, selected, isGrouped, isSaved, pane, viewHelp, digestRow, refDialog, fileReference, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
     sourcePicker, openSourcePicker, applySourceFilter,
+    showPreview, focusedPane,
     previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, digestReadAndNext, savedReadAndNext, toggleDigestRead, groupedToggleSaved,
     digestNextTopic, handleNextUnread, handleReadAndNext, handleSetStatus, handleToggleSaved, jumpToDuplicate,
   ]);
@@ -704,7 +744,6 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   // ── Render ──
 
-  const showPreview = hasSelection && !pane && previewPosition !== 'off';
   const mainClass = `main main--preview-${showPreview ? previewPosition : 'none'}`;
   const sourceFilterLabel = fomo.sourceFilter
     ? fomo.sourceFilter.length <= 2 ? fomo.sourceFilter.map(sourceName).join(', ') : `${fomo.sourceFilter.length} sources`
@@ -892,8 +931,17 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           <TodosPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
         ) : fomo.filter === 'refs' ? (
           <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
-        ) : isGrouped ? (
-          <>
+        ) : (
+          <div
+            ref={listPaneRef}
+            className={`feed-panel${showPreview && focusedPane === 'list' ? ' pane--focused' : ''}`}
+            role="region"
+            aria-label="Updates list"
+            tabIndex={0}
+            onFocusCapture={() => setFocusedPane('list')}
+            onPointerDownCapture={() => setFocusedPane('list')}
+          >
+            {isGrouped ? (
             <DigestList
               mode={isSaved ? 'saved' : 'digest'}
               rows={digestRows}
@@ -908,10 +956,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
               onRefresh={handleRefresh}
               search={fomo.search}
             />
-            {renderDetail()}
-          </>
-        ) : (
-          <>
+            ) : (
             <UpdatesTable
               updates={fomo.updates}
               selectedId={selected?.id}
@@ -922,8 +967,21 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
               onRefresh={handleRefresh}
               search={fomo.search}
             />
+            )}
+          </div>
+        )}
+        {showPreview && (
+          <div
+            ref={previewPaneRef}
+            className={`preview-panel${focusedPane === 'preview' ? ' pane--focused' : ''}`}
+            role="region"
+            aria-label="Preview"
+            tabIndex={0}
+            onFocusCapture={() => setFocusedPane('preview')}
+            onPointerDownCapture={() => setFocusedPane('preview')}
+          >
             {renderDetail()}
-          </>
+          </div>
         )}
       </div>
 

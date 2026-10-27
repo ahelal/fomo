@@ -10,6 +10,7 @@ interface Props {
   /** A Copilot digest run is in progress. */
   grouping?: boolean;
   selectedIndex: number;
+  focused?: boolean;
   height: number;
   columns: number;
   sourceLabels?: Record<string, string>;
@@ -46,6 +47,7 @@ export function DigestTable({
   pending,
   grouping = false,
   selectedIndex: selectedProp,
+  focused = true,
   height,
   columns,
   sourceLabels = {},
@@ -53,6 +55,8 @@ export function DigestTable({
   search,
   mode = 'digest',
 }: Props) {
+  const selectionBackground = focused ? SEL_BG : '#21262d';
+  const selectionColor = focused ? '#58a6ff' : '#8b949e';
   // The list can shrink (e.g. after grouping) one render before App clamps its selection
   const selectedIndex = Math.max(0, Math.min(selectedProp, rows.length - 1));
   const saved = mode === 'saved';
@@ -135,8 +139,8 @@ export function DigestTable({
 
       {visible.map(({ row, index }, viewIdx) => {
         const selected = index === selectedIndex;
-        const bg = selected ? SEL_BG : undefined;
-        const bar = selected ? <Text color="#1c7cd6" backgroundColor={SEL_BG}>{'▎ '}</Text> : <Text>{'  '}</Text>;
+        const bg = selected ? selectionBackground : undefined;
+        const bar = selected ? <Text color={selectionColor} backgroundColor={bg}>{'▎ '}</Text> : <Text>{'  '}</Text>;
 
         if (row.kind === 'item') {
           const u = row.update;
@@ -155,7 +159,7 @@ export function DigestTable({
               </Box>
               {u.summary && (
                 <Box paddingX={1}>
-                  {selected ? <Text color="#1c7cd6" backgroundColor={SEL_BG}>{'▎ '}</Text> : <Text>{'  '}</Text>}
+                  {bar}
                   <Text backgroundColor={bg}>{' '.repeat(summaryIndent - 2)}</Text>
                   <Text color="#8b949e" backgroundColor={bg} wrap="truncate">{clip(u.summary, titleW)}</Text>
                 </Box>
@@ -203,7 +207,7 @@ export function DigestTable({
             </Box>
             {summary && (
               <Box paddingX={1}>
-                {selected ? <Text color="#1c7cd6" backgroundColor={SEL_BG}>{'▎ '}</Text> : <Text>{'  '}</Text>}
+                {bar}
                 <Text backgroundColor={bg}>{' '.repeat(summaryIndent - 2)}</Text>
                 <Text color="#8b949e" backgroundColor={bg} wrap="truncate">{clip(summary, titleW)}</Text>
               </Box>

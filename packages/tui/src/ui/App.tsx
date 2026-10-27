@@ -29,6 +29,7 @@ import { DigestTable } from './components/DigestTable.js';
 import { StatusBar, type Activity } from './components/StatusBar.js';
 import { DetailPane } from './components/DetailPane.js';
 import { TopicPane } from './components/TopicPane.js';
+import type { PreviewScroll } from './components/PreviewViewport.js';
 import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, FETCHING_NOTE, SIGNING_IN_NOTE } from './components/SettingsPane.js';
@@ -153,6 +154,9 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   const [activity, setActivity] = useState<Activity | undefined>();
   const [digesting, setDigesting] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
+  const [previewFocused, setPreviewFocused] = useState(false);
+  const previewScroll = useRef<PreviewScroll>(null);
+  useEffect(() => { setPreviewFocused(false); }, [showDetail, filter]);
   const [stats, setStats] = useState<StatsResponse | undefined>();
   const [previewPosition, setPreviewPosition] = useState<PreviewPosition>('bottom');
   const [showSettings, setShowSettings] = useState(false);
@@ -2136,6 +2140,17 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     // d jumps between an update and its duplicate or original, when that is in this view
     if (input === 'd') { jumpToDuplicate(); return; }
 
+    if (key.tab && showDetail && listLength > 0) {
+      setPreviewFocused((focused) => !focused);
+      return;
+    }
+    if (showDetail && previewFocused) {
+      if (key.upArrow || input === 'k') { previewScroll.current?.scroll(-step); return; }
+      if (key.downArrow || input === 'j') { previewScroll.current?.scroll(step); return; }
+      if (key.pageUp) { previewScroll.current?.scroll(-jumpStep(rows)); return; }
+      if (key.pageDown) { previewScroll.current?.scroll(jumpStep(rows)); return; }
+    }
+
     // Navigation
     if (key.upArrow   || input === 'k') { setSelectedIndex((i) => Math.max(0, i - step));                return; }
     if (key.downArrow || input === 'j') { setSelectedIndex((i) => Math.max(0, Math.min(listLength - 1, i + step))); return; }
@@ -2361,6 +2376,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         pending={digestPending}
         grouping={digesting}
         selectedIndex={selectedIndex}
+        focused={!previewFocused}
         height={height}
         columns={width}
         sourceLabels={sourceLabels}
@@ -2372,6 +2388,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         updates={updates}
         search={search || undefined}
         selectedIndex={selectedIndex}
+        focused={!previewFocused}
         height={height}
         columns={width}
         sourceLabels={sourceLabels}
@@ -2381,6 +2398,8 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
 
   const renderDetail = (height: number, width: number, position: 'bottom' | 'right') => {
     const duplicateProps = {
+      focused: previewFocused,
+      scrollRef: previewScroll,
       duplicates,
       listed: new Set((grouped ? digestEntries.flatMap((e) => e.items) : updates).map((u) => u.id)),
       labelOf: sourceName,
@@ -2413,6 +2432,8 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           columns={width}
           position={position}
           sourceLabels={sourceLabels}
+          focused={previewFocused}
+          scrollRef={previewScroll}
         />
       );
     }
@@ -2634,7 +2655,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           <Box width={tableW}>
             {renderTable(availableH, tableW)}
           </Box>
-          <Box borderStyle="single" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor="gray">
+          <Box borderStyle="single" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor={previewFocused ? '#58a6ff' : '#30363d'}>
             <Box width={detailW - 2}>
               {renderDetail(availableH, detailW - 2, 'right')}
             </Box>
@@ -2645,7 +2666,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   }
 
   // Default: bottom layout (original)
-  const detailH = showDetail ? Math.max(6, Math.floor(availableH * 0.4)) : 0;
+  const detailH = showDetail ? Math.min(Math.max(0, availableH - 3), Math.max(8, Math.floor(availableH * 0.4))) : 0;
   const tableH = availableH - detailH;
 
   return (

@@ -305,6 +305,66 @@ describe('navigation', () => {
     expect(frame()).toContain('FOMO');
     expect(frame()).not.toMatch(/ERROR|TypeError/);
   });
+
+  it('Tab focuses the preview, arrows scroll it, and Shift+Tab returns to the list', async () => {
+    const updates = ['First release', 'Second release'].map((title, i) => ({
+      id: `app__${i}`, source: 'app', title, url: `https://example.com/${i}`,
+      datePublished: '2026-10-27', dateAdded: '2026-10-27',
+      status: 'unread' as const, saved: false,
+      content: Array.from({ length: 60 }, (_, n) => `- Release note ${n + 1}`).join('\n'),
+    }));
+    const listUpdates = vi.fn(async () => ({ updates, total: updates.length }));
+    const { press, frame } = await renderApp(undefined, {
+      service: { ...service, listUpdates, getDuplicates: async () => [] } as unknown as FomoDirectService,
+    });
+    await press('1');
+    await press('\r');
+    expect(frame()).not.toContain('List focused');
+    expect(frame()).toContain('- Release note 1');
+    await press('\t');
+    expect(frame()).not.toContain('Preview focused');
+    const calls = listUpdates.mock.calls.length;
+    await press('\u001b[B');
+    expect(frame()).toContain('- Release note 2');
+    expect(frame()).not.toContain('- Release note 1\n');
+    expect(listUpdates).toHaveBeenCalledTimes(calls);
+    expect(frame().split('\n').find((line) => line.includes('▎'))).toContain('First release');
+    await press('\u001b[A');
+    expect(frame()).toContain('- Release note 1');
+    await press('\u001b[Z');
+    expect(frame()).not.toContain('List focused');
+    await press('\u001b[B');
+    expect(frame().split('\n').find((line) => line.includes('▎'))).toContain('Second release');
+    expect(frame()).toContain('- Release note 1');
+  });
+
+  it('scrolls topic previews and resets scrolling on close and selection changes', async () => {
+    const item = (id: string) => ({
+      id, source: 'app', title: `Release ${id}`, url: `https://example.com/${id}`,
+      datePublished: '2026-10-27', dateAdded: '2026-10-27',
+      status: 'unread' as const, saved: false, content: '',
+    });
+    const entries = [{
+      topic: {
+        id: 'topic', title: 'App releases', summary: 'Topic overview',
+        highlights: Array.from({ length: 60 }, (_, n) => `Topic point ${n + 1}`),
+        createdAt: '2026-10-27', updatedAt: '2026-10-27',
+      },
+      items: [item('app__1'), item('app__2')], latestDate: '2026-10-27', sources: ['app'], synthetic: false,
+    }];
+    const { press, frame } = await renderApp(undefined, {
+      service: { ...service, getDigest: async () => ({ entries, pending: 0 }) } as unknown as FomoDirectService,
+    });
+    await press('.');
+    await press('\t');
+    expect(frame()).not.toContain('Preview focused');
+    await press('\u001b[6~');
+    expect(frame()).not.toContain('Topic overview');
+    await press('\u001b');
+    await press('.');
+    expect(frame()).not.toContain('List focused');
+    expect(frame()).toContain('Topic overview');
+  });
 });
 
 describe('a audit trail', () => {

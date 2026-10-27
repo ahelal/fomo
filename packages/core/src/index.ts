@@ -1,4 +1,5 @@
 export * from './types.js';
+export { previewText } from './preview.js';
 export { FomoStorageService } from './storage-service.js';
 export {
   buildConnectLink,

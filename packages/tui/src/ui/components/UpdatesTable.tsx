@@ -38,6 +38,7 @@ export function updateLook(u: Update) {
 interface Props {
   updates: Update[];
   selectedIndex: number;
+  focused?: boolean;
   height: number;
   columns: number;
   sourceLabels?: Record<string, string>;
@@ -46,7 +47,8 @@ interface Props {
   search?: string;
 }
 
-export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLabels = {}, sourceColors = {}, search }: Props) {
+export function UpdatesTable({ updates, selectedIndex, focused = true, height, columns, sourceLabels = {}, sourceColors = {}, search }: Props) {
+  const selectionBackground = focused ? '#1c2d4f' : '#21262d';
   // Reserve lines for header(1) + bottom scroll indicator(1)
   // Each row takes 2 lines (content + separator), except last row takes 1
   const viewportRows = Math.max(1, Math.floor((height - 1) / 2));
@@ -127,18 +129,18 @@ export function UpdatesTable({ updates, selectedIndex, height, columns, sourceLa
             {/* Data row */}
             <Box paddingX={1}>
               {isSelected ? (
-                <Text color="#1c7cd6" backgroundColor="#1c2d4f">{'▎ '}</Text>
+                <Text color={focused ? '#58a6ff' : '#8b949e'} backgroundColor={selectionBackground}>{'▎ '}</Text>
               ) : (
                 <Text>{'  '}</Text>
               )}
-              <Text color={sourceColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{source}</Text>
-              <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{dateStr.padEnd(dateW)}</Text>
-              <Text color={statusColor} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{statusLabel.padEnd(statusW)}</Text>
-              <Text color={textColor} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{formatUpdateTime(update).padEnd(timeW)}</Text>
+              <Text color={sourceColor} bold={isUnread} backgroundColor={isSelected ? selectionBackground : undefined}>{source}</Text>
+              <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? selectionBackground : undefined}>{dateStr.padEnd(dateW)}</Text>
+              <Text color={statusColor} backgroundColor={isSelected ? selectionBackground : undefined}>{statusLabel.padEnd(statusW)}</Text>
+              <Text color={textColor} backgroundColor={isSelected ? selectionBackground : undefined}>{formatUpdateTime(update).padEnd(timeW)}</Text>
               {update.duplicateOf && (
-                <Text color={DUP_COLOR} backgroundColor={isSelected ? '#1c2d4f' : undefined}>{DUP_BADGE}</Text>
+                <Text color={DUP_COLOR} backgroundColor={isSelected ? selectionBackground : undefined}>{DUP_BADGE}</Text>
               )}
-              <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? '#1c2d4f' : undefined} wrap="truncate">{titleRaw}</Text>
+              <Text color={textColor} bold={isUnread} backgroundColor={isSelected ? selectionBackground : undefined} wrap="truncate">{titleRaw}</Text>
             </Box>
           </React.Fragment>
         );
