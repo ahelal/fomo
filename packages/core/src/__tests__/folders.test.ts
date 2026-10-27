@@ -1,13 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildFolderRows,
+  deleteFolderEntries,
   folderColor,
   folderMatches,
   folderMove,
   folderPaths,
   isInFolder,
   moveFolderColors,
+  moveFolderMetadata,
   moveFolderPath,
+  normalizeFolderMetadata,
   normalizeFolder,
   parentFolder,
   parentRowIndex,
@@ -16,6 +19,7 @@ import {
   folderTreeStep,
   type FolderTreeOptions,
 } from '../folders.js';
+import type { FolderMetadata } from '../types.js';
 
 interface Note {
   id: string;
@@ -107,6 +111,50 @@ describe('folder colors', () => {
   });
 });
 
+describe('folder metadata', () => {
+  it('normalizes local paths and GitHub repositories', () => {
+    expect(normalizeFolderMetadata({ localPath: ' ~/work/fomo ', githubRepo: 'https://github.com/owner/repo/' }))
+      .toEqual({ localPath: '~/work/fomo', githubRepo: 'owner/repo' });
+    expect(normalizeFolderMetadata({ localPath: ' ', githubRepo: '' })).toEqual({});
+    expect(() => normalizeFolderMetadata({ githubRepo: 'not-a-repository' })).toThrow(/owner\/repo/);
+  });
+
+  it('moves metadata with folders and detects conflicts instead of overwriting', () => {
+    const metadata = { work: { localPath: '~/work' }, 'work/eng': { githubRepo: 'owner/eng' } };
+    expect(moveFolderMetadata(metadata, 'work', 'projects')).toEqual({
+      projects: { localPath: '~/work' },
+      'projects/eng': { githubRepo: 'owner/eng' },
+    });
+    expect(moveFolderMetadata({ work: { localPath: '~/work' }, projects: { githubRepo: 'owner/repo' } }, 'work', 'projects'))
+      .toEqual({ projects: { localPath: '~/work', githubRepo: 'owner/repo' } });
+    expect(() => moveFolderMetadata({ work: { localPath: '~/work' }, projects: { localPath: '~/other' } }, 'work', 'projects'))
+      .toThrow(/Conflicting metadata/);
+  });
+});
+
+describe('deleteFolderEntries', () => {
+  const colors = { ai: '#000001', 'ai/agents': '#000002', 'ai/agents/x': '#000003', aids: '#000004', agents: '#000005' };
+
+  it('drops the folder and lifts its subfolders into the parent', () => {
+    expect(deleteFolderEntries(colors, 'ai', 'parent', moveFolderColors))
+      .toEqual({ aids: '#000004', agents: '#000005', 'agents/x': '#000003' });
+    expect(deleteFolderEntries(colors, 'ai/agents', 'parent', moveFolderColors))
+      .toEqual({ ai: '#000001', 'ai/x': '#000003', aids: '#000004', agents: '#000005' });
+  });
+
+  it('drops the whole subtree', () => {
+    expect(deleteFolderEntries(colors, 'ai', 'all', moveFolderColors)).toEqual({ aids: '#000004', agents: '#000005' });
+  });
+
+  it('keeps metadata clashes and the top level out', () => {
+    expect(() => deleteFolderEntries<FolderMetadata>({ a: { localPath: '~/a' }, 'a/b': {}, 'a/b/c': { localPath: '~/1' }, 'a/c': { localPath: '~/2' } }, 'a/b', 'parent', moveFolderMetadata))
+      .toThrow('Conflicting metadata');
+    expect(deleteFolderEntries<FolderMetadata>({ a: { localPath: '~/a' }, 'a/b': { localPath: '~/b' } }, 'a/b', 'parent', moveFolderMetadata))
+      .toEqual({ a: { localPath: '~/a' } });
+    expect(() => deleteFolderEntries(colors, '', 'all', moveFolderColors)).toThrow(/top level/);
+  });
+});
+
 describe('buildFolderRows', () => {
   const notes = [note('z', ''), note('b', 'ai/agents', true), note('a', 'ai'), note('c', 'Azure', true), note('d', 'ai')];
 
@@ -130,6 +178,13 @@ describe('buildFolderRows', () => {
   it('counts nothing as done without isDone', () => {
     const rows = buildFolderRows(notes, new Set(), { ...opts, isDone: undefined });
     expect(rows.filter((r) => r.kind === 'folder').map((r) => r.kind === 'folder' && r.done)).toEqual([0, 0]);
+  });
+
+  it('keeps explicitly supplied empty folders visible', () => {
+    const rows = buildFolderRows([], new Set(), { ...opts, extraFolders: ['work/fomo'] });
+    expect(rows.map((r) => r.kind === 'folder' ? r.path : r.key)).toEqual(['work']);
+    const openRows = buildFolderRows([], new Set(['work']), { ...opts, extraFolders: ['work/fomo'] });
+    expect(openRows.map((r) => r.kind === 'folder' ? r.path : r.key)).toEqual(['work', 'work/fomo']);
   });
 
   it('finds the folder and parent of a row', () => {

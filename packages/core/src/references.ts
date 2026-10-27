@@ -1,4 +1,4 @@
-import type { Reference } from './types.js';
+import type { FolderMetadataMap, Reference } from './types.js';
 import { searchTerms } from './search.js';
 import { compareReferences, type ReferenceSort } from './sort.js';
 import { buildFolderRows, folderPaths, type FolderTreeRow } from './folders.js';
@@ -41,6 +41,7 @@ export function buildReferenceRows(
   expanded: ReadonlySet<string>,
   search?: string,
   sort?: ReferenceSort,
+  folderMetadata?: FolderMetadataMap,
 ): ReferenceRow[] {
   const searching = searchTerms(search).length > 0;
   return buildFolderRows(refs, expanded, {
@@ -49,5 +50,6 @@ export function buildReferenceRows(
     compare: compareReferences(sort),
     include: searching ? (ref) => matchesReference(ref, search) : undefined,
     openAll: searching,
+    extraFolders: searching ? [] : Object.keys(folderMetadata ?? {}),
   });
 }

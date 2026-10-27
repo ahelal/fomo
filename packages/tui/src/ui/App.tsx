@@ -431,6 +431,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     suggest: suggestReference,
     notify: showMessage,
     openUrl: async (url) => { const { default: open } = await import('open'); await open(url); },
+    openAttachment: openTodoAttachment,
     copy: copyToClipboard,
     pickColor: colorPicker.open,
     jump: jumpStep(rows),
@@ -1743,8 +1744,9 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       if (key.tab && !todos.typing) { cycleView(key.shift ? -1 : 1); return; }
       if (input === 'w' && !todos.typing) { profilePicker.open(); return; }
       const view = todos.typing ? undefined : viewForKey(input);
-      if (view) {
-        if (view !== 'todos') showView(view);
+      // 6 again (already on Todos) cycles todos + ideas → todos → ideas.
+      if (view && view !== 'todos') {
+        showView(view);
         return;
       }
       todos.handleInput(raw, key);

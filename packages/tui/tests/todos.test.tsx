@@ -8,15 +8,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COLOR_PALETTE,
   DEFAULT_SETTINGS,
+  deleteFolderEntries,
   isInFolder,
+  parentFolder,
   moveFolderColors,
+  moveFolderMetadata,
   moveFolderPath,
   moveInGrid,
   paletteIndex,
   setFolderColor,
   toIsoDate,
   type CreateTodoRequest,
+  type DeleteFolderMode,
   type FolderColorMap,
+  type FolderMetadata,
+  type FolderMetadataMap,
   type Todo,
   type UpdateTodoRequest,
 } from '@fomo/core';
@@ -56,13 +62,14 @@ function todo(id: string, subject: string, folder: string, extra: Partial<Todo> 
 function fakeService(initial: Todo[], initialColors: FolderColorMap = {}) {
   let todos = [...initial];
   let folderColors = { ...initialColors };
+  let folderMetadata: FolderMetadataMap = {};
   return {
     getSettings: async () => ({ ...DEFAULT_SETTINGS }),
     getSources: async () => [],
     getDigest: async () => ({ entries: [], pending: 0 }),
     listUpdates: vi.fn(async (_query: { status?: string; saved?: boolean }) => ({ updates: [], total: 0 })),
     getStats: async () => ({ total: 0, byStatus: { unread: 0, read: 0 }, bySource: {}, saved: 0 }),
-    listTodos: vi.fn(async () => ({ todos, folderColors })),
+    listTodos: vi.fn(async () => ({ todos, folderColors, folderMetadata })),
     createTodo: vi.fn(async (req: CreateTodoRequest) => {
       const created = todo(`n${todos.length + 1}`, req.subject, req.folder ?? '', { ...req, folder: req.folder ?? '', description: req.description ?? '' });
       todos = [...todos, created];
@@ -77,11 +84,25 @@ function fakeService(initial: Todo[], initialColors: FolderColorMap = {}) {
       const moved = todos.filter((t) => isInFolder(t.folder, from)).length;
       todos = todos.map((t) => ({ ...t, folder: moveFolderPath(t.folder, from, to) }));
       folderColors = moveFolderColors(folderColors, from, to);
+      folderMetadata = moveFolderMetadata(folderMetadata, from, to);
       return moved;
+    }),
+    deleteTodoFolder: vi.fn(async (folder: string, mode: DeleteFolderMode) => {
+      const inside = todos.filter((t) => isInFolder(t.folder, folder));
+      todos = mode === 'all'
+        ? todos.filter((t) => !isInFolder(t.folder, folder))
+        : todos.map((t) => ({ ...t, folder: moveFolderPath(t.folder, folder, parentFolder(folder)) }));
+      folderColors = deleteFolderEntries(folderColors, folder, mode, moveFolderColors);
+      folderMetadata = deleteFolderEntries(folderMetadata, folder, mode, moveFolderMetadata);
+      return inside.length;
     }),
     setTodoFolderColor: vi.fn(async (folder: string, color: string) => {
       folderColors = setFolderColor(folderColors, folder, color);
       return folderColors;
+    }),
+    setTodoFolderMetadata: vi.fn(async (folder: string, metadata: FolderMetadata) => {
+      folderMetadata = { ...folderMetadata, [folder]: metadata };
+      return folderMetadata;
     }),
   };
 }
@@ -160,7 +181,7 @@ describe('6 Todos view', () => {
     expect(frame()).toContain('1 done');
     expect(frame()).toMatch(/▾ work\/\s+1\/2/);
     expect(frame()).toContain('2d overdue');
-    await press(ENTER); // closes the work folder
+    await press(LEFT); // closes the work folder
     expect(frame()).toMatch(/▸ work\//);
     expect(frame()).not.toContain('Write report');
     await press('6', ESC, '\u007f', '\u001b[3~');
@@ -183,11 +204,11 @@ describe('6 Todos view', () => {
   it('steps into and out of folders with → and ←', async () => {
     const { press, frame } = await renderApp(LIST);
     await press('6');
-    expect(frame()).toContain('work/ · 1 of 2 done');
+    expect(frame()).toContain('work/ · 1 of 2 todos done');
     await press(RIGHT); // into the open work/ folder
-    expect(frame()).toMatch(/\[↵\] → /);
+    expect(frame()).toMatch(/\[space\] → /);
     await press(LEFT); // back up to work/
-    expect(frame()).toContain('work/ · 1 of 2 done');
+    expect(frame()).toContain('work/ · 1 of 2 todos done');
     await press(LEFT); // and close it
     expect(frame()).toMatch(/▸ work\//);
     expect(frame()).not.toContain('Write report');
@@ -196,16 +217,48 @@ describe('6 Todos view', () => {
     expect(frame()).toContain('Write report');
   });
 
-  it('steps the status with ↵ and toggles done with x', async () => {
+  it('steps the status with space, toggles done with x and edits with ↵', async () => {
     const { svc, press, frame } = await renderApp(LIST);
     await press('6', DOWN); // work/ → Write report
-    await press(ENTER);
+    await press(' ');
     expect(svc.updateTodo).toHaveBeenLastCalledWith('t1', { status: 'in_progress' });
     expect(frame()).toContain('In progress: “Write report”');
     await press('x');
     expect(svc.updateTodo).toHaveBeenLastCalledWith('t1', { status: 'done' });
     await press('X');
     expect(svc.updateTodo).toHaveBeenLastCalledWith('t1', { status: 'pending' });
+    svc.updateTodo.mockClear();
+    await press(ENTER);
+    expect(svc.updateTodo).not.toHaveBeenCalled();
+    expect(frame()).toContain('[^S] save');
+  });
+
+  it('cycles todos + ideas, todos only and ideas only by pressing 6 again', async () => {
+    const { press, frame } = await renderApp([...LIST, todo('t4', 'Try a new idea', 'work', { kind: 'idea' })]);
+    await press('6');
+    expect(frame()).toContain('✓ Todos + Ideas');
+    expect(frame()).toContain('Write report');
+    expect(frame()).toContain('Try a new idea');
+    const counts = (f: string) => f.split('\n').find((l) => l.includes('open'))!.indexOf('open');
+    const column = counts(frame());
+    await press('6');
+    expect(frame()).toContain('✓ Todos ');
+    expect(counts(frame())).toBe(column);
+    expect(frame()).toContain('Showing: Todos');
+    expect(frame()).toContain('Write report');
+    expect(frame()).not.toContain('Try a new idea');
+    await press('6');
+    expect(frame()).toContain('Showing: Ideas');
+    expect(frame()).toContain('✓ Ideas ');
+    expect(counts(frame())).toBe(column);
+    expect(frame()).not.toContain('Write report');
+    expect(frame()).toContain('Try a new idea');
+    await press('6');
+    expect(frame()).toContain('Write report');
+    expect(frame()).toContain('Try a new idea');
+    await press('y'); // no longer a filter key
+    expect(frame()).toContain('Write report');
+    expect(frame()).toContain('Try a new idea');
   });
 
   it('shows open, in-progress or done todos with v', async () => {
@@ -223,12 +276,105 @@ describe('6 Todos view', () => {
     expect(frame()).toContain('Buy milk');
   });
 
-  it('renames a folder with its todos and its color', async () => {
+  it.each(['e', ENTER])('renames a folder with its todos and its color using %j', async (editKey) => {
     const { svc, press, frame } = await renderApp(LIST, { work: '#3fb950' });
-    await press('6', 'e', CTRL_U, ...'job', ENTER);
+    await press('6', editKey, CTRL_U, ...'job', ENTER);
     expect(svc.moveTodoFolder).toHaveBeenCalledWith('work', 'job');
     expect(frame()).toContain('Moved 2 todos to job');
     expect(frame()).toMatch(/▾ job\//);
+    expect(svc.setTodoFolderMetadata).not.toHaveBeenCalled();
+  });
+
+  describe('deleting a folder with d', () => {
+    const NESTED = [...LIST, todo('t4', 'Plan sprint', 'work/team')];
+
+    it('moves its contents, subfolders included, up to the parent with p', async () => {
+      const { svc, press, frame } = await renderApp(NESTED, { work: '#3fb950', 'work/team': '#123456' });
+      await press('6', 'd');
+      expect(frame()).toContain('Delete work/ (3 todos, 1 subfolder)');
+      expect(frame()).toContain('move contents to the top level');
+      await press('p');
+      expect(svc.deleteTodoFolder).toHaveBeenCalledWith('work', 'parent');
+      expect(frame()).toContain('Deleted work/ — moved 3 todos to the top level');
+      expect(frame()).toMatch(/▾ team\//);
+      expect(frame()).not.toMatch(/▾ work\//);
+      expect(frame()).toContain('Write report');
+    });
+
+    it('deletes everything in it with a', async () => {
+      const { svc, press, frame } = await renderApp(NESTED);
+      await press('6', 'd', 'a');
+      expect(svc.deleteTodoFolder).toHaveBeenCalledWith('work', 'all');
+      expect(frame()).toContain('Deleted work/ and 3 todos');
+      expect(frame()).not.toContain('Write report');
+      expect(frame()).not.toContain('Plan sprint');
+      expect(frame()).toContain('Buy milk');
+    });
+
+    it('keeps the folder on Esc, and other keys only answer the question', async () => {
+      const { svc, press, frame } = await renderApp(NESTED);
+      await press('6', 'd', 'q', 'x', ESC);
+      expect(svc.deleteTodoFolder).not.toHaveBeenCalled();
+      expect(frame()).not.toContain('Delete work/');
+      expect(frame()).toMatch(/▾ work\//);
+    });
+  });
+
+  it('edits a folder name, local directory and GitHub repo in one form with ↵', async () => {
+    const { svc, press, frame } = await renderApp(LIST);
+    await press('6', ENTER);
+    expect(frame()).toContain('Edit folder · work/');
+    await press(CTRL_U, ...'job', TAB, ...'/src/job', TAB, ...'octo/job', ENTER);
+    expect(svc.moveTodoFolder).toHaveBeenCalledWith('work', 'job');
+    expect(svc.setTodoFolderMetadata).toHaveBeenCalledWith('job', { localPath: '/src/job', githubRepo: 'octo/job' });
+    expect(frame()).toContain('Moved 2 todos to job');
+    expect(frame()).toMatch(/▾ job\//);
+  });
+
+  it('saves folder metadata without moving when the name is unchanged', async () => {
+    const { svc, press, frame } = await renderApp(LIST);
+    await press('6', ENTER, TAB, TAB, ...'octo/work', ENTER);
+    expect(svc.moveTodoFolder).not.toHaveBeenCalled();
+    expect(svc.setTodoFolderMetadata).toHaveBeenCalledWith('work', { githubRepo: 'octo/work' });
+    expect(frame()).toContain('Saved work/');
+  });
+
+  it('picks a folder color in its untyped edit form and saves only on submit', async () => {
+    const { svc, press, frame } = await renderApp(LIST);
+    await press('6', ENTER);
+    expect(frame()).toContain('Color:');
+    expect(frame()).not.toContain('Type:');
+    await press(TAB, TAB, TAB, ENTER, '#', CTRL_U, ...'#123456', ENTER);
+    expect(frame()).toContain('Edit folder · work/');
+    expect(svc.setTodoFolderColor).not.toHaveBeenCalled();
+    await press(ENTER);
+    expect(svc.setTodoFolderColor).toHaveBeenCalledWith('work', '#123456');
+    expect(svc.moveTodoFolder).not.toHaveBeenCalled();
+    expect(svc.setTodoFolderMetadata).not.toHaveBeenCalled();
+  });
+
+  it('resets a folder color to inherit from its parent or the default', async () => {
+    const { svc, press } = await renderApp(LIST, { work: '#3fb950' });
+    await press('6', ENTER, TAB, TAB, TAB, CTRL_U, TAB, ENTER);
+    expect(svc.setTodoFolderColor).toHaveBeenCalledWith('work', '');
+  });
+
+  it('discards a picked folder color when the form is cancelled', async () => {
+    const { svc, press } = await renderApp(LIST);
+    await press('6', ENTER, TAB, TAB, TAB, ENTER, RIGHT, ENTER, ESC);
+    expect(svc.setTodoFolderColor).not.toHaveBeenCalled();
+  });
+
+  it('keeps the moved folder editable when saving its color fails', async () => {
+    const { svc, press, frame } = await renderApp(LIST);
+    svc.setTodoFolderColor.mockRejectedValueOnce(new Error('Color save failed'));
+    await press('6', ENTER, CTRL_U, ...'job', TAB, TAB, TAB, ENTER, RIGHT, ENTER, ENTER);
+    expect(frame()).toContain('Edit folder · job/');
+    expect(frame()).toContain('Color save failed');
+    await press(ENTER);
+    expect(svc.moveTodoFolder).toHaveBeenCalledTimes(1);
+    expect(svc.setTodoFolderColor).toHaveBeenLastCalledWith('job', rightOf(TODO_FOLDER_COLOR));
+    expect(frame()).not.toContain('Edit folder');
   });
 
   it('deletes a todo only on the second d', async () => {
@@ -261,7 +407,7 @@ describe('6 Todos view', () => {
     expect(frame()).not.toContain('Add todo');
     await press('e', ESC);
     expect(frame()).toContain('Write report');
-    expect(frame()).not.toContain('Move work/ to:');
+    expect(frame()).not.toContain('Edit folder');
   });
 });
 

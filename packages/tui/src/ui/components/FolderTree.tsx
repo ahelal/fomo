@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { colorName, normalizeHexColor, type FolderRow, type FolderTreeRow } from '@fomo/core';
 import { COLOR_FIELD, FOLDER_FIELD, type FolderForm } from '../hooks/folderForm.js';
-import type { FolderRename } from '../hooks/useFolderTree.js';
+import type { FolderDeletePrompt, FolderRename } from '../hooks/useFolderTree.js';
 import { textRows } from '../text.js';
 
 export const ACCENT = '#58a6ff';
@@ -54,13 +54,13 @@ export function FolderLine({ row, selected, columns, color, progress }: {
   const label = `${indent}${row.open ? '▾' : '▸'} ${row.name}/`;
   const fg = (c: string) => (selected ? DARK : c);
   if (progress) {
-    const [filled, empty] = progressBar(row.done, row.count);
+    const [filled, empty] = progressBar(row.done, row.progressCount);
     const tail = `  ${row.done}/${row.count} ${filled}${empty}`;
     return (
       <Box width={columns}>
         <Text backgroundColor={selected ? ACCENT : undefined} color={fg(color)} bold wrap="truncate-end">
           {' '}{truncate(label, columns - tail.length - 2)}
-          <Text color={fg(MUTED)} bold={false}>{`  ${row.done}/${row.count} `}</Text>
+          <Text color={fg(MUTED)} bold={false}>{`  ${row.done}/${row.progressCount} `}</Text>
           <Text color={fg(DONE)} bold={false}>{filled}</Text>
           <Text color={fg('#30363d')} bold={false}>{empty}</Text>
         </Text>
@@ -114,10 +114,38 @@ export function RenameLine({ rename, color }: { rename?: FolderRename; color: st
   );
 }
 
-/** Lines the search and rename prompts take. */
-export function promptLines(view: { search: string; searchDraft?: string; rename?: FolderRename }): number {
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** How to delete a folder: p lifts its contents into the parent, a deletes everything. */
+export function DeleteFolderLine({ prompt, noun, color }: { prompt?: FolderDeletePrompt; noun: readonly [string, string]; color: string }) {
+  if (!prompt) return null;
+  const parent = prompt.path.includes('/') ? `${prompt.path.slice(0, prompt.path.lastIndexOf('/'))}/` : 'the top level';
+  const inside = [plural(prompt.count, noun[0], noun[1]), ...(prompt.subfolders ? [plural(prompt.subfolders, 'subfolder', 'subfolders')] : [])].join(', ');
+  return (
+    <Box flexDirection="column">
+      <Text wrap="truncate-end">
+        <Text color={color} bold>{` Delete ${prompt.path}/ `}</Text>
+        <Text color={MUTED}>{`(${inside})  `}</Text>
+        {prompt.busy
+          ? <Text color={MUTED}>{'deleting…'}</Text>
+          : (
+            <Text>
+              <Text color={HINT} bold>p</Text><Text color={TEXT}>{` move contents to ${parent}  `}</Text>
+              <Text color={ERROR} bold>a</Text><Text color={ERROR}>{' delete all  '}</Text>
+              <Text color={MUTED}>{'Esc cancel'}</Text>
+            </Text>
+          )}
+      </Text>
+      {prompt.error && <Text color={ERROR}>{` ⚠ ${prompt.error}`}</Text>}
+    </Box>
+  );
+}
+
+/** Lines the search, rename and delete-folder prompts take. */
+export function promptLines(view: { search: string; searchDraft?: string; rename?: FolderRename; folderDelete?: FolderDeletePrompt }): number {
   return (view.searchDraft !== undefined || view.search ? 1 : 0)
-    + (view.rename ? (view.rename.error ? 2 : 1) : 0);
+    + (view.rename ? (view.rename.error ? 2 : 1) : 0)
+    + (view.folderDelete ? (view.folderDelete.error ? 2 : 1) : 0);
 }
 
 /** The visible slice of `rows`, keeping the selected one near the middle. */

@@ -2,10 +2,13 @@ import { UpdateStore, TodoStore } from './store/tables.js';
 import { TopicStore } from './store/topics.js';
 import { ReferenceStore } from './store/references.js';
 import { FolderColorStore } from './store/folder-colors.js';
+import { FolderMetadataStore } from './store/folder-metadata.js';
 import { sourceInfos } from './scraper/specs.js';
 import { buildDigest } from './digest/view.js';
 import { searchDigest, searchTerms } from './search.js';
+import { folderToDelete, parentFolder } from './folders.js';
 import type {
+  DeleteFolderMode,
   FomoService,
   DigestQuery,
   StoreConnection,
@@ -29,6 +32,8 @@ import type {
   UpdateReferenceRequest,
   ListReferencesResponse,
   FolderColorMap,
+  FolderMetadata,
+  FolderMetadataMap,
 } from './types.js';
 
 /** How long the list of duplicate copies is reused before it is read again. */
@@ -48,7 +53,9 @@ export class FomoStorageService implements FomoService {
   protected readonly topicStore: TopicStore;
   protected readonly referenceStore: ReferenceStore;
   protected readonly todoFolderColors: FolderColorStore;
+  protected readonly todoFolderMetadata: FolderMetadataStore;
   protected readonly referenceFolderColors: FolderColorStore;
+  protected readonly referenceFolderMetadata: FolderMetadataStore;
   private initPromise: Promise<void> | undefined;
   private duplicateCopies: { loadedAt: number; list: Promise<Update[]> } | undefined;
 
@@ -59,7 +66,9 @@ export class FomoStorageService implements FomoService {
     this.referenceStore = new ReferenceStore(conn);
     // Each tree keeps its folder colors in its own table, next to the items.
     this.todoFolderColors = new FolderColorStore(conn, 'todos');
+    this.todoFolderMetadata = new FolderMetadataStore(conn, 'todos');
     this.referenceFolderColors = new FolderColorStore(conn, 'references');
+    this.referenceFolderMetadata = new FolderMetadataStore(conn, 'references');
   }
 
   protected async ensureInit(): Promise<void> {
@@ -204,8 +213,12 @@ export class FomoStorageService implements FomoService {
 
   async listTodos(opts: ListTodosOptions = {}): Promise<ListTodosResponse> {
     await this.ensureInit();
-    const [list, folderColors] = await Promise.all([this.todoStore.listTodos(opts), this.todoFolderColors.get()]);
-    return { ...list, folderColors };
+    const [list, folderColors, folderMetadata] = await Promise.all([
+      this.todoStore.listTodos(opts),
+      this.todoFolderColors.get(),
+      this.todoFolderMetadata.get(),
+    ]);
+    return { ...list, folderColors, folderMetadata };
   }
 
   async getTodo(id: string): Promise<Todo> {
@@ -232,9 +245,23 @@ export class FomoStorageService implements FomoService {
 
   async moveTodoFolder(from: string, to: string): Promise<number> {
     await this.ensureInit();
+    await this.todoFolderMetadata.assertCanMove(from, to);
     const moved = await this.todoStore.moveFolder(from, to);
     await this.todoFolderColors.move(from, to);
+    await this.todoFolderMetadata.move(from, to);
     return moved;
+  }
+
+  async deleteTodoFolder(folder: string, mode: DeleteFolderMode): Promise<number> {
+    await this.ensureInit();
+    const path = folderToDelete(folder);
+    await this.todoFolderMetadata.assertCanDelete(path, mode);
+    const count = mode === 'all'
+      ? await this.todoStore.deleteFolder(path)
+      : await this.todoStore.moveFolder(path, parentFolder(path));
+    await this.todoFolderColors.delete(path, mode);
+    await this.todoFolderMetadata.delete(path, mode);
+    return count;
   }
 
   async setTodoFolderColor(folder: string, color: string): Promise<FolderColorMap> {
@@ -242,15 +269,21 @@ export class FomoStorageService implements FomoService {
     return this.todoFolderColors.set(folder, color);
   }
 
+  async setTodoFolderMetadata(folder: string, metadata: FolderMetadata): Promise<FolderMetadataMap> {
+    await this.ensureInit();
+    return this.todoFolderMetadata.set(folder, metadata);
+  }
+
   // ─── References ────────────────────────────────────────────────────────────
 
   async listReferences(): Promise<ListReferencesResponse> {
     await this.ensureInit();
-    const [references, folderColors] = await Promise.all([
+    const [references, folderColors, folderMetadata] = await Promise.all([
       this.referenceStore.listReferences(),
       this.referenceFolderColors.get(),
+      this.referenceFolderMetadata.get(),
     ]);
-    return { references, folderColors };
+    return { references, folderColors, folderMetadata };
   }
 
   async getReference(id: string): Promise<Reference> {
@@ -277,13 +310,32 @@ export class FomoStorageService implements FomoService {
 
   async moveReferenceFolder(from: string, to: string): Promise<number> {
     await this.ensureInit();
+    await this.referenceFolderMetadata.assertCanMove(from, to);
     const moved = await this.referenceStore.moveFolder(from, to);
     await this.referenceFolderColors.move(from, to);
+    await this.referenceFolderMetadata.move(from, to);
     return moved;
+  }
+
+  async deleteReferenceFolder(folder: string, mode: DeleteFolderMode): Promise<number> {
+    await this.ensureInit();
+    const path = folderToDelete(folder);
+    await this.referenceFolderMetadata.assertCanDelete(path, mode);
+    const count = mode === 'all'
+      ? await this.referenceStore.deleteFolder(path)
+      : await this.referenceStore.moveFolder(path, parentFolder(path));
+    await this.referenceFolderColors.delete(path, mode);
+    await this.referenceFolderMetadata.delete(path, mode);
+    return count;
   }
 
   async setReferenceFolderColor(folder: string, color: string): Promise<FolderColorMap> {
     await this.ensureInit();
     return this.referenceFolderColors.set(folder, color);
+  }
+
+  async setReferenceFolderMetadata(folder: string, metadata: FolderMetadata): Promise<FolderMetadataMap> {
+    await this.ensureInit();
+    return this.referenceFolderMetadata.set(folder, metadata);
   }
 }

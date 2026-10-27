@@ -1,5 +1,5 @@
 import { cleanColor } from './colors.js';
-import type { FolderColorMap } from './types.js';
+import type { DeleteFolderMode, FolderColorMap, FolderMetadata, FolderMetadataMap } from './types.js';
 import { compareText } from './sort.js';
 
 /**
@@ -112,6 +112,69 @@ export function moveFolderColors(colors: FolderColorMap, from: string, to: strin
   return next;
 }
 
+/** Canonical folder metadata. GitHub repositories are stored as `owner/repo`. */
+export function normalizeFolderMetadata(metadata: FolderMetadata): FolderMetadata {
+  if (metadata.localPath !== undefined && typeof metadata.localPath !== 'string') throw new Error('Local directory must be text');
+  if (metadata.githubRepo !== undefined && typeof metadata.githubRepo !== 'string') throw new Error('GitHub repository must be text');
+  const localPath = metadata.localPath?.trim();
+  const githubInput = metadata.githubRepo?.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\/+$/, '');
+  let githubRepo: string | undefined;
+  if (githubInput) {
+    if (!/^[\w.-]+\/[\w.-]+$/.test(githubInput)) throw new Error('GitHub repository must be owner/repo or a github.com URL');
+    githubRepo = githubInput;
+  }
+  return {
+    ...(localPath ? { localPath } : {}),
+    ...(githubRepo ? { githubRepo } : {}),
+  };
+}
+
+/** Carry folder metadata across a rename; conflicting non-empty values must be resolved explicitly. */
+export function moveFolderMetadata(metadata: FolderMetadataMap, from: string, to: string): FolderMetadataMap {
+  const move = folderMove(from, to);
+  if (!move) return metadata;
+  const next: FolderMetadataMap = {};
+  const moved: [string, FolderMetadata][] = [];
+  for (const [path, value] of Object.entries(metadata)) {
+    if (isInFolder(path, move.from)) moved.push([moveFolderPath(path, move.from, move.to), value]);
+    else next[path] = value;
+  }
+  for (const [path, value] of moved) {
+    if (!path) continue;
+    const existing = next[path];
+    if (existing && ((existing.localPath && value.localPath && existing.localPath !== value.localPath)
+      || (existing.githubRepo && value.githubRepo && existing.githubRepo !== value.githubRepo))) {
+      throw new Error(`Conflicting metadata for ${path}/; clear or move its existing metadata first`);
+    }
+    next[path] = { ...existing, ...value };
+  }
+  return next;
+}
+
+// ─── Deleting folders ────────────────────────────────────────────────────────
+
+/** The checked folder to delete (throws for the top level). */
+export function folderToDelete(path: string): string {
+  const folder = normalizeFolder(path);
+  if (!folder) throw new Error('The top level cannot be deleted');
+  return folder;
+}
+
+/** Folder `path` deleted from a per-folder map (colors, metadata): its own entry always goes. */
+export function deleteFolderEntries<V>(
+  map: Record<string, V>,
+  path: string,
+  mode: DeleteFolderMode,
+  move: (rest: Record<string, V>, from: string, to: string) => Record<string, V>,
+): Record<string, V> {
+  const folder = folderToDelete(path);
+  const rest: Record<string, V> = {};
+  for (const [p, v] of Object.entries(map)) {
+    if (mode === 'all' ? !isInFolder(p, folder) : p !== folder) rest[p] = v;
+  }
+  return mode === 'all' ? rest : move(rest, folder, parentFolder(folder));
+}
+
 // ─── Tree rows ───────────────────────────────────────────────────────────────
 
 export interface FolderRow {
@@ -126,6 +189,8 @@ export interface FolderRow {
   count: number;
   /** How many of them are done (always 0 without `isDone`). */
   done: number;
+  /** Number of items included in progress (todos exclude ideas). */
+  progressCount: number;
   open: boolean;
 }
 
@@ -150,6 +215,9 @@ export interface FolderTreeOptions<T> {
   openAll?: boolean;
   /** Counts a folder's done items (todo progress). */
   isDone?(item: T): boolean;
+  isProgressItem?(item: T): boolean;
+  /** Folders that should remain visible even without items (for example, metadata-bearing folders). */
+  extraFolders?: readonly string[];
 }
 
 interface FolderNode<T> {
@@ -157,12 +225,13 @@ interface FolderNode<T> {
   name: string;
   count: number;
   done: number;
+  progressCount: number;
   folders: Map<string, FolderNode<T>>;
   items: T[];
 }
 
 function newNode<T>(path: string, name: string): FolderNode<T> {
-  return { path, name, count: 0, done: 0, folders: new Map(), items: [] };
+  return { path, name, count: 0, done: 0, progressCount: 0, folders: new Map(), items: [] };
 }
 
 /**
@@ -171,12 +240,23 @@ function newNode<T>(path: string, name: string): FolderNode<T> {
  */
 export function buildFolderRows<T>(items: readonly T[], expanded: ReadonlySet<string>, opts: FolderTreeOptions<T>): FolderTreeRow<T>[] {
   const root = newNode<T>('', '');
+  for (const folder of opts.extraFolders ?? []) {
+    let node = root;
+    for (const name of folder ? folder.split('/') : []) {
+      const path = node.path ? `${node.path}/${name}` : name;
+      let child = node.folders.get(name);
+      if (!child) node.folders.set(name, (child = newNode<T>(path, name)));
+      node = child;
+    }
+  }
   for (const item of items) {
     if (opts.include && !opts.include(item)) continue;
     const done = opts.isDone?.(item) ? 1 : 0;
+    const progress = opts.isProgressItem ? Number(opts.isProgressItem(item)) : 1;
     let node = root;
     node.count++;
     node.done += done;
+    node.progressCount += progress;
     const folder = opts.folder(item);
     for (const name of folder ? folder.split('/') : []) {
       const path = node.path ? `${node.path}/${name}` : name;
@@ -184,6 +264,7 @@ export function buildFolderRows<T>(items: readonly T[], expanded: ReadonlySet<st
       if (!child) node.folders.set(name, (child = newNode<T>(path, name)));
       child.count++;
       child.done += done;
+      child.progressCount += progress;
       node = child;
     }
     node.items.push(item);
@@ -201,6 +282,7 @@ export function buildFolderRows<T>(items: readonly T[], expanded: ReadonlySet<st
         depth,
         count: child.count,
         done: child.done,
+        progressCount: child.progressCount,
         open,
       });
       if (open) walk(child, depth + 1);

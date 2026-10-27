@@ -13,6 +13,7 @@ import {
   rowFolder,
   sortLabel,
   type Reference,
+  type FolderMetadataMap,
   type ReferenceSort,
   type ReferenceSuggestion,
   type Update,
@@ -22,6 +23,7 @@ import type { AuditLog } from '../../audit.js';
 import { applyFormColor, formKey, type FolderForm } from './folderForm.js';
 import { errorText, useFolderTree, type TreeKeyHandler } from './useFolderTree.js';
 import type { OpenColorPicker } from './useColorPicker.js';
+import { useFolderEditor } from './useFolderEditor.js';
 
 export { folderMatches };
 
@@ -50,6 +52,7 @@ interface Options {
   /** Show a message in the main status bar (used after filing from the feed). */
   notify(message: string, ms?: number): void;
   openUrl(url: string): Promise<void>;
+  openAttachment(target: string): Promise<void>;
   copy(text: string): void;
   /** Opens the color picker popup. */
   pickColor?: OpenColorPicker;
@@ -98,7 +101,7 @@ function applySuggestion(form: RefForm, s: ReferenceSuggestion, explicit: boolea
 }
 
 /** State and keys of the Bookmarks view (5) and the file-a-link form (b, a, e). */
-export function useReferences({ service, audit, suggest, notify, openUrl, copy, pickColor, jump }: Options) {
+export function useReferences({ service, audit, suggest, notify, openUrl, openAttachment, copy, pickColor, jump }: Options) {
   const [open, setOpen] = useState(false);
   /** Order of links within a folder (cycled with s). */
   const [sort, setSort] = useState<ReferenceSort | undefined>();
@@ -107,7 +110,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
   const formSeq = useRef(0);
 
   const buildRows = useCallback(
-    (refs: Reference[], expanded: ReadonlySet<string>, search: string) => buildReferenceRows(refs, expanded, search, sort),
+    (refs: Reference[], expanded: ReadonlySet<string>, search: string, metadata?: FolderMetadataMap) => buildReferenceRows(refs, expanded, search, sort, metadata),
     [sort],
   );
   const tree = useFolderTree<Reference>({
@@ -117,11 +120,13 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
     itemName: (ref) => ref.title,
     buildRows,
     fetch: async () => {
-      const { references, folderColors } = await service.listReferences();
-      return { items: references, folderColors };
+      const { references, folderColors, folderMetadata } = await service.listReferences();
+      return { items: references, folderColors, folderMetadata };
     },
     moveFolder: (from, to) => service.moveReferenceFolder(from, to),
+    deleteFolder: (folder, mode) => service.deleteReferenceFolder(folder, mode),
     saveFolderColor: (folder, color) => service.setReferenceFolderColor(folder, color),
+    saveFolderMetadata: (folder, metadata) => service.setReferenceFolderMetadata(folder, metadata),
     saveItemColor: (ref, color) => service.updateReference(ref.id, { color }),
     remove: (ref) => service.deleteReference(ref.id),
     pickColor,
@@ -131,7 +136,14 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
     notify,
     jump,
   });
-  const { load, reveal, say, folders, folderColors } = tree;
+  const { load, reveal, say, folders, folderColors, folderMetadata } = tree;
+  const folderEditor = useFolderEditor({
+    area: 'reference', noun: ['link', 'links'], folderMetadata, folderColors, audit, pickColor,
+    revealFolder: tree.revealFolder, load, say,
+    moveFolder: (from, to) => service.moveReferenceFolder(from, to),
+    saveMetadata: (path, metadata) => service.setReferenceFolderMetadata(path, metadata),
+    saveColor: (path, color) => service.setReferenceFolderColor(path, color),
+  });
   const matches = useMemo(() => (form ? folderMatches(folders, form.folderQuery) : []), [folders, form]);
 
   const openView = useCallback(() => {
@@ -142,9 +154,10 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
   const closeAll = useCallback(() => {
     formSeq.current++;
     setForm(undefined);
+    folderEditor.close();
     tree.reset();
     setOpen(false);
-  }, [tree.reset]);
+  }, [tree.reset, folderEditor.close]);
 
   const runSuggest = useCallback((current: RefForm, explicit: boolean) => {
     if (!suggest) { setForm((f) => f && { ...f, error: 'Copilot is not available' }); return; }
@@ -251,9 +264,20 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
       setForm(newForm({ folder: rowFolder(row) }, { field: 'url', note: suggest ? 'Paste a link, then ^G to let Copilot file it' : undefined }));
       return true;
     }
+    if (row?.kind === 'folder' && (key.return || input === 'e' || input === 'm')) {
+      folderEditor.open(row.path, input === 'm' ? 'localPath' : 'name');
+      return true;
+    }
+    if (row?.kind === 'folder' && (input === 'o' || input === 'g')) {
+      const metadata = folderMetadata[row.path];
+      const target = input === 'o' ? metadata?.localPath : metadata?.githubRepo ? `https://github.com/${metadata.githubRepo}` : undefined;
+      if (!target) say(input === 'o' ? 'No local directory is associated with this folder' : 'No GitHub repository is associated with this folder');
+      else void openAttachment(target).then(() => say(`Opened ${target}`), (err) => tree.fail(`open folder association “${target}”`, err));
+      return true;
+    }
     if (row?.kind !== 'item') return false;
     const ref = row.item;
-    if (key.return || input === 'o') {
+    if (input === 'o') {
       openUrl(ref.url).catch((err) => {
         audit.error('open', `${ref.url}: ${errorText(err)}`);
         say('Could not open browser');
@@ -261,12 +285,13 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
       return true;
     }
     if (input === 'y') { copy(ref.url); say('✓ Link copied'); return true; }
-    if (input === 'e') { formSeq.current++; setForm(editForm(ref)); return true; }
+    if (input === 'e' || key.return) { formSeq.current++; setForm(editForm(ref)); return true; }
     return false;
   };
 
   /** Handle a key while Bookmarks (or its form) is shown; `raw` keeps its case for typing. */
   const handleInput = (raw: string, key: Key) => {
+    if (folderEditor.form) { folderEditor.handleInput(raw, key); return; }
     if (form) { formInput(form, raw, key); return; }
     tree.handleInput(raw, key, onKey);
   };
@@ -275,7 +300,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
     /** The Bookmarks view or the file-a-link form is shown. */
     active: open || form !== undefined,
     /** Keys are text (form, rename or search prompt), so global keys like q must not fire. */
-    typing: form !== undefined || tree.typing,
+    typing: form !== undefined || folderEditor.form !== undefined || tree.typing,
     openView,
     close: closeAll,
     fileUpdate,
@@ -285,6 +310,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, copy, 
     view: {
       ...tree.view,
       form,
+      folderMetadataForm: folderEditor.form,
       folderMatches: matches,
       canSuggest: !!suggest,
     },

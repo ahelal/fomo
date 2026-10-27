@@ -1,9 +1,9 @@
 import type { TableClient, TableEntity } from '@azure/data-tables';
 import { createTableClient } from './connection.js';
 import { isTableError } from './tables.js';
-import { moveFolderColors, setFolderColor } from '../folders.js';
+import { deleteFolderEntries, moveFolderColors, setFolderColor } from '../folders.js';
 import { normalizeHexColor } from '../colors.js';
-import type { FolderColorMap, StoreConnection } from '../types.js';
+import type { DeleteFolderMode, FolderColorMap, StoreConnection } from '../types.js';
 
 /** The colors live in one row beside the items, outside their partition (`todo`, `ref`). */
 const COLORS_PK = 'folder';
@@ -50,6 +50,11 @@ export class FolderColorStore {
   /** Carry the colors of folder `from` (and its subfolders) over to `to`. */
   move(from: string, to: string): Promise<FolderColorMap> {
     return this.change((colors) => moveFolderColors(colors, from, to));
+  }
+
+  /** Drop the colors of deleted folder `path` (see `DeleteFolderMode`). */
+  delete(path: string, mode: DeleteFolderMode): Promise<FolderColorMap> {
+    return this.change((colors) => deleteFolderEntries(colors, path, mode, moveFolderColors));
   }
 
   private async read(): Promise<{ colors: FolderColorMap; etag?: string }> {

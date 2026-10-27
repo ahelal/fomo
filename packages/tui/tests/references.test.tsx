@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { PassThrough } from 'node:stream';
 import { render } from 'ink';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { COLOR_PALETTE, DEFAULT_SETTINGS, isInFolder, moveFolderPath, moveInGrid, paletteIndex, setFolderColor, type FolderColorMap, type Reference, type Update } from '@fomo/core';
+import { COLOR_PALETTE, DEFAULT_SETTINGS, deleteFolderEntries, isInFolder, parentFolder, type DeleteFolderMode, moveFolderColors, moveFolderMetadata, moveFolderPath, moveInGrid, paletteIndex, setFolderColor, type FolderColorMap, type FolderMetadata, type FolderMetadataMap, type Reference, type Update } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import { App } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
@@ -18,6 +18,7 @@ const CTRL_G = '\u0007';
 const SHIFT_DOWN = '\u001B[1;2B';
 const SHIFT_UP = '\u001B[1;2A';
 const RIGHT = '\u001B[C';
+const LEFT = '\u001B[D';
 const CTRL_U = '\u0015';
 
 /** The color the picker lands on after one → from `start`. */
@@ -43,13 +44,14 @@ function ref(id: string, title: string, folder: string, url = `https://example.c
 function fakeService(initial: Reference[], updates: Update[] = [update]) {
   let refs = [...initial];
   let folderColors: FolderColorMap = {};
+  let folderMetadata: FolderMetadataMap = {};
   const svc = {
     getSettings: async () => ({ ...DEFAULT_SETTINGS }),
     getSources: async () => [],
     getDigest: async () => ({ entries: [], pending: 0 }),
     listUpdates: vi.fn(async (_query: { status?: string; saved?: boolean }) => ({ updates, total: updates.length })),
     getStats: async () => ({ total: 1, byStatus: { unread: 1, read: 0 }, bySource: {}, saved: 0 }),
-    listReferences: vi.fn(async () => ({ references: refs, folderColors })),
+    listReferences: vi.fn(async () => ({ references: refs, folderColors, folderMetadata })),
     listTodos: async () => ({ todos: [], folderColors: {} }),
     createReference: vi.fn(async (req: Omit<Reference, 'id' | 'createdAt' | 'updatedAt'>) => {
       const created = { ...req, id: `new${refs.length}`, createdAt: '2026-10-03T00:00:00Z', updatedAt: 'x' } as Reference;
@@ -64,11 +66,26 @@ function fakeService(initial: Reference[], updates: Update[] = [update]) {
     moveReferenceFolder: vi.fn(async (from: string, to: string) => {
       const moved = refs.filter((r) => isInFolder(r.folder, from)).length;
       refs = refs.map((r) => ({ ...r, folder: moveFolderPath(r.folder, from, to) }));
+      folderColors = moveFolderColors(folderColors, from, to);
+      folderMetadata = moveFolderMetadata(folderMetadata, from, to);
       return moved;
+    }),
+    deleteReferenceFolder: vi.fn(async (folder: string, mode: DeleteFolderMode) => {
+      const inside = refs.filter((r) => isInFolder(r.folder, folder));
+      refs = mode === 'all'
+        ? refs.filter((r) => !isInFolder(r.folder, folder))
+        : refs.map((r) => ({ ...r, folder: moveFolderPath(r.folder, folder, parentFolder(folder)) }));
+      folderColors = deleteFolderEntries(folderColors, folder, mode, moveFolderColors);
+      folderMetadata = deleteFolderEntries(folderMetadata, folder, mode, moveFolderMetadata);
+      return inside.length;
     }),
     setReferenceFolderColor: vi.fn(async (folder: string, color: string) => {
       folderColors = setFolderColor(folderColors, folder, color);
       return folderColors;
+    }),
+    setReferenceFolderMetadata: vi.fn(async (folder: string, metadata: FolderMetadata) => {
+      folderMetadata = { ...folderMetadata, [folder]: metadata };
+      return folderMetadata;
     }),
   };
   return svc;
@@ -160,7 +177,7 @@ describe('5 Bookmarks view', () => {
     expect(frame()).toContain('3 links');
     expect(frame()).toMatch(/▾ ai\/ 2/);
     expect(frame()).toContain('Agents guide');
-    await press(ENTER); // close the ai folder
+    await press(LEFT); // close the ai folder
     expect(frame()).toMatch(/▸ ai\/ 2/);
     expect(frame()).not.toContain('Agents guide');
     await press('5', ESC, '\u007f', '\u001b[3~');
@@ -214,13 +231,82 @@ describe('5 Bookmarks view', () => {
     expect(frame()).toMatch(/▾ ml\/ 2/);
   });
 
+  it('deletes a folder: p lifts its links and subfolders into the parent, a deletes them', async () => {
+    const { svc, press, frame } = await renderApp(library);
+    await press('5', 'd');
+    expect(frame()).toContain('Delete ai/ (2 links, 1 subfolder)');
+    await press('p');
+    expect(svc.deleteReferenceFolder).toHaveBeenCalledWith('ai', 'parent');
+    expect(frame()).toContain('Deleted ai/ — moved 2 links to the top level');
+    expect(frame()).toMatch(/▾ agents\/ 1/);
+    expect(frame()).toContain('Prompting');
+    await press('d', 'a');
+    expect(svc.deleteReferenceFolder).toHaveBeenLastCalledWith('agents', 'all');
+    expect(frame()).toContain('Deleted agents/ and 1 link');
+    expect(frame()).not.toContain('Agents guide');
+  });
+
+  it('keeps the delete-folder question open with the error when the store refuses', async () => {
+    const { svc, press, frame } = await renderApp(library);
+    svc.deleteReferenceFolder.mockRejectedValueOnce(new Error('Conflicting metadata for agents/'));
+    await press('5', 'd', 'p');
+    expect(frame()).toContain('⚠ Conflicting metadata for agents/');
+    expect(frame()).toContain('Delete ai/');
+    await press(ESC);
+    expect(frame()).not.toContain('Delete ai/');
+    expect(frame()).toMatch(/▾ ai\/ 2/);
+  });
+
   it('cancels add and rename prompts without leaving the Bookmarks tab', async () => {
     const { press, frame } = await renderApp(library);
     await press('5', 'a', ESC);
     expect(frame()).toContain('3 links');
     await press('e', ESC);
     expect(frame()).toContain('3 links');
-    expect(frame()).not.toContain('Move ai/ to:');
+    expect(frame()).not.toContain('Edit folder');
+  });
+
+  it.each([ENTER, 'e'])('opens the shared folder editor with %j', async (key) => {
+    const { svc, press, frame } = await renderApp(library);
+    await press('5', key);
+    expect(frame()).toContain('Edit folder · ai/');
+    expect(frame()).toContain('Color:');
+    expect(frame()).not.toContain('Type:');
+    await press(CTRL_U, ...'ml', TAB, ...'~/src/ml', TAB, ...'owner/ml', TAB, ENTER, RIGHT, ENTER, ENTER);
+    expect(svc.moveReferenceFolder).toHaveBeenCalledWith('ai', 'ml');
+    expect(svc.setReferenceFolderMetadata).toHaveBeenCalledWith('ml', { localPath: '~/src/ml', githubRepo: 'owner/ml' });
+    expect(svc.setReferenceFolderColor).toHaveBeenCalledWith('ml', rightOf(REF_FOLDER_COLOR));
+    expect(frame()).toMatch(/▾ ml\/ 2/);
+    await press(ENTER);
+    expect(frame()).toContain('~/src/ml');
+    expect(frame()).toContain('owner/ml');
+  });
+
+  it('does not save a picked folder color when the editor is cancelled', async () => {
+    const { svc, press, frame } = await renderApp(library);
+    await press('5', ENTER, TAB, TAB, TAB, ENTER, RIGHT, ENTER, ESC);
+    expect(svc.setReferenceFolderColor).not.toHaveBeenCalled();
+    expect(frame()).not.toContain('Edit folder');
+  });
+
+  it('keeps editing the moved folder after a metadata save failure', async () => {
+    const { svc, press, frame } = await renderApp(library);
+    svc.setReferenceFolderMetadata.mockRejectedValueOnce(new Error('Metadata save failed'));
+    await press('5', ENTER, CTRL_U, ...'ml', TAB, ...'~/src/ml', ENTER);
+    expect(frame()).toContain('Edit folder · ml/');
+    expect(frame()).toContain('Metadata save failed');
+    await press(ENTER);
+    expect(svc.moveReferenceFolder).toHaveBeenCalledTimes(1);
+    expect(svc.setReferenceFolderMetadata).toHaveBeenLastCalledWith('ml', { localPath: '~/src/ml' });
+    expect(frame()).not.toContain('Edit folder');
+  });
+
+  it('uses Enter to edit a bookmark, leaving o to open it', async () => {
+    const { svc, press, frame } = await renderApp([ref('1', 'Bookmark', '')]);
+    await press('5', ENTER);
+    expect(frame()).toContain('Edit bookmark');
+    await press(CTRL_U, ...'work', ENTER);
+    expect(svc.updateReference).toHaveBeenCalledWith('1', expect.objectContaining({ folder: 'work' }));
   });
 
   it('deletes a link only on the second d', async () => {

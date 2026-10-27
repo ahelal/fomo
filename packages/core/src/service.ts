@@ -174,7 +174,11 @@ export class FomoDirectService extends FomoStorageService {
    */
   async suggestReference(req: SuggestReferenceRequest, summarizer: Summarizer): Promise<ReferenceSuggestion> {
     await this.ensureInit();
-    const folders = referenceFolders(await this.referenceStore.listReferences());
+    const [references, metadata] = await Promise.all([
+      this.referenceStore.listReferences(),
+      this.referenceFolderMetadata.get(),
+    ]);
+    const folders = referenceFolders([...references, ...Object.keys(metadata).map((folder) => ({ folder }))]);
 
     let url = req.url?.trim() ?? '';
     let title = req.title?.trim() ?? '';

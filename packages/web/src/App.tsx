@@ -507,7 +507,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       }
       // In Bookmarks and Todos c colors the selected folder or item.
       if (key === 'c' && !pane) { setShowSettings(true); return; }
-      if (key in FILTER_KEYS) { setFilter(FILTER_KEYS[key]!); return; }
+      // On Todos, 6 again is the pane's: it cycles todos + ideas → todos → ideas.
+      if (key in FILTER_KEYS && !(key === '6' && fomo.filter === 'todos')) { setFilter(FILTER_KEYS[key]!); return; }
       // Tab / Shift+Tab step through the views in tab order (1–6), wrapping around.
       if (key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();

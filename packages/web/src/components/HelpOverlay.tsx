@@ -62,12 +62,13 @@ const DETAIL_KEYS: [string, string][] = [
 ];
 
 const REFERENCE_KEYS: [string, string][] = [
-  ['↵',     'Open folder / open link'],
+  ['↵',     'Edit bookmark / edit folder: name, local directory, GitHub repo, color'],
   ['→/l',   'Open folder'],
   ['←',     'Close folder, or go to its parent'],
   ['a',     'Add a link (in the selected folder)'],
-  ['e',     'Edit link / rename or move folder'],
+  ['e',     'Edit bookmark or folder'],
   ['d d',   'Delete link (press twice)'],
+  ['d',     'On a folder: move its contents to the parent, or delete everything'],
   ['o',     'Open link in browser'],
   ['y',     'Copy link'],
   ['c',     'Color the link or folder (←↑↓→ ↵ pick, # hex, d reset)'],
@@ -78,15 +79,18 @@ const REFERENCE_KEYS: [string, string][] = [
 
 const TODO_KEYS: [string, string][] = [
   ['a',     'Add a todo (in the selected folder)'],
-  ['↵',     'Next status (pending → in progress → done) / open folder'],
+  ['↵',     'Edit todo or idea / edit folder: name, local directory, GitHub repo, color'],
+  ['Space', 'Next status (pending → in progress → done)'],
   ['x',     'Done, or reopen a done todo'],
-  ['e',     'Edit todo / rename or move folder'],
+  ['e',     'Edit todo / edit folder'],
   ['o',     'Attachments: ↑↓ select, Enter opens a URL or copies a local path'],
   ['c',     'Color the todo or folder (←↑↓→ ↵ pick, # hex, d reset)'],
   ['d d',   'Delete todo (press twice)'],
+  ['d',     'On a folder: move its contents to the parent, or delete everything'],
   ['→/l',   'Open folder'],
   ['←',     'Close folder, or go to its parent'],
   ['v',     'Show all / open / in progress / done'],
+  ['6',     'Show todos + ideas / todos / ideas'],
   ['s',     'Cycle sort order (status, due, created, subject)'],
   ['/',     'Search subjects, notes, folders & attachments'],
   ['Ctrl/Cmd+S', 'Save the todo form; Enter adds a line in Notes/Attachments'],
@@ -94,11 +98,12 @@ const TODO_KEYS: [string, string][] = [
 ];
 
 const GLOBAL_KEYS: [string, string][] = [
-  ['↑/k',  'Move up'],
-  ['↓/j',  'Move down'],
+  ['↑/k',  'Move up in the list / scroll the focused preview'],
+  ['↓/j',  'Move down in the list / scroll the focused preview'],
   ['⇧↑/⇧↓','Jump 5 rows (10 on a tall window)'],
   ['1–4',  'All / unread / read / pending'],
-  ['⇥/⇧⇥', 'Next / previous view (1–6)'],
+  ['⇥/⇧⇥', 'Switch list / preview focus; without a preview: next / previous view'],
+  ['PgUp/PgDn', 'Scroll the focused preview by several lines'],
   ['2 / 4','Again: switch Unread / Pending between topics and a list'],
   ['5',    'Bookmarks: links filed into folders'],
   ['6',    'Todos: tasks filed into folders'],

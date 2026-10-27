@@ -2,6 +2,22 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FomoDirectService, extractText, extractTitle } from '../service.js';
 import type { ExperimentalProvider } from '../experimental.js';
 
+const metadataStores = vi.hoisted(() => {
+  const store = () => ({
+    get: vi.fn().mockResolvedValue({}),
+    set: vi.fn().mockResolvedValue({}),
+    move: vi.fn().mockResolvedValue({}),
+    delete: vi.fn().mockResolvedValue({}),
+    assertCanMove: vi.fn().mockResolvedValue(undefined),
+    assertCanDelete: vi.fn().mockResolvedValue(undefined),
+  });
+  return { todos: store(), references: store() };
+});
+
+vi.mock('../store/folder-metadata.js', () => ({
+  FolderMetadataStore: vi.fn().mockImplementation((_conn: unknown, table: keyof typeof metadataStores) => metadataStores[table]),
+}));
+
 // Mock the store and scrapers
 vi.mock('../store/tables.js', () => {
   const store = {
@@ -53,6 +69,7 @@ vi.mock('../store/tables.js', () => {
     updateTodo: vi.fn(),
     deleteTodo: vi.fn().mockResolvedValue(undefined),
     moveFolder: vi.fn().mockResolvedValue(2),
+    deleteFolder: vi.fn().mockResolvedValue(4),
   };
 
   return {
@@ -86,6 +103,7 @@ vi.mock('../store/references.js', () => {
     init: vi.fn().mockResolvedValue(undefined),
     listReferences: vi.fn().mockResolvedValue([]),
     moveFolder: vi.fn().mockResolvedValue(3),
+    deleteFolder: vi.fn().mockResolvedValue(5),
   };
   return {
     ReferenceStore: vi.fn().mockImplementation(() => referenceStore),
@@ -98,6 +116,7 @@ vi.mock('../store/folder-colors.js', () => {
     get: vi.fn().mockResolvedValue({}),
     set: vi.fn().mockResolvedValue({}),
     move: vi.fn().mockResolvedValue({}),
+    delete: vi.fn().mockResolvedValue({}),
   });
   const byTable: Record<string, ReturnType<typeof colorStore>> = { todos: colorStore(), references: colorStore() };
   return {
@@ -974,6 +993,7 @@ describe('FomoDirectService', () => {
         content: `<p>${'Review details. '.repeat(80)}</p>`, gist: { summary: 'Review can call tools.', points: ['Pro+'] },
       });
       __mockReferenceStore.listReferences.mockResolvedValue([{ folder: 'ai/agents' }, { folder: 'azure' }]);
+      metadataStores.references.get.mockResolvedValueOnce({ 'research/empty': { githubRepo: 'owner/research' } });
       const fetchMock = vi.fn();
       vi.stubGlobal('fetch', fetchMock);
       const summarizer = { generateJson: vi.fn().mockResolvedValue(suggestion) };
@@ -984,6 +1004,7 @@ describe('FomoDirectService', () => {
       expect(fetchMock).not.toHaveBeenCalled();
       const prompt: string = summarizer.generateJson.mock.calls[0][0].prompt;
       expect(prompt).toContain('- ai\n- ai/agents\n- azure');
+      expect(prompt).toContain('- research\n- research/empty');
       expect(prompt).toContain('TITLE: Copilot code review gets agentic tools');
       expect(prompt).toContain('Review can call tools. - Pro+ Review details.');
     });
@@ -1027,8 +1048,8 @@ describe('folder colors', () => {
     colors.todos.get.mockResolvedValueOnce({ work: '#ff0000' });
     colors.references.get.mockResolvedValueOnce({ ai: '#00ff00' });
     const s = svc();
-    expect(await s.listTodos()).toEqual({ todos: [], folderColors: { work: '#ff0000' } });
-    expect(await s.listReferences()).toEqual({ references: [], folderColors: { ai: '#00ff00' } });
+    expect(await s.listTodos()).toEqual({ todos: [], folderColors: { work: '#ff0000' }, folderMetadata: {} });
+    expect(await s.listReferences()).toEqual({ references: [], folderColors: { ai: '#00ff00' }, folderMetadata: {} });
   });
 
   it('moves the colors along with a renamed folder', async () => {
@@ -1058,6 +1079,60 @@ describe('folder colors', () => {
     await s.setReferenceFolderColor('ai', '');
     expect(colors.references.set).toHaveBeenCalledWith('ai', '');
     expect(colors.todos.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists and saves Bookmarks metadata independently from Todos', async () => {
+    metadataStores.references.get.mockResolvedValueOnce({ ai: { githubRepo: 'owner/ai' } });
+    metadataStores.references.set.mockResolvedValueOnce({ ai: { localPath: '~/ai' } });
+    const s = svc();
+    expect((await s.listReferences()).folderMetadata).toEqual({ ai: { githubRepo: 'owner/ai' } });
+    expect(await s.setReferenceFolderMetadata('ai', { localPath: '~/ai' })).toEqual({ ai: { localPath: '~/ai' } });
+    expect(metadataStores.references.set).toHaveBeenCalledWith('ai', { localPath: '~/ai' });
+    expect(metadataStores.todos.set).not.toHaveBeenCalled();
+  });
+
+  it('preflights and moves Bookmarks metadata with its folder', async () => {
+    const s = svc();
+    await s.moveReferenceFolder('ai', 'ml');
+    expect(metadataStores.references.assertCanMove).toHaveBeenCalledWith('ai', 'ml');
+    expect(metadataStores.references.move).toHaveBeenCalledWith('ai', 'ml');
+  });
+
+  it('does not move Bookmarks or colors when metadata conflicts', async () => {
+    const { refs, colors } = await mocks();
+    metadataStores.references.assertCanMove.mockRejectedValueOnce(new Error('Conflicting metadata'));
+    await expect(svc().moveReferenceFolder('ai', 'ml')).rejects.toThrow('Conflicting metadata');
+    expect(refs.moveFolder).not.toHaveBeenCalled();
+    expect(colors.references.move).not.toHaveBeenCalled();
+    expect(metadataStores.references.move).not.toHaveBeenCalled();
+  });
+
+  it('deletes a folder by lifting its contents into the parent', async () => {
+    const { todos, colors } = await mocks();
+    expect(await svc().deleteTodoFolder('work/fomo', 'parent')).toBe(2);
+    expect(metadataStores.todos.assertCanDelete).toHaveBeenCalledWith('work/fomo', 'parent');
+    expect(todos.moveFolder).toHaveBeenCalledWith('work/fomo', 'work');
+    expect(todos.deleteFolder).not.toHaveBeenCalled();
+    expect(colors.todos.delete).toHaveBeenCalledWith('work/fomo', 'parent');
+    expect(metadataStores.todos.delete).toHaveBeenCalledWith('work/fomo', 'parent');
+  });
+
+  it('deletes a folder with everything in it', async () => {
+    const { refs, colors } = await mocks();
+    expect(await svc().deleteReferenceFolder('ai', 'all')).toBe(5);
+    expect(refs.deleteFolder).toHaveBeenCalledWith('ai');
+    expect(refs.moveFolder).not.toHaveBeenCalled();
+    expect(colors.references.delete).toHaveBeenCalledWith('ai', 'all');
+    expect(metadataStores.references.delete).toHaveBeenCalledWith('ai', 'all');
+  });
+
+  it('refuses the top level and metadata clashes before touching anything', async () => {
+    const { todos, refs } = await mocks();
+    await expect(svc().deleteTodoFolder(' / ', 'all')).rejects.toThrow(/top level/);
+    expect(todos.deleteFolder).not.toHaveBeenCalled();
+    metadataStores.references.assertCanDelete.mockRejectedValueOnce(new Error('Conflicting metadata'));
+    await expect(svc().deleteReferenceFolder('ai', 'parent')).rejects.toThrow('Conflicting metadata');
+    expect(refs.moveFolder).not.toHaveBeenCalled();
   });
 });
 

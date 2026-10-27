@@ -5,13 +5,18 @@ import {
   folderColorRequest,
   folderPaths,
   folderTreeStep,
+  compareText,
   isInFolder,
   itemColorRequest,
   normalizeFolder,
+  parentFolder,
   searchTerms,
   setFolderColor,
   shortcutKey,
+  type DeleteFolderMode,
   type FolderColorMap,
+  type FolderMetadata,
+  type FolderMetadataMap,
   type FolderRow,
   type FolderTreeKey,
   type FolderTreeRow,
@@ -36,10 +41,13 @@ export interface FolderTreeOptions<T extends FolderItem> {
   /** An item's name in messages and the color picker. */
   itemName(item: T): string;
   /** The rows shown; must keep its identity while the order and filter stay the same (useCallback). */
-  buildRows(items: T[], expanded: ReadonlySet<string>, search: string): FolderTreeRow<T>[];
-  fetch(): Promise<{ items: T[]; folderColors?: FolderColorMap }>;
+  buildRows(items: T[], expanded: ReadonlySet<string>, search: string, folderMetadata?: FolderMetadataMap): FolderTreeRow<T>[];
+  fetch(): Promise<{ items: T[]; folderColors?: FolderColorMap; folderMetadata?: FolderMetadataMap }>;
   moveFolder(from: string, to: string): Promise<number>;
+  /** Delete a folder: `parent` lifts what's in it into the parent folder, `all` deletes it too. */
+  deleteFolder(folder: string, mode: DeleteFolderMode): Promise<number>;
   saveFolderColor(folder: string, color: string): Promise<FolderColorMap>;
+  saveFolderMetadata?(folder: string, metadata: FolderMetadata): Promise<FolderMetadataMap>;
   saveItemColor(item: T, color: string): Promise<unknown>;
   remove(item: T): Promise<void>;
   /** Opens the color picker (c); without it, colors can't be changed. */
@@ -61,6 +69,18 @@ export interface FolderRename {
   error?: string;
 }
 
+/** Asking how to delete a folder (d on a folder): p lifts its contents up, a deletes them. */
+export interface FolderDeletePrompt {
+  path: string;
+  /** Items in it and its subfolders. */
+  count: number;
+  /** Subfolders in it, at any depth. */
+  subfolders: number;
+  /** Waiting for the store. */
+  busy?: boolean;
+  error?: string;
+}
+
 /** Handles a view's own keys before the shared ones; returns true when it used the key. */
 export type TreeKeyHandler<T> = (input: string, key: Key, row: FolderTreeRow<T> | undefined) => boolean;
 
@@ -69,7 +89,8 @@ export const errorText = (err: unknown) => (err instanceof Error ? err.message :
 
 /**
  * A folder tree of items, shared by Bookmarks and Todos: loading, selection, open and closed
- * folders, search (/), renaming or moving a folder (e), deleting an item (d twice) and colors (c).
+ * folders, search (/), renaming or moving a folder (e), deleting an item (d twice) or a folder
+ * (d, then p or a) and colors (c).
  */
 export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T>) {
   const cfg = useRef(options);
@@ -77,6 +98,7 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
   const { buildRows } = options;
   const [items, setItems] = useState<T[]>([]);
   const [folderColors, setFolderColors] = useState<FolderColorMap>({});
+  const [folderMetadata, setFolderMetadata] = useState<FolderMetadataMap>({});
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   /** Folders are open unless collapsed. */
@@ -85,14 +107,15 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
   const [searchDraft, setSearchDraft] = useState<string | undefined>();
   const [rename, setRename] = useState<FolderRename | undefined>();
   const [confirmDelete, setConfirmDelete] = useState<string | undefined>();
+  const [folderDelete, setFolderDelete] = useState<FolderDeletePrompt | undefined>();
   /** Row to select once the rows are rebuilt (after a save, rename or new order). */
   const pendingKey = useRef<string | undefined>();
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
-  const folders = useMemo(() => folderPaths(items), [items]);
+  const folders = useMemo(() => [...new Set([...folderPaths(items), ...Object.keys(folderMetadata)])].sort(compareText), [items, folderMetadata]);
   const expanded = useMemo(() => new Set(folders.filter((f) => !collapsed.has(f))), [folders, collapsed]);
-  const rows = useMemo(() => buildRows(items, expanded, search), [buildRows, items, expanded, search]);
+  const rows = useMemo(() => buildRows(items, expanded, search, folderMetadata), [buildRows, items, expanded, search, folderMetadata]);
 
   useEffect(() => {
     if (pendingKey.current) {
@@ -116,9 +139,10 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
   const load = useCallback(async (): Promise<T[]> => {
     setLoading(true);
     try {
-      const { items: list, folderColors: colors } = await cfg.current.fetch();
+      const { items: list, folderColors: colors, folderMetadata: metadata } = await cfg.current.fetch();
       setItems(list);
       setFolderColors(colors ?? {});
+      setFolderMetadata(metadata ?? {});
       return list;
     } catch (err) {
       fail('load', err);
@@ -134,12 +158,19 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
     pendingKey.current = cfg.current.itemKey(item);
   }, []);
 
+  /** Open `folder` and select it once the rows are rebuilt; the top level selects nothing. */
+  const revealFolder = useCallback((folder: string) => {
+    setCollapsed((c) => new Set([...c].filter((f) => !isInFolder(folder, f))));
+    pendingKey.current = folder ? `folder:${folder}` : undefined;
+  }, []);
+
   /** Keep the row with `key` selected when the rows are rebuilt (e.g. in a new order). */
   const keep = useCallback((key: string | undefined) => { pendingKey.current = key; }, []);
 
   /** Drop prompts that are half typed (search, rename, delete). */
   const reset = useCallback(() => {
     setRename(undefined);
+    setFolderDelete(undefined);
     setSearchDraft(undefined);
     setConfirmDelete(undefined);
   }, []);
@@ -161,6 +192,16 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
       });
     };
     pickColor(folderColorRequest({ path: row.path, onPick }, folderColors, defaultFolderColor));
+  };
+
+  const saveFolderMetadata = async (path: string, metadata: FolderMetadata) => {
+    if (!cfg.current.saveFolderMetadata) return;
+    try {
+      setFolderMetadata(await cfg.current.saveFolderMetadata(path, metadata));
+      say(`✓ Saved metadata for ${path}/`);
+    } catch (err) {
+      fail(`folder metadata “${path}”`, err);
+    }
   };
 
   const pickItemColor = (item: T) => {
@@ -204,10 +245,37 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
       .then(() => load());
   };
 
+  const startFolderDelete = (path: string) => {
+    const count = items.filter((i) => isInFolder(i.folder, path)).length;
+    const subfolders = folders.filter((f) => f !== path && isInFolder(f, path)).length;
+    setFolderDelete({ path, count, subfolders });
+  };
+
+  const doDeleteFolder = async (path: string, mode: DeleteFolderMode) => {
+    const { deleteFolder, noun, area, audit } = cfg.current;
+    setFolderDelete((p) => p && { ...p, busy: true, error: undefined });
+    try {
+      const count = await deleteFolder(path, mode);
+      const parent = parentFolder(path);
+      setFolderDelete(undefined);
+      revealFolder(parent);
+      await load();
+      const what = `${count} ${count === 1 ? noun[0] : noun[1]}`;
+      say(mode === 'all'
+        ? `✓ Deleted ${path}/ and ${what}`
+        : `✓ Deleted ${path}/ — moved ${what} to ${parent ? `${parent}/` : 'the top level'}`);
+    } catch (err) {
+      audit.error(area, `delete folder “${path}”: ${errorText(err)}`);
+      setFolderDelete((p) => p && { ...p, busy: false, error: errorText(err) });
+    }
+  };
+
   /**
    * A key in the tree: `onKey` (the view's own keys) goes first, after prompts being typed and
    * moving around. Escape cancels prompts or clears the search, never leaves the tab.
    */
+  const startRename = useCallback((path: string) => setRename({ from: path, value: path }), []);
+
   const handleInput = (raw: string, key: Key, onKey?: TreeKeyHandler<T>): void => {
     if (searchDraft !== undefined) {
       if (key.escape) setSearchDraft(undefined);
@@ -216,6 +284,14 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
         const next = editText(searchDraft, raw, key);
         if (next !== undefined) setSearchDraft(next);
       }
+      return undefined;
+    }
+    if (folderDelete) {
+      const choice = shortcutKey(raw);
+      if (folderDelete.busy) return undefined;
+      if (key.escape || choice === 'n') setFolderDelete(undefined);
+      else if (choice === 'p') void doDeleteFolder(folderDelete.path, 'parent');
+      else if (choice === 'a') void doDeleteFolder(folderDelete.path, 'all');
       return undefined;
     }
     if (rename) {
@@ -266,9 +342,9 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
     }
 
     if (row.kind === 'folder') {
-      if (input === 'e') setRename({ from: row.path, value: row.path });
+      if (input === 'e') startRename(row.path);
       else if (input === 'c') pickFolderColor(row);
-      else if (input === 'd') say(`Folders go away with their last ${cfg.current.noun[0]} — rename (e) to merge one into another`);
+      else if (input === 'd') startFolderDelete(row.path);
       return undefined;
     }
 
@@ -286,18 +362,22 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
     setItems,
     folders,
     folderColors,
+    folderMetadata,
     rows,
     selectedIndex,
     say,
     fail,
     load,
     reveal,
+    revealFolder,
     keep,
     reset,
     colorOf,
+    saveFolderMetadata,
+    startRename,
     handleInput,
     /** Keys are text (search or rename prompt). */
-    typing: rename !== undefined || searchDraft !== undefined,
+    typing: rename !== undefined || searchDraft !== undefined || folderDelete !== undefined,
     view: {
       rows,
       total: items.length,
@@ -306,8 +386,10 @@ export function useFolderTree<T extends FolderItem>(options: FolderTreeOptions<T
       search,
       searchDraft,
       rename,
+      folderDelete,
       confirmDelete,
       folderColors,
+      folderMetadata,
       defaultFolderColor: options.defaultFolderColor,
     },
   };

@@ -9,6 +9,9 @@ import {
   nextTodoStatus,
   formatDate,
   normalizeFolder,
+  todoKind,
+  todoKindTitle,
+  TODO_KIND_TITLE_LIST,
   todoFilterLabel,
   TODO_STATUS_COLOR,
   TODO_STATUS_ICON,
@@ -17,18 +20,22 @@ import {
   type TodoRow,
 } from '@fomo/core';
 import { TODO_FIELDS, TODO_FOLDER_COLOR, TODO_ITEM_COLOR, type PathSuggestions, type TodoField, type TodosViewState } from '../hooks/useTodos.js';
+import { FolderEditorForm } from './FolderEditorForm.js';
 import { pathMatchName } from '../../pathComplete.js';
 import {
   ACCENT,
+  BRIGHT,
   ColorChip,
   DARK,
   DETAILS_H,
   DetailsBox,
   ERROR,
+  HINT,
   FolderFormBox,
   FolderLine,
   MUTED,
   RenameLine,
+  DeleteFolderLine,
   SearchLine,
   TEXT,
   promptLines,
@@ -45,6 +52,7 @@ interface Props extends TodosViewState {
 const SOON = '#e3b341';
 
 const FIELD_LABEL: Record<TodoField, string> = {
+  kind: 'Type',
   subject: 'Subject',
   due: 'Due',
   folder: 'Folder',
@@ -54,6 +62,7 @@ const FIELD_LABEL: Record<TodoField, string> = {
 };
 
 const PLACEHOLDER: Partial<Record<TodoField, string>> = {
+  kind: 'todo or idea',
   due: '(none) — 2026-03-06, today, fri, +3, 2w',
   folder: '(top level)',
   description: '(optional)',
@@ -99,7 +108,7 @@ function PathHint({ suggestions }: { suggestions: PathSuggestions }) {
 function Form({ form, folderMatches, folderColors, pathSuggestions, columns, height }: Pick<Props, 'form' | 'folderMatches' | 'folderColors' | 'pathSuggestions' | 'columns' | 'height'>) {
   if (!form) return null;
   const inherited = folderColor(folderColors, normalizeFolder(form.values.folder));
-  const fields: FormFieldSpec<TodoField>[] = TODO_FIELDS.map((field) => ({
+  const fields: FormFieldSpec<TodoField>[] = TODO_FIELDS.filter((field) => form.values.kind !== 'idea' || field !== 'due').map((field) => ({
     field,
     label: FIELD_LABEL[field],
     placeholder: PLACEHOLDER[field],
@@ -110,14 +119,14 @@ function Form({ form, folderMatches, folderColors, pathSuggestions, columns, hei
   }));
   return (
     <FolderFormBox
-      title={form.id ? 'Edit todo' : 'Add todo'}
+      title={form.id ? `Edit ${form.values.kind}` : `Add ${form.values.kind}`}
       form={form}
       fields={fields}
       folderMatches={folderMatches}
       folderColor={TODO_FOLDER_COLOR}
       colorFallback={inherited ?? TODO_ITEM_COLOR}
       colorFallbackLabel={inherited ? 'folder color' : 'none'}
-      footer="[Tab] field  [^S] save  [Esc] cancel  [^U] clear · Notes/Attachments: ↵ new line, arrows edit · Tab completes paths"
+      footer="[Tab] field  [^S] save  [Esc] cancel · Type: todo or idea · Notes/Attachments: ↵ new line, arrows edit · Tab completes paths"
       columns={columns}
     />
   );
@@ -134,8 +143,9 @@ function Row({ row, selected, columns, colorOf, folderColorOf }: {
   const todo = row.item;
   const indent = '  '.repeat(row.depth);
   const color = colorOf(todo);
-  const done = todo.status === 'done';
-  const due = dueLabel(todo.dueDate);
+  const idea = todoKind(todo) === 'idea';
+  const done = !idea && todo.status === 'done';
+  const due = idea ? '' : dueLabel(todo.dueDate);
   const dueText = due ? `  ${due} ` : ' ';
   const subjectW = Math.max(10, columns - indent.length - 4 - dueText.length);
   const fg = (c: string) => (selected ? DARK : c);
@@ -144,8 +154,9 @@ function Row({ row, selected, columns, colorOf, folderColorOf }: {
       <Text backgroundColor={selected ? ACCENT : undefined} color={fg(TEXT)} wrap="truncate-end">
         {' '}{indent}
         <Text color={fg(color ?? TEXT)}>{color ? '▎' : ' '}</Text>
-        <Text color={fg(TODO_STATUS_COLOR[todo.status])}>{TODO_STATUS_ICON[todo.status]}</Text>
+        <Text color={fg(idea ? HINT : TODO_STATUS_COLOR[todo.status])}>{idea ? '✧' : TODO_STATUS_ICON[todo.status]}</Text>
         {' '}
+        {idea ? <Text color={fg(HINT)}>{'IDEA '}</Text> : null}
         <Text color={fg(done ? MUTED : (color ?? TEXT))} strikethrough={done}>{truncate(todo.subject, subjectW)}</Text>
         {' '.repeat(Math.max(0, subjectW - Math.min(todo.subject.length, subjectW)))}
         <Text color={fg(dueColor(todo))}>{dueText}</Text>
@@ -154,11 +165,12 @@ function Row({ row, selected, columns, colorOf, folderColorOf }: {
   );
 }
 
-function Details({ row, columns, confirmDelete, folderColors, folderColorOf }: {
+function Details({ row, columns, confirmDelete, folderColors, folderMetadata, folderColorOf }: {
   row?: TodoRow;
   columns: number;
   confirmDelete?: string;
   folderColors: Props['folderColors'];
+  folderMetadata: Props['folderMetadata'];
   folderColorOf(path: string): string;
 }) {
   const lines: React.ReactNode[] = [];
@@ -167,14 +179,18 @@ function Details({ row, columns, confirmDelete, folderColors, folderColorOf }: {
     lines.push(
       <Text key="f" color={folderColorOf(row.path)} wrap="truncate-end">
         {` ${row.path}/`}
-        <Text color={MUTED}>{` · ${row.done} of ${row.count} done`}</Text>
+        <Text color={MUTED}>{` · ${row.done} of ${row.progressCount} todos done · ${row.count} item(s)`}</Text>
       </Text>,
-      <Text key="h" color={MUTED} wrap="truncate-end">{' [↵/→/←] open · close  [e] rename or move  [c] color  [a] add a todo here'}</Text>,
+      <Text key="m" color={MUTED} wrap="truncate-end">
+        {` local: ${folderMetadata[row.path]?.localPath || '(none)'} · GitHub: ${folderMetadata[row.path]?.githubRepo || '(none)'}`}
+      </Text>,
+      <Text key="h" color={MUTED} wrap="truncate-end">{' [→/←] open · close  [↵/e] edit folder  [o] local dir  [g] GitHub  [c] color  [d] delete  [a] todo  [i] idea'}</Text>,
     );
   } else {
     const todo = row.item;
+    const idea = todoKind(todo) === 'idea';
     const notes = todo.description.split(/\r\n?|\n/);
-    const due = todo.dueDate ? `due ${formatDate(todo.dueDate)} (${dueLabel(todo.dueDate)})` : 'no due date';
+    const due = idea ? 'Idea · no due date' : todo.dueDate ? `due ${formatDate(todo.dueDate)} (${dueLabel(todo.dueDate)})` : 'no due date';
     const inherited = folderColor(folderColors, todo.folder);
     lines.push(
       <Text key="d" color={TEXT} wrap="truncate-end">
@@ -183,7 +199,9 @@ function Details({ row, columns, confirmDelete, folderColors, folderColorOf }: {
       </Text>,
       <Text key="s" color={MUTED} wrap="truncate-end">
         {' '}
-        <Text color={TODO_STATUS_COLOR[todo.status]}>{`${TODO_STATUS_ICON[todo.status]} ${TODO_STATUS_LABEL[todo.status]}`}</Text>
+        {idea
+          ? <Text color={HINT}>✧ Idea</Text>
+          : <Text color={TODO_STATUS_COLOR[todo.status]}>{`${TODO_STATUS_ICON[todo.status]} ${TODO_STATUS_LABEL[todo.status]}`}</Text>}
         {' · '}
         <Text color={dueColor(todo)}>{due}</Text>
         {` · ${todo.folder || 'top level'} · `}
@@ -193,33 +211,48 @@ function Details({ row, columns, confirmDelete, folderColors, folderColorOf }: {
       <Text key="k" color={confirmDelete === todo.id ? ERROR : MUTED} wrap="truncate-end">
         {confirmDelete === todo.id
           ? ' d again to delete · any other key cancels'
-          : ` [↵] → ${TODO_STATUS_LABEL[nextTodoStatus(todo.status)]}  [x] ${todo.status === 'done' ? 'reopen' : 'done'}  [e] edit  [o] attachments  [c] color  [d] delete`}
+          : idea
+            ? ' [t] convert to todo  [↵/e] edit  [o] attachments  [c] color  [d] delete'
+            : ` [space] → ${TODO_STATUS_LABEL[nextTodoStatus(todo.status)]}  [x] ${todo.status === 'done' ? 'reopen' : 'done'}  [↵/e] edit  [o] attachments  [c] color  [d] delete`}
       </Text>,
     );
   }
   return <DetailsBox columns={columns}>{lines}</DetailsBox>;
 }
 
+/** The title keeps the room of its longest form, so switching the type (6) doesn't shift the header. */
+const TITLE_WIDTH = Math.max(...TODO_KIND_TITLE_LIST.map((t) => t.length));
+
 export function TodosView(props: Props) {
-  const { rows, total, selectedIndex, loading, search, searchDraft, form, attachmentPicker, rename, folderColors, filter, counts, height, columns } = props;
+  const { rows, total, selectedIndex, loading, search, searchDraft, form, folderMetadataForm, attachmentPicker, rename, folderColors, folderMetadata, filter, kindFilter, counts, height, columns } = props;
   const folderColorOf = (path: string) => folderColor(folderColors, path) ?? TODO_FOLDER_COLOR;
   const colorOf = (todo: Todo) => todo.color || folderColor(folderColors, todo.folder);
 
   const header = (
     <Box width={columns} borderStyle="single" borderBottom borderTop={false} borderLeft={false} borderRight={false} borderColor="gray">
       <Box flexShrink={0}>
-        <Text color={ACCENT} bold>{' ✓ Todos'}</Text>
+        <Text color={ACCENT} bold>{` ✓ ${todoKindTitle(kindFilter).padEnd(TITLE_WIDTH)}`}</Text>
         <Text color={MUTED}>
           {` · ${counts.open} open`}
           {counts.overdue > 0 ? <Text color={ERROR}>{` · ${counts.overdue} overdue`}</Text> : null}
           {` · ${counts.done} done`}
+          {counts.ideas > 0 ? ` · ${counts.ideas} ideas` : ''}
           {filter !== 'all' ? <Text color={SOON}>{` · showing ${todoFilterLabel(filter)}`}</Text> : null}
           {loading ? ' · loading…' : ''}
         </Text>
       </Box>
-      {!form && !attachmentPicker && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [↵] status  [x] done  [e] edit  [o] attachments  [c] color  [v] show  [/] search  [s] sort'}</Text>}
+      {!form && !folderMetadataForm && !attachmentPicker && <Text color={MUTED} wrap="truncate-end">{'   [a] todo  [i] idea  [space] status  [x] done  [↵] edit  [o] attachments  [c] color  [v] status  [6] type  [/] search  [s] sort'}</Text>}
     </Box>
   );
+
+  if (folderMetadataForm) {
+    return (
+      <Box flexDirection="column" width={columns} height={height}>
+        {header}
+        <FolderEditorForm form={folderMetadataForm} columns={columns} folderColors={folderColors} />
+      </Box>
+    );
+  }
 
   if (form) {
     return (
@@ -269,6 +302,7 @@ export function TodosView(props: Props) {
       {header}
       <SearchLine search={search} searchDraft={searchDraft} matches={rows.filter((r) => r.kind === 'item').length} color={TODO_FOLDER_COLOR} />
       <RenameLine rename={rename} color={TODO_FOLDER_COLOR} />
+      <DeleteFolderLine prompt={props.folderDelete} noun={['todo', 'todos']} color={TODO_FOLDER_COLOR} />
       <Box flexDirection="column" height={listH}>
         {rows.length === 0 ? (
           <Box height={listH} alignItems="center" justifyContent="center">
@@ -280,7 +314,7 @@ export function TodosView(props: Props) {
           ))
         )}
       </Box>
-      <Details row={rows[selectedIndex]} columns={columns} confirmDelete={props.confirmDelete} folderColors={folderColors} folderColorOf={folderColorOf} />
+      <Details row={rows[selectedIndex]} columns={columns} confirmDelete={props.confirmDelete} folderColors={folderColors} folderMetadata={folderMetadata} folderColorOf={folderColorOf} />
     </Box>
   );
 }

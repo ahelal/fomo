@@ -72,11 +72,12 @@ interface FolderFieldProps {
   folders: readonly string[];
   folderColors: FolderColorMap;
   inputRef?: React.RefObject<HTMLInputElement>;
+  autoFocus?: boolean;
   onChange(value: string): void;
 }
 
 /** The folder an item is filed in, suggesting the existing ones; the icon shows the folder's color. */
-export function FolderField({ value, folders, folderColors, inputRef, onChange }: FolderFieldProps) {
+export function FolderField({ value, folders, folderColors, inputRef, autoFocus, onChange }: FolderFieldProps) {
   const listId = useId();
   const folder = normalizeFolder(value);
   return (
@@ -85,6 +86,7 @@ export function FolderField({ value, folders, folderColors, inputRef, onChange }
         <FolderIcon color={folder ? folderColor(folderColors, folder) ?? DEFAULT_FOLDER_COLOR : undefined} />
         <input
           ref={inputRef}
+          autoFocus={autoFocus}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="Top level — nest with /, e.g. work/fomo"

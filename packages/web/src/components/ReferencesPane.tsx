@@ -8,11 +8,13 @@ import {
   rowFolder,
   sortLabel,
   type FomoService,
+  type FolderMetadataMap,
   type Reference,
   type ReferenceSort,
 } from '@fomo/core';
 import { ColorButton } from './ColorPicker.js';
 import { ReferenceDialog, type ReferenceDraft } from './ReferenceDialog.js';
+import { DeleteFolderDialog, FolderDialog, FolderMetadataEditor } from './FolderDialog.js';
 import { DeleteButton, FolderDetails, FolderTreeList, Pill, RenameBar, TreeMessage, TreeSearch } from './FolderTree.js';
 import { plural, useFolderTree, type PaneKeyHandler } from '../hooks/useFolderTree.js';
 import { useWindowKeys } from '../hooks/useKeys.js';
@@ -48,9 +50,10 @@ let lastSort: ReferenceSort | undefined;
 /** Links filed into folders: browse the tree, search, add, edit, color, move folders and delete. */
 export function ReferencesPane({ service, active }: Props) {
   const [dialog, setDialog] = useState<DialogState | undefined>();
+  const [folderDialog, setFolderDialog] = useState<string | undefined>();
   const [sort, setSort] = useState<ReferenceSort | undefined>(lastSort);
   const buildRows = useCallback(
-    (refs: Reference[], expanded: ReadonlySet<string>, search: string) => buildReferenceRows(refs, expanded, search, sort),
+    (refs: Reference[], expanded: ReadonlySet<string>, search: string, metadata?: FolderMetadataMap) => buildReferenceRows(refs, expanded, search, sort, metadata),
     [sort],
   );
   const tree = useFolderTree<Reference>({
@@ -59,11 +62,13 @@ export function ReferencesPane({ service, active }: Props) {
     itemName: (ref) => ref.title,
     buildRows,
     fetch: async () => {
-      const { references, folderColors } = await service.listReferences();
-      return { items: references, folderColors };
+      const { references, folderColors, folderMetadata } = await service.listReferences();
+      return { items: references, folderColors, folderMetadata };
     },
     moveFolder: (from, to) => service.moveReferenceFolder(from, to),
+    deleteFolder: (folder, mode) => service.deleteReferenceFolder(folder, mode),
     saveFolderColor: (folder, color) => service.setReferenceFolderColor(folder, color),
+    saveFolderMetadata: (folder, metadata) => service.setReferenceFolderMetadata(folder, metadata),
     saveItemColor: (ref, color) => service.updateReference(ref.id, { color }),
     remove: (ref) => service.deleteReference(ref.id),
   });
@@ -89,13 +94,14 @@ export function ReferencesPane({ service, active }: Props) {
   const onKey: PaneKeyHandler<Reference> = (k, r) => {
     if (k === 'a') { addLink(rowFolder(r)); return true; }
     if (k === 's') { cycleSort(); return true; }
+    if (r?.kind === 'folder' && (k === 'Enter' || k === 'e' || k === 'm')) { setFolderDialog(r.path); return true; }
     if (r?.kind !== 'item') return false;
-    if (k === 'Enter' || k === 'o') { openUrl(r.item.url); return true; }
+    if (k === 'o') { openUrl(r.item.url); return true; }
     if (k === 'y') { copyLink(r.item); return true; }
-    if (k === 'e') { editLink(r.item); return true; }
+    if (k === 'e' || k === 'Enter') { editLink(r.item); return true; }
     return false;
   };
-  useWindowKeys(active && !dialog, (e) => tree.handleKey(e, onKey));
+  useWindowKeys(active && !dialog && folderDialog === undefined, (e) => tree.handleKey(e, onKey));
 
   const onSaved = useCallback((saved: Reference, created: boolean) => {
     setDialog(undefined);
@@ -141,7 +147,7 @@ export function ReferencesPane({ service, active }: Props) {
         rowRef={tree.rowRef}
         onSelect={tree.select}
         onToggle={tree.setOpen}
-        onActivate={(ref) => openUrl(ref.url)}
+        onActivate={editLink}
         itemTitle={(ref) => ref.url}
         renderItem={(ref) => {
           const color = tree.colorOf(ref);
@@ -166,7 +172,10 @@ export function ReferencesPane({ service, active }: Props) {
               onColor={() => tree.pickFolderColor(row.path)}
             >
               <button type="button" className="btn" onClick={() => addLink(row.path)}>a · Add link here</button>
-              <button type="button" className="btn" onClick={() => tree.startRename(row.path)}>e · Rename / move</button>
+              <button type="button" className="btn" onClick={() => setFolderDialog(row.path)}>↵ · Edit folder</button>
+              <button type="button" className="btn" onClick={() => tree.startFolderDelete(row.path)}>d · Delete folder</button>
+              <FolderMetadataEditor key={row.path} path={row.path} metadata={tree.folderMetadata[row.path]}
+                onSave={(metadata) => tree.saveFolderMetadata(row.path, metadata)} />
             </FolderDetails>
           ) : (
             <>
@@ -202,6 +211,33 @@ export function ReferencesPane({ service, active }: Props) {
         />
       )}
       {tree.picker.element}
+      {tree.folderDelete && (
+        <DeleteFolderDialog
+          prompt={tree.folderDelete}
+          noun={NOUN}
+          onDelete={(mode) => void tree.submitFolderDelete(mode)}
+          onClose={tree.cancelFolderDelete}
+        />
+      )}
+      {folderDialog !== undefined && (
+        <FolderDialog
+          moveFolder={(from, to) => service.moveReferenceFolder(from, to)}
+          saveMetadata={(path, metadata) => service.setReferenceFolderMetadata(path, metadata)}
+          saveColor={(path, color) => service.setReferenceFolderColor(path, color)}
+          path={folderDialog}
+          metadata={tree.folderMetadata[folderDialog]}
+          folders={tree.folders}
+          folderColors={tree.folderColors}
+          onMoved={(path) => { tree.revealFolder(path); void load(); }}
+          onSaved={(path, moved) => {
+            setFolderDialog(undefined);
+            tree.revealFolder(path);
+            void load();
+            say(moved === undefined ? `✓ Saved ${path}/` : `✓ Moved ${plural(moved, NOUN)} to ${path || 'the top level'}`);
+          }}
+          onClose={() => setFolderDialog(undefined)}
+        />
+      )}
     </div>
   );
 }

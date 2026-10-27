@@ -1,4 +1,4 @@
-import type { Todo, TodoStatus } from './types.js';
+import type { FolderMetadataMap, Todo, TodoKind, TodoStatus } from './types.js';
 import { searchTerms } from './search.js';
 import { compareTodos, type TodoSort } from './sort.js';
 import { buildFolderRows, type FolderTreeRow } from './folders.js';
@@ -32,6 +32,36 @@ export function nextTodoStatus(status: TodoStatus): TodoStatus {
 
 /** Which todos are listed (cycled with v). */
 export type TodoFilter = 'all' | 'open' | 'in_progress' | 'done';
+export type TodoKindFilter = 'all' | 'todos' | 'ideas';
+
+export const TODO_KIND_FILTERS: readonly { value: TodoKindFilter; label: string }[] = [
+  { value: 'all', label: 'Todos + ideas' },
+  { value: 'todos', label: 'Todos' },
+  { value: 'ideas', label: 'Ideas' },
+];
+
+export function todoKind(item: Todo): TodoKind {
+  return item.kind ?? 'todo';
+}
+
+export function nextTodoKindFilter(filter: TodoKindFilter): TodoKindFilter {
+  const i = TODO_KIND_FILTERS.findIndex((f) => f.value === filter);
+  return TODO_KIND_FILTERS[(i + 1) % TODO_KIND_FILTERS.length]!.value;
+}
+
+export function todoKindFilterLabel(filter: TodoKindFilter): string {
+  return TODO_KIND_FILTERS.find((f) => f.value === filter)?.label ?? 'Todos + ideas';
+}
+
+const TODO_KIND_TITLES: Record<TodoKindFilter, string> = { all: 'Todos + Ideas', todos: 'Todos', ideas: 'Ideas' };
+
+/** The Todos view's title for a type filter. */
+export function todoKindTitle(filter: TodoKindFilter): string {
+  return TODO_KIND_TITLES[filter];
+}
+
+/** Every title, so a header can keep room for the longest one. */
+export const TODO_KIND_TITLE_LIST: readonly string[] = Object.values(TODO_KIND_TITLES);
 
 export const TODO_FILTERS: readonly { value: TodoFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -51,6 +81,7 @@ export function todoFilterLabel(filter: TodoFilter): string {
 
 /** True when `todo` is listed under `filter` (`open` is anything not done). */
 export function matchesTodoFilter(todo: Todo, filter: TodoFilter = 'all'): boolean {
+  if (todoKind(todo) === 'idea') return true;
   if (filter === 'all') return true;
   if (filter === 'open') return todo.status !== 'done';
   return todo.status === filter;
@@ -68,11 +99,14 @@ export interface TodoRowOptions {
   search?: string;
   sort?: TodoSort;
   filter?: TodoFilter;
+  kindFilter?: TodoKindFilter;
+  folderMetadata?: FolderMetadataMap;
 }
 
 export interface TodoCounts {
   open: number;
   done: number;
+  ideas: number;
   /** Open todos past their due date. */
   overdue: number;
 }
@@ -81,29 +115,38 @@ export interface TodoCounts {
 export function todoCounts(todos: readonly Todo[], now = new Date()): TodoCounts {
   let done = 0;
   let overdue = 0;
+  let ideas = 0;
   for (const todo of todos) {
+    if (todoKind(todo) === 'idea') { ideas++; continue; }
     if (todo.status === 'done') done++;
     else if (isOverdue(todo, now)) overdue++;
   }
-  return { open: todos.length - done, done, overdue };
+  return { open: todos.length - done - ideas, done, ideas, overdue };
 }
 
 /**
  * The Todos folder tree as display rows: subfolders first (by name), then todos (by `sort`). Folders
  * count their done todos for a progress bar. With `search` set every folder is opened.
  */
-export function buildTodoRows(todos: Todo[], expanded: ReadonlySet<string>, { search, sort, filter = 'all' }: TodoRowOptions = {}): TodoRow[] {
+export function buildTodoRows(todos: Todo[], expanded: ReadonlySet<string>, { search, sort, filter = 'all', kindFilter = 'all', folderMetadata }: TodoRowOptions = {}): TodoRow[] {
   const searching = searchTerms(search).length > 0;
   return buildFolderRows(todos, expanded, {
     folder: (todo) => todo.folder,
     key: (todo) => `todo:${todo.id}`,
     compare: compareTodos(sort),
     include: searching || filter !== 'all'
-      ? (todo) => matchesTodoFilter(todo, filter) && matchesTodo(todo, search)
+      || kindFilter !== 'all'
+      ? (todo) => matchesTodoKindFilter(todo, kindFilter) && matchesTodoFilter(todo, filter) && matchesTodo(todo, search)
       : undefined,
     openAll: searching,
-    isDone: (todo) => todo.status === 'done',
+    isDone: (todo) => todoKind(todo) === 'todo' && todo.status === 'done',
+    isProgressItem: (todo) => todoKind(todo) === 'todo',
+    extraFolders: searching ? [] : Object.keys(folderMetadata ?? {}),
   });
+}
+
+export function matchesTodoKindFilter(todo: Todo, filter: TodoKindFilter = 'all'): boolean {
+  return filter === 'all' || todoKind(todo) === (filter === 'ideas' ? 'idea' : 'todo');
 }
 
 // ─── Due dates ───────────────────────────────────────────────────────────────

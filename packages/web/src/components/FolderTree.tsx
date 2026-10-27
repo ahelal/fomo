@@ -115,7 +115,7 @@ function FolderLabel({ row, color, progress }: { row: FolderRow; color: string; 
       <span className="tree-row__caret" aria-hidden="true">{row.open ? '▾' : '▸'}</span>
       <FolderIcon color={color} />
       <span className="tree-row__folder" style={{ color }}>{row.name}/</span>
-      {progress ? <Progress done={row.done} count={row.count} /> : <span className="tree-row__count">{row.count}</span>}
+      {progress ? <Progress done={row.done} count={row.progressCount} /> : <span className="tree-row__count">{row.count}</span>}
     </>
   );
 }

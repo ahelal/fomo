@@ -381,11 +381,25 @@ export interface FomoService {
   moveReferenceFolder(from: string, to: string): Promise<number>;
   /** Color a Bookmarks folder (`''` clears it); returns every folder color. */
   setReferenceFolderColor(folder: string, color: string): Promise<FolderColorMap>;
+  /** Set or clear metadata on a Bookmarks folder. */
+  setReferenceFolderMetadata(folder: string, metadata: FolderMetadata): Promise<FolderMetadataMap>;
+  /**
+   * Delete a Bookmarks folder: `parent` lifts its bookmarks and subfolders into the parent folder,
+   * `all` deletes them too. Returns how many bookmarks moved or were deleted.
+   */
+  deleteReferenceFolder(folder: string, mode: DeleteFolderMode): Promise<number>;
   /** Rename a Todos folder, like `moveReferenceFolder`. Returns how many todos moved. */
   moveTodoFolder(from: string, to: string): Promise<number>;
   /** Color a Todos folder (`''` clears it); returns every folder color. */
   setTodoFolderColor(folder: string, color: string): Promise<FolderColorMap>;
+  /** Set or clear metadata on a Todos/Ideas folder. */
+  setTodoFolderMetadata(folder: string, metadata: FolderMetadata): Promise<FolderMetadataMap>;
+  /** Delete a Todos folder, like `deleteReferenceFolder`. */
+  deleteTodoFolder(folder: string, mode: DeleteFolderMode): Promise<number>;
 }
+
+/** How a folder is deleted: `parent` lifts its contents into the parent folder; `all` deletes them. */
+export type DeleteFolderMode = 'parent' | 'all';
 
 /** Folder path → `#rrggbb`; a folder without a color shows its parent's. */
 export type FolderColorMap = Record<string, string>;
@@ -433,6 +447,7 @@ export interface UpdateReferenceRequest {
 export interface ListReferencesResponse {
   references: Reference[];
   folderColors?: FolderColorMap;
+  folderMetadata?: FolderMetadataMap;
 }
 
 /** Copilot's proposal for filing a link (TUI only). */
@@ -445,11 +460,14 @@ export interface ReferenceSuggestion {
 // ─── Todos ───────────────────────────────────────────────────────────────────
 
 export type TodoStatus = 'pending' | 'in_progress' | 'done';
+export type TodoKind = 'todo' | 'idea';
 
 export interface Todo {
   /** Opaque ID: stored as RowKey in Azure Table Storage. */
   id: string;
   subject: string;
+  /** Missing on records created before todo/idea support; those are todos. */
+  kind?: TodoKind;
   /** Optional multiline notes, stored as plain text; empty when not supplied. */
   description: string;
   /** URL or filesystem path references, not uploaded files. */
@@ -469,6 +487,7 @@ export interface Todo {
 
 export interface CreateTodoRequest {
   subject: string;
+  kind?: TodoKind;
   description?: string;
   attachments?: string[];
   dueDate?: string;
@@ -479,6 +498,7 @@ export interface CreateTodoRequest {
 
 export interface UpdateTodoRequest {
   subject?: string;
+  kind?: TodoKind;
   description?: string;
   /** Replaces the references; `[]` removes them all. Omit to keep them unchanged. */
   attachments?: string[];
@@ -497,7 +517,17 @@ export interface ListTodosOptions {
 export interface ListTodosResponse {
   todos: Todo[];
   folderColors?: FolderColorMap;
+  folderMetadata?: FolderMetadataMap;
 }
+
+/** Optional folder metadata, without granting access to either target. */
+export interface FolderMetadata {
+  localPath?: string;
+  githubRepo?: string;
+}
+
+/** Folder path → its optional local directory and GitHub repository. */
+export type FolderMetadataMap = Record<string, FolderMetadata>;
 
 // ─── Centralised settings ────────────────────────────────────────────────────
 

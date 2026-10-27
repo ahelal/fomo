@@ -9,12 +9,15 @@ import {
   isOverdue,
   matchesTodo,
   matchesTodoFilter,
+  matchesTodoKindFilter,
+  nextTodoKindFilter,
   nextTodoFilter,
   nextTodoStatus,
   parseDueDate,
   toIsoDate,
   todoCounts,
   todoFilterLabel,
+  todoKindFilterLabel,
   type TodoRow,
 } from '../todos.js';
 import { TodoStore } from '../store/tables.js';
@@ -49,6 +52,17 @@ describe('todo status and filter', () => {
     expect([pending, doing, done].map((t) => matchesTodoFilter(t, 'in_progress'))).toEqual([false, true, false]);
     expect([pending, doing, done].map((t) => matchesTodoFilter(t, 'done'))).toEqual([false, false, true]);
     expect([pending, doing, done].map((t) => matchesTodoFilter(t))).toEqual([true, true, true]);
+  });
+
+  it('filters todos and ideas independently from task status', () => {
+    const task = todo('task', 'work', { status: 'done' });
+    const idea = todo('idea', 'work', { kind: 'idea', status: 'pending' });
+    expect([task, idea].map((item) => matchesTodoKindFilter(item, 'todos'))).toEqual([true, false]);
+    expect([task, idea].map((item) => matchesTodoKindFilter(item, 'ideas'))).toEqual([false, true]);
+    expect(matchesTodoFilter(idea, 'done')).toBe(true);
+    expect(nextTodoKindFilter('all')).toBe('todos');
+    expect(nextTodoKindFilter('todos')).toBe('ideas');
+    expect(todoKindFilterLabel('ideas')).toBe('Ideas');
   });
 
   it('searches the subject, description and folder', () => {
@@ -109,6 +123,18 @@ describe('buildTodoRows', () => {
   it('orders the todos of a folder by the chosen sort', () => {
     const rows = buildTodoRows(todos, new Set(['work', 'work/eng']), { sort: { key: 'subject', dir: 'desc' } });
     expect(rows.filter((r) => r.kind === 'item').map((r) => r.key)).toEqual(['todo:ship', 'todo:bug', 'todo:report', 'todo:groceries']);
+  });
+
+  it('shows ideas in the tree without including them in todo progress', () => {
+    const mixed = [...todos, todo('idea', 'work/eng', { kind: 'idea' })];
+    const rows = buildTodoRows(mixed, new Set(['work', 'work/eng', 'empty', 'empty/folder']), {
+      folderMetadata: { 'empty/folder': { githubRepo: 'owner/repo' } },
+    });
+    const work = rows.find((r) => r.kind === 'folder' && r.path === 'work');
+    const empty = rows.find((r) => r.kind === 'folder' && r.path === 'empty/folder');
+    expect(work).toMatchObject({ count: 4, done: 1, progressCount: 3 });
+    expect(empty).toMatchObject({ count: 0, done: 0, progressCount: 0 });
+    expect(rows.some((r) => r.kind === 'item' && r.item.kind === 'idea')).toBe(true);
   });
 });
 
@@ -191,8 +217,9 @@ describe('todoCounts', () => {
       todo('soon', 'work', { dueDate: '2026-03-05' }),
       todo('shipped', 'work', { status: 'done', dueDate: '2026-02-01' }),
     ];
-    expect(todoCounts(todos, NOW)).toEqual({ open: 3, done: 1, overdue: 2 });
-    expect(todoCounts([], NOW)).toEqual({ open: 0, done: 0, overdue: 0 });
+    expect(todoCounts(todos, NOW)).toEqual({ open: 3, done: 1, ideas: 0, overdue: 2 });
+    expect(todoCounts([todo('idea', '', { kind: 'idea', dueDate: '2026-03-01' })], NOW)).toEqual({ open: 0, done: 0, ideas: 1, overdue: 0 });
+    expect(todoCounts([], NOW)).toEqual({ open: 0, done: 0, ideas: 0, overdue: 0 });
   });
 });
 
@@ -223,6 +250,19 @@ describe('TodoStore folders and colors', () => {
     expect(calls.created[0]).toMatchObject({ partitionKey: 'todo', folder: 'work/eng', color: '#aabbcc' });
     expect(await store.createTodo({ subject: 'Plain' })).not.toHaveProperty('color');
     await expect(store.createTodo({ subject: 'Bad', color: 'red' })).rejects.toThrow(/Not a color/);
+  });
+
+  it('stores ideas without due dates and preserves their ID when converting them', async () => {
+    const { store, calls } = storeWith([]);
+    const idea = await store.createTodo({ subject: 'Explore a feature', kind: 'idea' });
+    expect(idea).toMatchObject({ kind: 'idea', status: 'pending' });
+    expect(idea).not.toHaveProperty('dueDate');
+    await expect(store.createTodo({ subject: 'Bad idea', kind: 'idea', dueDate: '2026-03-10' })).rejects.toThrow(/cannot have a due date/);
+
+    const row = { ...calls.created[0], etag: 'e1' };
+    const second = storeWith([row]);
+    const converted = await second.store.updateTodo(idea.id, { kind: 'todo', dueDate: '2026-03-10' });
+    expect(converted).toMatchObject({ id: idea.id, kind: 'todo', dueDate: '2026-03-10' });
   });
 
   it('reads todos stored before folders at the top level', async () => {

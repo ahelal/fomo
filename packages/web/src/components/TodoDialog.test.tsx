@@ -6,6 +6,7 @@ import { TodoDialog } from './TodoDialog.js';
 import { TodoDetails } from './TodosPane.js';
 import { ReferenceDialog } from './ReferenceDialog.js';
 import { TodoAttachments } from './TodoAttachments.js';
+import { DeleteFolderDialog, FolderDialog } from './FolderDialog.js';
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 const service = {} as FomoService;
@@ -44,6 +45,14 @@ describe('TodoDialog', () => {
     // No color of its own: it shows the folder's.
     expect(text(html)).toContain('folder color');
     expect(html).toContain('border-color:#f85149');
+  });
+
+  it('adds an idea without exposing a due-date field', () => {
+    const html = renderTodoDialog({ initial: { kind: 'idea', folder: 'work' } });
+    expect(text(html)).toContain('✓ Add an idea');
+    expect(html).toContain('<option value="idea" selected="">Idea</option>');
+    expect(text(html)).not.toContain('Due');
+    expect(html).not.toContain('type="date"');
   });
 
   it('reads a typed due date and fills the date picker with it', () => {
@@ -95,6 +104,14 @@ describe('TodoDetails', () => {
     expect(text(html)).toContain('top level');
   });
 
+  it('shows an idea as a distinct kind without a task status or due date', () => {
+    const html = renderToStaticMarkup(<TodoDetails todo={{ ...TODO, kind: 'idea' }} />);
+    expect(text(html)).toContain('✧ Idea');
+    expect(text(html)).not.toContain('In progress');
+    expect(text(html)).not.toContain('due 26-03-02');
+    expect(html).not.toContain('todo-due--');
+  });
+
   it('renders notes as plain text with their line breaks intact', () => {
     const html = renderToStaticMarkup(<TodoDetails todo={{ ...TODO, description: 'First line\n<script>alert(1)</script>\nLast line' }} />);
     expect(html).toContain('First line\n&lt;script&gt;alert(1)&lt;/script&gt;\nLast line');
@@ -137,5 +154,66 @@ describe('ReferenceDialog', () => {
     );
     expect(text(none)).toContain('folder color');
     expect(none).toContain('border-color:#f85149');
+  });
+});
+
+describe('FolderDialog', () => {
+  it('edits the folder name, local directory, GitHub repo and color without a type', () => {
+    const html = renderToStaticMarkup(
+      <FolderDialog
+        moveFolder={(from, to) => service.moveTodoFolder(from, to)}
+        saveMetadata={(path, metadata) => service.setTodoFolderMetadata(path, metadata)}
+        saveColor={(path, color) => service.setTodoFolderColor(path, color)}
+        path="work"
+        metadata={{ localPath: '/src/work', githubRepo: 'octo/work' }}
+        folders={['work']}
+        folderColors={FOLDER_COLORS}
+        onSaved={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(text(html)).toContain('✓ Edit folder work/');
+    expect(text(html)).toContain('Local directory');
+    expect(text(html)).toContain('GitHub repository');
+    expect(text(html)).toContain('Color');
+    expect(text(html)).not.toContain('Type');
+    expect(html).not.toContain('<select');
+    expect(html).toContain('background-color:#f85149');
+    expect(html).toContain('value="work"');
+    expect(html).toContain('value="/src/work"');
+    expect(html).toContain('value="octo/work"');
+  });
+
+  it('shows the parent color for a folder with no color of its own', () => {
+    const html = renderToStaticMarkup(
+      <FolderDialog moveFolder={(from, to) => service.moveReferenceFolder(from, to)}
+        saveMetadata={(path, metadata) => service.setReferenceFolderMetadata(path, metadata)}
+        saveColor={(path, color) => service.setReferenceFolderColor(path, color)}
+        path="work/fomo" folders={['work', 'work/fomo']}
+        folderColors={FOLDER_COLORS} onSaved={vi.fn()} onClose={vi.fn()} />,
+    );
+    expect(text(html)).toContain('parent folder');
+    expect(html).toContain('border-color:#f85149');
+  });
+});
+
+describe('DeleteFolderDialog', () => {
+  it('offers moving the contents to the parent or deleting everything', () => {
+    const html = renderToStaticMarkup(
+      <DeleteFolderDialog prompt={{ path: 'work/fomo', count: 3, subfolders: 1 }} noun={['todo', 'todos']} onDelete={vi.fn()} onClose={vi.fn()} />,
+    );
+    expect(text(html)).toContain('Delete work/fomo/');
+    expect(text(html)).toContain('It holds 3 todos and 1 subfolder');
+    expect(text(html)).toContain('p · Move contents to work/');
+    expect(text(html)).toContain('a · Delete all');
+  });
+
+  it('moves a top-level folder’s contents to the top level and shows a refusal', () => {
+    const html = renderToStaticMarkup(
+      <DeleteFolderDialog prompt={{ path: 'ai', count: 1, subfolders: 0, error: 'Conflicting metadata for agents/' }} noun={['link', 'links']} onDelete={vi.fn()} onClose={vi.fn()} />,
+    );
+    expect(text(html)).toContain('It holds 1 link.');
+    expect(text(html)).toContain('Move contents to the top level');
+    expect(text(html)).toContain('⚠ Conflicting metadata for agents/');
   });
 });

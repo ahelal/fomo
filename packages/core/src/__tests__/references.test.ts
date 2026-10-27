@@ -52,6 +52,13 @@ describe('buildReferenceRows', () => {
     expect(matchesReference(refs[1]!, 'AI guide')).toBe(true);
     expect(matchesReference(refs[1]!, 'guide bicep')).toBe(false);
   });
+
+  it('keeps metadata-only folders visible, with their ancestors', () => {
+    const metadata = { 'work/research': { githubRepo: 'owner/research' } };
+    const rows = buildReferenceRows([], new Set(['work']), undefined, undefined, metadata);
+    expect(rows.map((r) => r.key)).toEqual(['folder:work', 'folder:work/research']);
+    expect(buildReferenceRows([], new Set(), 'research', undefined, metadata)).toEqual([]);
+  });
 });
 
 describe('reference suggestion', () => {

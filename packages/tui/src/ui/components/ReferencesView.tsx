@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { folderColor, formatDate, normalizeFolder, type Reference, type ReferenceRow } from '@fomo/core';
 import { REF_FIELDS, REF_FOLDER_COLOR, type RefField, type ReferencesViewState } from '../hooks/useReferences.js';
+import { FolderEditorForm } from './FolderEditorForm.js';
 import {
   ACCENT,
   DARK,
@@ -13,6 +14,7 @@ import {
   HINT,
   MUTED,
   RenameLine,
+  DeleteFolderLine,
   SearchLine,
   TEXT,
   promptLines,
@@ -104,7 +106,7 @@ function Details({ row, columns, confirmDelete, folderColorOf }: { row?: Referen
   else if (row.kind === 'folder') {
     lines.push(
       <Text key="f" color={folderColorOf(row.path)} wrap="truncate-end">{` ${row.path}/`}<Text color={MUTED}>{` · ${row.count} link${row.count === 1 ? '' : 's'}`}</Text></Text>,
-      <Text key="h" color={MUTED} wrap="truncate-end">{' [↵/→/←] open · close  [e] rename or move  [c] color  [a] add a link here'}</Text>,
+      <Text key="h" color={MUTED} wrap="truncate-end">{' [→/←] open · close  [↵/e] edit folder  [o] local dir  [g] GitHub  [c] color  [d] delete  [a] add a link here'}</Text>,
     );
   } else {
     const ref = row.item;
@@ -114,7 +116,7 @@ function Details({ row, columns, confirmDelete, folderColorOf }: { row?: Referen
       <Text key="m" color={confirmDelete === ref.id ? ERROR : MUTED} wrap="truncate-end">
         {confirmDelete === ref.id
           ? ' d again to delete · any other key cancels'
-          : ` ${ref.folder || 'top level'} · added ${formatDate(ref.createdAt)}  [↵/o] open  [y] copy link  [e] edit  [c] color  [d] delete`}
+          : ` ${ref.folder || 'top level'} · added ${formatDate(ref.createdAt)}  [o] open  [y] copy link  [↵/e] edit  [c] color  [d] delete`}
       </Text>,
     );
   }
@@ -122,7 +124,7 @@ function Details({ row, columns, confirmDelete, folderColorOf }: { row?: Referen
 }
 
 export function ReferencesView(props: Props) {
-  const { rows, total, selectedIndex, loading, search, searchDraft, form, rename, folderColors, height, columns } = props;
+  const { rows, total, selectedIndex, loading, search, searchDraft, form, folderMetadataForm, rename, folderColors, height, columns } = props;
   const folderColorOf = (path: string) => folderColor(folderColors, path) ?? REF_FOLDER_COLOR;
   const colorOf = (ref: Reference) => ref.color || folderColor(folderColors, ref.folder);
 
@@ -132,9 +134,18 @@ export function ReferencesView(props: Props) {
         <Text color={ACCENT} bold>{' 🔖 Bookmarks'}</Text>
         <Text color={MUTED}>{` · ${total} link${total === 1 ? '' : 's'}${loading ? ' · loading…' : ''}`}</Text>
       </Box>
-      {!form && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [e] edit  [d] delete  [c] color  [o] open  [/] search  [s] sort'}</Text>}
+      {!form && !folderMetadataForm && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [↵/e] edit  [d] delete  [c] color  [o] open  [/] search  [s] sort'}</Text>}
     </Box>
   );
+
+  if (folderMetadataForm) {
+    return (
+      <Box flexDirection="column" width={columns} height={height}>
+        {header}
+        <FolderEditorForm form={folderMetadataForm} columns={columns} folderColors={folderColors} />
+      </Box>
+    );
+  }
 
   if (form) {
     return (
@@ -153,6 +164,7 @@ export function ReferencesView(props: Props) {
       {header}
       <SearchLine search={search} searchDraft={searchDraft} matches={rows.filter((r) => r.kind === 'item').length} color={REF_FOLDER_COLOR} />
       <RenameLine rename={rename} color={REF_FOLDER_COLOR} />
+      <DeleteFolderLine prompt={props.folderDelete} noun={['link', 'links']} color={REF_FOLDER_COLOR} />
       <Box flexDirection="column" height={listH}>
         {rows.length === 0 ? (
           <Box height={listH} alignItems="center" justifyContent="center">

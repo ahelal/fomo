@@ -134,14 +134,15 @@ The TUI can refresh an update's details from its linked page, for example when t
 **Bookmarks** is a link library for pages worth keeping, separate from the Pending queue for things to read later. Links can be filed in nested folders, and a feed update can be saved with its title, URL and summary.
 
 - Links can be added directly or saved from an update. The TUI can suggest a folder and description; in the web app, these are entered by hand.
-- Folders are derived from the links they contain. Renaming or moving a folder also moves its contents.
+- Folders come from their contents or saved metadata. Bookmarks and Todos use the same folder editor for name/location, color, local directory and GitHub repository, without a type. Renaming or moving a folder also moves its contents and metadata; each view keeps its folders separate. Deleting a folder (`d`) asks first: move its contents (items and subfolders) up into the parent folder, or delete everything in it. Either way the folder's own color and metadata go with it.
+- In both views, Enter edits the selected item or folder; Left/Right navigate folders. In Bookmarks, `o` opens a link.
 - Bookmarks are stored with the profile's Azure account and can be browsed in either app.
 
 ### Todos
 
-Todos are small tasks stored alongside updates and bookmarks. They can have a due date, notes, links or local file-path attachments, and are organized in nested folders.
+Todos and ideas share one nested folder tree. Todos can have a due date; ideas cannot. Both can have notes and URL or local file-path references, and the list can show both types or filter to either one. Converting an idea to a todo keeps its identity and folder. Idea workflow stages are intentionally not fixed yet.
 
-Todos move through pending, in-progress and done states. Folder progress reflects the completion of its tasks. The TUI can open URL and local-path attachments; the web app can open URLs and copy paths, but local files are not uploaded or synced.
+Todos move through pending, in-progress and done states. Folder progress counts todos, not ideas. Folders have no todo/idea type and can hold both. Their edit form combines name/location, color, an optional local-directory path and GitHub repository association; the latter two are metadata only and do not grant access or trigger repository or filesystem operations. Clearing a folder's color restores its inherited parent color or the default. In both folder trees, the TUI can explicitly open associated paths and repositories. It can also open URL and local-path attachments; the web app can open URLs and copy paths, but local files are not uploaded or synced.
 
 ---
 

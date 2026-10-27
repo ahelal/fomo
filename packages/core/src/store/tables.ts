@@ -3,7 +3,7 @@ import { createTableClient, isSasConnection } from './connection.js';
 import { mapLimit } from '../util.js';
 import { matchesSearch, searchTerms } from '../search.js';
 import { compareUpdates, sortTodos } from '../sort.js';
-import { folderMove, isInFolder, moveFolderPath, normalizeFolder } from '../folders.js';
+import { folderMove, folderToDelete, isInFolder, moveFolderPath, normalizeFolder } from '../folders.js';
 import { cleanColor } from '../colors.js';
 import { normalizeAttachments } from '../attachments.js';
 import type {
@@ -17,6 +17,7 @@ import type {
   SourceFetchStatus,
   AppSettings,
   Todo,
+  TodoKind,
   TodoStatus,
   CreateTodoRequest,
   UpdateTodoRequest,
@@ -713,6 +714,7 @@ type TodoEntity = TableEntity<{
   attachments?: string;
   dueDate: string;
   status: string;
+  kind?: string;
   /** Missing on todos stored before folders. */
   folder?: string;
   color?: string;
@@ -721,6 +723,11 @@ type TodoEntity = TableEntity<{
 }>;
 
 function entityToTodo(e: TodoEntity): Todo {
+  if (e.kind !== undefined && e.kind !== 'todo' && e.kind !== 'idea') {
+    throw new Error(`Invalid type stored for todo ${e.rowKey}`);
+  }
+  const kind = e.kind === 'idea' ? 'idea' : 'todo';
+  if (kind === 'idea' && e.dueDate) throw new Error(`Idea ${e.rowKey} has an invalid due date`);
   const stored: unknown = JSON.parse(e.attachments || '[]');
   if (!Array.isArray(stored) || !stored.every((value): value is string => typeof value === 'string')) {
     throw new Error(`Invalid attachments stored for todo ${e.rowKey}`);
@@ -729,8 +736,9 @@ function entityToTodo(e: TodoEntity): Todo {
   const todo: Todo = {
     id: e.rowKey,
     subject: e.subject,
+    kind,
     description: e.description ?? '',
-    dueDate: e.dueDate || undefined,
+    ...(kind === 'todo' && e.dueDate ? { dueDate: e.dueDate } : {}),
     status: e.status as TodoStatus,
     folder: e.folder ?? '',
     createdAt: e.createdAt,
@@ -756,12 +764,16 @@ export class TodoStore {
   }
 
   async createTodo(req: CreateTodoRequest): Promise<Todo> {
+    if (req.kind !== undefined && req.kind !== 'todo' && req.kind !== 'idea') throw new Error(`Invalid todo type: ${String(req.kind)}`);
+    const kind = req.kind ?? 'todo';
+    if (kind === 'idea' && req.dueDate) throw new Error('Ideas cannot have a due date');
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const entity: TodoEntity = {
       partitionKey: TODO_PK,
       rowKey: id,
       subject: req.subject,
+      kind,
       description: req.description ?? '',
       attachments: JSON.stringify(normalizeAttachments(req.attachments ?? [])),
       dueDate: req.dueDate ?? '',
@@ -803,13 +815,19 @@ export class TodoStore {
   }
 
   async updateTodo(id: string, patch: UpdateTodoRequest): Promise<Todo> {
+    if (patch.kind !== undefined && patch.kind !== 'todo' && patch.kind !== 'idea') {
+      throw new Error(`Invalid todo type: ${String(patch.kind)}`);
+    }
     const entity = await this.client.getEntity<TodoEntity>(TODO_PK, id);
+    const kind: TodoKind = patch.kind ?? (entity.kind === 'idea' ? 'idea' : 'todo');
+    if (kind === 'idea' && patch.dueDate) throw new Error('Ideas cannot have a due date');
     const updated: TodoEntity = {
       ...entity,
       subject: patch.subject ?? entity.subject,
+      kind,
       description: patch.description !== undefined ? patch.description : entity.description,
       attachments: patch.attachments !== undefined ? JSON.stringify(normalizeAttachments(patch.attachments)) : (entity.attachments ?? '[]'),
-      dueDate: patch.dueDate !== undefined ? (patch.dueDate ?? '') : entity.dueDate,
+      dueDate: kind === 'idea' ? '' : patch.dueDate !== undefined ? (patch.dueDate ?? '') : entity.dueDate,
       status: patch.status ?? entity.status,
       folder: patch.folder !== undefined ? normalizeFolder(patch.folder) : (entity.folder ?? ''),
       color: patch.color !== undefined ? cleanColor(patch.color) : (entity.color ?? ''),
@@ -834,6 +852,15 @@ export class TodoStore {
         ),
       ),
     );
+    return inside.length;
+  }
+
+  /** Delete every todo in `folder` and its subfolders; returns how many went. */
+  async deleteFolder(folder: string): Promise<number> {
+    const path = folderToDelete(folder);
+    const { todos } = await this.listTodos();
+    const inside = todos.filter((t) => isInFolder(t.folder, path));
+    await Promise.all(inside.map((t) => this.deleteTodo(t.id)));
     return inside.length;
   }
 

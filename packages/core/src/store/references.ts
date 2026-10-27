@@ -2,7 +2,7 @@ import { odata, type TableClient, type TableEntity } from '@azure/data-tables';
 import { createTableClient, isSasConnection } from './connection.js';
 import { isTableError } from './tables.js';
 import { normalizeReferenceUrl } from '../references.js';
-import { folderMove, isInFolder, moveFolderPath, normalizeFolder } from '../folders.js';
+import { folderMove, folderToDelete, isInFolder, moveFolderPath, normalizeFolder } from '../folders.js';
 import { cleanColor } from '../colors.js';
 import type {
   CreateReferenceRequest,
@@ -165,6 +165,14 @@ export class ReferenceStore {
         ),
       ),
     );
+    return refs.length;
+  }
+
+  /** Delete every reference in `folder` and its subfolders; returns how many went. */
+  async deleteFolder(folder: string): Promise<number> {
+    const path = folderToDelete(folder);
+    const refs = (await this.listReferences()).filter((r) => isInFolder(r.folder, path));
+    await Promise.all(refs.map((r) => this.deleteReference(r.id)));
     return refs.length;
   }
 }

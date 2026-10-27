@@ -10,12 +10,14 @@ import {
   type FolderColorMap,
   type FomoService,
   type Todo,
+  type TodoKind,
 } from '@fomo/core';
 import { useColorPicker } from './ColorPicker.js';
 import { ColorField, DialogField, FolderField, ItemDialog } from './ItemDialog.js';
 import { errorText } from '../hooks/useFolderTree.js';
 
 export interface TodoDraft {
+  kind: TodoKind;
   subject: string;
   /** As typed: a date, `today`, `fri`, `+3`, `2w`… ('' for none). */
   due: string;
@@ -43,6 +45,7 @@ interface Props {
 /** Add or edit a todo, with optional multiline notes and URL/path references. */
 export function TodoDialog({ service, todo, initial, folders, folderColors, onSaved, onClose }: Props) {
   const [values, setValues] = useState<TodoDraft>(() => ({
+    kind: todo?.kind ?? initial?.kind ?? 'todo',
     subject: todo?.subject ?? initial?.subject ?? '',
     due: todo?.dueDate ?? initial?.due ?? '',
     folder: todo?.folder ?? initial?.folder ?? '',
@@ -53,8 +56,8 @@ export function TodoDialog({ service, todo, initial, folders, folderColors, onSa
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const picker = useColorPicker();
-  const due = parseDueDate(values.due);
-  const hint = dueHint(values.due);
+  const due = values.kind === 'idea' ? '' : parseDueDate(values.due);
+  const hint = values.kind === 'idea' ? undefined : dueHint(values.due);
 
   const set = (field: keyof TodoDraft) => (value: string) => {
     setValues((v) => ({ ...v, [field]: value }));
@@ -77,7 +80,7 @@ export function TodoDialog({ service, todo, initial, folders, folderColors, onSa
     if (saving) return;
     const subject = values.subject.trim();
     if (!subject) { setError('Subject is required'); return; }
-    if (due === undefined) { setError(dueDateError(values.due)); return; }
+    if (values.kind === 'todo' && due === undefined) { setError(dueDateError(values.due)); return; }
     let attachments: string[];
     try {
       attachments = parseAttachments(values.attachments);
@@ -88,10 +91,16 @@ export function TodoDialog({ service, todo, initial, folders, folderColors, onSa
     setSaving(true);
     setError(undefined);
     try {
-      const req = { subject, description: values.description, folder: normalizeFolder(values.folder) };
+      const originalKind = todo?.kind ?? 'todo';
+      const req = {
+        subject,
+        description: values.description,
+        folder: normalizeFolder(values.folder),
+        ...(values.kind === 'idea' || (todo && originalKind !== values.kind) ? { kind: values.kind } : {}),
+      };
       const saved = todo
-        ? await service.updateTodo(todo.id, { ...req, dueDate: due, color: values.color, attachments })
-        : await service.createTodo({ ...req, ...(attachments.length ? { attachments } : {}), ...(due ? { dueDate: due } : {}), ...(values.color ? { color: values.color } : {}) });
+        ? await service.updateTodo(todo.id, { ...req, dueDate: values.kind === 'todo' ? due ?? '' : '', color: values.color, attachments })
+        : await service.createTodo({ ...req, ...(attachments.length ? { attachments } : {}), ...(values.kind === 'todo' && due ? { dueDate: due } : {}), ...(values.color ? { color: values.color } : {}) });
       onSaved(saved, !todo);
     } catch (err) {
       setError(errorText(err));
@@ -101,7 +110,7 @@ export function TodoDialog({ service, todo, initial, folders, folderColors, onSa
 
   return (
     <ItemDialog
-      title={todo ? '✓ Edit todo' : '✓ Add a todo'}
+      title={todo ? `✓ Edit ${values.kind}` : `✓ Add ${values.kind === 'idea' ? 'an idea' : 'a todo'}`}
       error={error}
       saving={saving}
       multiline
@@ -109,18 +118,26 @@ export function TodoDialog({ service, todo, initial, folders, folderColors, onSa
       onSubmit={() => void submit()}
       onClose={onClose}
     >
+      <DialogField label="Type">
+        <select value={values.kind} onChange={(e) => set('kind')(e.target.value as TodoKind)}>
+          <option value="todo">Todo</option>
+          <option value="idea">Idea</option>
+        </select>
+      </DialogField>
       <DialogField label="Subject">
         <input autoFocus value={values.subject} onChange={onInput('subject')} placeholder="What needs doing" />
       </DialogField>
-      <DialogField
-        label="Due"
-        aside={hint && <span className={`item-dialog__due-hint${hint.error ? ' item-dialog__due-hint--error' : ''}`}>{hint.text}</span>}
-      >
-        <span className="item-dialog__due">
-          <input value={values.due} onChange={onInput('due')} placeholder="none — 2026-03-06, today, fri, +3, 2w" autoComplete="off" />
-          <input type="date" aria-label="Pick the due date" value={due || ''} onChange={onInput('due')} />
-        </span>
-      </DialogField>
+      {values.kind === 'todo' && (
+        <DialogField
+          label="Due"
+          aside={hint && <span className={`item-dialog__due-hint${hint.error ? ' item-dialog__due-hint--error' : ''}`}>{hint.text}</span>}
+        >
+          <span className="item-dialog__due">
+            <input value={values.due} onChange={onInput('due')} placeholder="none — 2026-03-06, today, fri, +3, 2w" autoComplete="off" />
+            <input type="date" aria-label="Pick the due date" value={due || ''} onChange={onInput('due')} />
+          </span>
+        </DialogField>
+      )}
       <FolderField value={values.folder} folders={folders} folderColors={folderColors} onChange={set('folder')} />
       <DialogField label="Notes (optional)">
         <textarea value={values.description} onChange={onInput('description')} rows={5} placeholder="Add notes — Enter starts a new line" />

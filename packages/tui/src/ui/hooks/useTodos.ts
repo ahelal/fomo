@@ -9,6 +9,8 @@ import {
   isDefaultSort,
   itemColorRequest,
   matchesTodoFilter,
+  matchesTodoKindFilter,
+  nextTodoKindFilter,
   nextSort,
   nextTodoFilter,
   nextTodoStatus,
@@ -23,8 +25,13 @@ import {
   TODO_STATUS_LABEL,
   todoCounts,
   todoFilterLabel,
+  todoKind,
+  todoKindFilterLabel,
   type Todo,
+  type FolderMetadataMap,
   type TodoFilter,
+  type TodoKind,
+  type TodoKindFilter,
   type TodoSort,
   type TodoStatus,
 } from '@fomo/core';
@@ -35,10 +42,11 @@ import { cursorLine } from '../editText.js';
 import { applyFormColor, formKey, setFormValue, type FolderForm } from './folderForm.js';
 import { errorText, useFolderTree, type TreeKeyHandler } from './useFolderTree.js';
 import type { OpenColorPicker } from './useColorPicker.js';
+import { useFolderEditor } from './useFolderEditor.js';
 
-export type TodoField = 'subject' | 'due' | 'folder' | 'description' | 'attachments' | 'color';
+export type TodoField = 'kind' | 'subject' | 'due' | 'folder' | 'description' | 'attachments' | 'color';
 /** The form's fields in Tab order. */
-export const TODO_FIELDS: TodoField[] = ['subject', 'due', 'folder', 'description', 'attachments', 'color'];
+export const TODO_FIELDS: TodoField[] = ['subject', 'due', 'folder', 'description', 'attachments', 'color', 'kind'];
 const MULTILINE_FIELDS: TodoField[] = ['description', 'attachments'];
 
 /** Folder color when neither a folder nor its parents have one. */
@@ -47,9 +55,14 @@ export const TODO_FOLDER_COLOR = DEFAULT_FOLDER_COLOR;
 export const TODO_ITEM_COLOR = DEFAULT_ITEM_COLOR;
 
 export type TodoForm = FolderForm<TodoField> & {
+  originalKind?: TodoKind;
   /** Tab cycling through the paths that complete an attachment line. */
   pathCycle?: PathCycle;
 };
+
+function fieldsFor(form: TodoForm): TodoField[] {
+  return form.values.kind === 'idea' ? TODO_FIELDS.filter((field) => field !== 'due') : TODO_FIELDS;
+}
 
 /** Paths completing the attachment line at the cursor; `current` is the one Tab cycled to. */
 export interface PathSuggestions {
@@ -70,14 +83,14 @@ interface Options {
 }
 
 function newForm(values: Partial<Record<TodoField, string>>, extra: Partial<TodoForm> = {}): TodoForm {
-  const all = { subject: '', due: '', folder: '', description: '', attachments: '', color: '', ...values };
+  const all = { kind: 'todo', subject: '', due: '', folder: '', description: '', attachments: '', color: '', ...values };
   return { values: all, field: 'subject', touched: new Set(), folderQuery: all.folder, pick: -1, saving: false, ...extra };
 }
 
 function editForm(todo: Todo): TodoForm {
   return newForm(
-    { subject: todo.subject, due: todo.dueDate ?? '', folder: todo.folder ?? '', description: todo.description, attachments: todo.attachments?.join('\n') ?? '', color: todo.color ?? '' },
-    { id: todo.id },
+    { kind: todoKind(todo), subject: todo.subject, due: todo.dueDate ?? '', folder: todo.folder ?? '', description: todo.description, attachments: todo.attachments?.join('\n') ?? '', color: todo.color ?? '' },
+    { id: todo.id, originalKind: todoKind(todo) },
   );
 }
 
@@ -86,12 +99,14 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
   const [open, setOpen] = useState(false);
   const [sort, setSort] = useState<TodoSort | undefined>();
   const [filter, setFilter] = useState<TodoFilter>('all');
+  const [kindFilter, setKindFilter] = useState<TodoKindFilter>('all');
   const [form, setForm] = useState<TodoForm | undefined>();
   const [attachmentPicker, setAttachmentPicker] = useState<{ todo: Todo; index: number }>();
 
   const buildRows = useCallback(
-    (todos: Todo[], expanded: ReadonlySet<string>, search: string) => buildTodoRows(todos, expanded, { search, sort, filter }),
-    [sort, filter],
+    (todos: Todo[], expanded: ReadonlySet<string>, search: string, folderMetadata?: FolderMetadataMap) =>
+      buildTodoRows(todos, expanded, { search, sort, filter, kindFilter, folderMetadata }),
+    [sort, filter, kindFilter],
   );
   const tree = useFolderTree<Todo>({
     area: 'todo',
@@ -100,11 +115,13 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
     itemName: (todo) => todo.subject,
     buildRows,
     fetch: async () => {
-      const { todos, folderColors } = await service.listTodos();
-      return { items: todos.map((t) => ({ ...t, folder: t.folder ?? '' })), folderColors };
+      const { todos, folderColors, folderMetadata } = await service.listTodos();
+      return { items: todos.map((t) => ({ ...t, folder: t.folder ?? '' })), folderColors, folderMetadata };
     },
     moveFolder: (from, to) => service.moveTodoFolder(from, to),
+    deleteFolder: (folder, mode) => service.deleteTodoFolder(folder, mode),
     saveFolderColor: (folder, color) => service.setTodoFolderColor(folder, color),
+    saveFolderMetadata: (folder, metadata) => service.setTodoFolderMetadata(folder, metadata),
     saveItemColor: (todo, color) => service.updateTodo(todo.id, { color }),
     remove: (todo) => service.deleteTodo(todo.id),
     pickColor,
@@ -114,7 +131,14 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
     notify,
     jump,
   });
-  const { load, reveal, say, fail, keep, folders, folderColors, items } = tree;
+  const { load, reveal, revealFolder, say, fail, keep, folders, folderColors, folderMetadata, items } = tree;
+  const folderEditor = useFolderEditor({
+    area: 'todo', noun: ['todo', 'todos'], folderMetadata, folderColors, audit, pickColor, revealFolder, load, say,
+    moveFolder: (from, to) => service.moveTodoFolder(from, to),
+    saveMetadata: (path, metadata) => service.setTodoFolderMetadata(path, metadata),
+    saveColor: (path, color) => service.setTodoFolderColor(path, color),
+  });
+  const folderMetadataForm = folderEditor.form;
   const matches = useMemo(() => (form ? folderMatches(folders, form.folderQuery) : []), [folders, form]);
 
   const [pathMatches, setPathMatches] = useState<{ line: string; matches: string[] }>();
@@ -148,12 +172,14 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
 
   const close = useCallback(() => {
     setForm(undefined);
+    folderEditor.close();
     setAttachmentPicker(undefined);
     tree.reset();
     setOpen(false);
-  }, [tree.reset]);
+  }, [tree.reset, folderEditor.close]);
 
   const setStatus = (todo: Todo, status: TodoStatus) => {
+    if (todoKind(todo) === 'idea') return;
     if (todo.status === status) return;
     tree.setItems((list) => list.map((t) => (t.id === todo.id ? { ...t, status } : t)));
     if (matchesTodoFilter({ ...todo, status }, filter)) keep(`todo:${todo.id}`);
@@ -166,9 +192,14 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
 
   const save = async (current: TodoForm) => {
     const { subject, due, folder, description, color } = current.values;
+    if (current.values.kind !== 'todo' && current.values.kind !== 'idea') {
+      setForm({ ...current, error: 'Type must be todo or idea', field: 'kind' });
+      return;
+    }
+    const kind: TodoKind = current.values.kind;
     if (!subject.trim()) { setForm({ ...current, error: 'Subject is required', field: 'subject' }); return; }
-    const dueDate = parseDueDate(due);
-    if (dueDate === undefined) {
+    const dueDate = kind === 'todo' ? parseDueDate(due) : '';
+    if (kind === 'todo' && dueDate === undefined) {
       setForm({ ...current, error: dueDateError(due), field: 'due' });
       return;
     }
@@ -181,12 +212,20 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
     }
     setForm({ ...current, saving: true, error: undefined });
     try {
-      const req = { subject: subject.trim(), description, folder: normalizeFolder(folder) };
+      const req = {
+        subject: subject.trim(),
+        description,
+        folder: normalizeFolder(folder),
+        ...(kind === 'idea' || (current.id && current.originalKind !== kind) ? { kind } : {}),
+      };
       const saved = current.id
-        ? await service.updateTodo(current.id, { ...req, dueDate, color, attachments })
-        : await service.createTodo({ ...req, ...(attachments.length ? { attachments } : {}), ...(dueDate ? { dueDate } : {}), ...(color ? { color } : {}) });
+        ? await service.updateTodo(current.id, { ...req, dueDate: kind === 'todo' ? dueDate ?? '' : '', color, attachments })
+        : await service.createTodo({ ...req, ...(attachments.length ? { attachments } : {}), ...(kind === 'todo' && dueDate ? { dueDate } : {}), ...(color ? { color } : {}) });
       setForm(undefined);
-      if (!matchesTodoFilter(saved, filter)) setFilter('all');
+      if (!matchesTodoFilter(saved, filter) || !matchesTodoKindFilter(saved, kindFilter)) {
+        setFilter('all');
+        setKindFilter('all');
+      }
       reveal(saved);
       await load();
       say(`✓ ${current.id ? 'Updated' : 'Added'} in ${saved.folder || 'top level'}`);
@@ -204,7 +243,7 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
       sample: subject || 'Todo',
       folder: f.values.folder,
       color: f.values.color,
-      onPick: (color) => setForm((cur) => cur && applyFormColor(cur, TODO_FIELDS, color)),
+      onPick: (color) => setForm((cur) => cur && { ...applyFormColor(cur, TODO_FIELDS, color), field: 'subject' }),
     }, folderColors, TODO_ITEM_COLOR));
   };
 
@@ -220,7 +259,7 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
         const value = f.values.attachments.slice(0, line.start) + step.text + f.values.attachments.slice(line.end);
         next = { ...setFormValue<TodoField, TodoForm>(f, 'attachments', value), cursor: line.start + step.text.length, pathCycle: step.cycle };
       } else {
-        const moved = formKey(f, TODO_FIELDS, matches, raw, key, MULTILINE_FIELDS);
+        const moved = formKey(f, fieldsFor(f), matches, raw, key, MULTILINE_FIELDS);
         if (moved && 'form' in moved) next = moved.form;
       }
       setForm((cur) => (cur === f ? next : cur));
@@ -230,7 +269,7 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
 
   const formInput = (f: TodoForm, raw: string, key: Key) => {
     if (key.tab && !key.shift && f.field === 'attachments' && !f.saving && completeAttachment(f, raw, key)) return;
-    const step = formKey(f, TODO_FIELDS, matches, raw, key, MULTILINE_FIELDS);
+    const step = formKey(f, fieldsFor(f), matches, raw, key, MULTILINE_FIELDS);
     if (!step) return;
     if ('form' in step) setForm(step.form);
     else if (step.action === 'cancel') setForm(undefined);
@@ -253,12 +292,48 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
       say(`Showing: ${todoFilterLabel(next)}`);
       return true;
     }
+    if (input === '6') {
+      const next = nextTodoKindFilter(kindFilter);
+      keep(row?.key);
+      setKindFilter(next);
+      say(`Showing: ${todoKindFilterLabel(next)}`);
+      return true;
+    }
     if (input === 'a') { setForm(newForm({ folder: rowFolder(row) })); return true; }
+    if (input === 'i') { setForm(newForm({ kind: 'idea', folder: rowFolder(row) })); return true; }
+    if (row?.kind === 'folder' && (key.return || input === 'e' || input === 'm')) {
+      folderEditor.open(row.path, input === 'm' ? 'localPath' : 'name');
+      return true;
+    }
+    if (row?.kind === 'folder' && (input === 'o' || input === 'g')) {
+      const metadata = folderMetadata[row.path];
+      const target = input === 'o' ? metadata?.localPath : metadata?.githubRepo ? `https://github.com/${metadata.githubRepo}` : undefined;
+      if (!target) say(input === 'o' ? 'No local directory is associated with this folder' : 'No GitHub repository is associated with this folder');
+      else void openAttachment(target).then(() => say(`Opened ${target}`), (err) => fail(`open folder association “${target}”`, err));
+      return true;
+    }
     if (row?.kind !== 'item') return false;
     const todo = row.item;
-    if (key.return) { setStatus(todo, nextTodoStatus(todo.status)); return true; }
+    if (input === 't' && todoKind(todo) === 'idea') {
+      void service.updateTodo(todo.id, { kind: 'todo' }).then((updated) => {
+        tree.setItems((list) => list.map((item) => item.id === updated.id ? updated : item));
+        keep(`todo:${updated.id}`);
+        say(`✓ Converted “${todo.subject}” to a todo`);
+      }, (err) => fail(`convert “${todo.subject}”`, err));
+      return true;
+    }
+    if (todoKind(todo) === 'idea') {
+      if (input === 'e' || key.return) { setForm(editForm(todo)); return true; }
+      if (input === 'o') {
+        if (todo.attachments?.length) setAttachmentPicker({ todo, index: 0 });
+        else say('No attachments — e to add URLs or file paths');
+        return true;
+      }
+      return false;
+    }
+    if (input === ' ') { setStatus(todo, nextTodoStatus(todo.status)); return true; }
     if (input === 'x') { setStatus(todo, todo.status === 'done' ? 'pending' : 'done'); return true; }
-    if (input === 'e') { setForm(editForm(todo)); return true; }
+    if (input === 'e' || key.return) { setForm(editForm(todo)); return true; }
     if (input === 'o') {
       if (todo.attachments?.length) setAttachmentPicker({ todo, index: 0 });
       else say('No attachments — e to add URLs or file paths');
@@ -269,6 +344,7 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
 
   /** Handle a key while Todos (or its form) is shown; `raw` keeps its case for typing. */
   const handleInput = (raw: string, key: Key) => {
+    if (folderMetadataForm) { folderEditor.handleInput(raw, key); return; }
     if (form) { formInput(form, raw, key); return; }
     if (attachmentPicker) {
       const input = shortcutKey(raw);
@@ -292,7 +368,7 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
     /** The Todos view is shown. */
     active: open,
     /** Keys are text (form, rename or search prompt), so global keys like q must not fire. */
-    typing: form !== undefined || tree.typing,
+    typing: form !== undefined || folderMetadataForm !== undefined || tree.typing,
     openView,
     close,
     handleInput,
@@ -301,10 +377,12 @@ export function useTodos({ service, audit, pickColor, notify, openAttachment, ju
     view: {
       ...tree.view,
       form,
+      folderMetadataForm,
       attachmentPicker,
       pathSuggestions,
       folderMatches: matches,
       filter,
+      kindFilter,
       counts,
     },
   };
