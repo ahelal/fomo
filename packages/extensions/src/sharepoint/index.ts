@@ -6,7 +6,7 @@ const PAGE_SIZE = 25;
 /** The exact live-verified projection; the host broker allows only this query and its continuations. */
 export const ITEM_SELECT = 'id,webUrl,eTag,createdDateTime,lastModifiedDateTime';
 export const ITEM_EXPAND = 'fields($select=Title,FileLeafRef,FSObjType,CanvasContent1)';
-const MAX_PAGE_TEXT_CHARS = 24_000;
+const MAX_PAGE_TEXT_CHARS = 256 * 1024;
 
 interface SharePointRow {
   id: string;
@@ -61,7 +61,8 @@ function fieldText(fields: Record<string, unknown>, ...keys: string[]): string |
 }
 
 function pageText(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('SharePoint page is missing its text field');
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') throw new Error('SharePoint page has an invalid text field');
   const markup = value
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, code: string) => {
       if (code[0] !== '#') {

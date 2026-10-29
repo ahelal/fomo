@@ -59,7 +59,7 @@ describe('SharePoint page-text scanner', () => {
     expect(await fetch(ctx)).toHaveLength(1);
   });
 
-  it('rejects off-list or re-projected continuations and incomplete page text instead of accepting partial scans', async () => {
+  it('rejects off-list or re-projected continuations and accepts empty page text', async () => {
     await expect(fetch(context([page([first], nextLink({}, `/sites/other/lists/${LIST}/items`))])))
       .rejects.toThrow('continuation outside the selected list');
     await expect(fetch(context([page([first], nextLink({ $expand: 'fields($select=Title,FileLeafRef,FSObjType)' }))])))
@@ -67,8 +67,12 @@ describe('SharePoint page-text scanner', () => {
     await expect(fetch(context([page([{ ...first, eTag: undefined }])]))).rejects.toThrow('missing a stable ID');
     await expect(fetch(context([page([{ ...first, webUrl: 'https://evil.example/x' }])]))).rejects.toThrow('missing a stable ID');
     await expect(fetch(context([page([{ ...first, fields: { ...first.fields, CanvasContent1: undefined } }])])))
-      .rejects.toThrow('missing its text field');
-    await expect(fetch(context([page([{ ...first, fields: { ...first.fields, CanvasContent1: 'x'.repeat(24_001) } }])])))
+      .resolves.toEqual([expect.objectContaining({ text: '' })]);
+    await expect(fetch(context([page([{ ...first, fields: { ...first.fields, CanvasContent1: null } }])])))
+      .resolves.toEqual([expect.objectContaining({ text: '' })]);
+    await expect(fetch(context([page([{ ...first, fields: { ...first.fields, CanvasContent1: 'x'.repeat(25_000) } }])])))
+      .resolves.toEqual([expect.objectContaining({ text: 'x'.repeat(25_000) })]);
+    await expect(fetch(context([page([{ ...first, fields: { ...first.fields, CanvasContent1: 'x'.repeat(256 * 1024 + 1) } }])])))
       .rejects.toThrow('snapshot limit');
   });
 

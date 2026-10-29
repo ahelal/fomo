@@ -14,7 +14,7 @@ type DatabaseSync = Database;
 /** Matches the extension's scan budget (100 pages × 25). */
 const MAX_RECORDS = 2500;
 const MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
-const MAX_PAGE_TEXT_CHARS = 24_000;
+const MAX_PAGE_TEXT_CHARS = 256 * 1024;
 const MAX_EVENT_CONTENT_CHARS = 32_000;
 /** Fetch hands at most this many outbox events to one ingestion pass. */
 const DELIVERY_BATCH = 100;

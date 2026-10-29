@@ -319,7 +319,7 @@ imported as new, unread items; older pages are tracked quietly. These are first-
 newly created pages, so their first event says that no earlier text snapshot is available. Later complete snapshots
 create one event when an item's ETag changes, showing lines added and removed since the previous fetch. The initial
 import is not repeated for existing sources. This is snapshot detection, not a history of every edit: intermediate
-revisions and deletions are not reported, and a timestamp change alone is not treated as an edit. Text reordering without additions or removals is called out as such. Pages are limited to 24,000 normalized
+revisions and deletions are not reported, and a timestamp change alone is not treated as an edit. Text reordering without additions or removals is called out as such. Pages are limited to 262,144 normalized
 characters and a scan's local text snapshots to 48 MiB. Snapshots are also capped at 100 pages/2,500 items; an
 oversized or incomplete scan is rejected without advancing the local journal. Imports are delivered in batches of
 up to 100 per fetch; any remaining events stay queued for the

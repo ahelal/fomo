@@ -184,8 +184,8 @@ describe('SharePoint revision journal', () => {
   it('bounds large diffs to the storage limit without corrupting the pending event', async () => {
     directory = await mkdtemp(join(tmpdir(), 'fomo-sharepoint-state-'));
     const journal = await SharePointJournal.open('default', source, directory);
-    journal.stageSnapshot([item('1', 'e1', 'Page', 'x'.repeat(24_000))], now);
-    const [updated] = journal.stageSnapshot([item('1', 'e2', 'Page', 'y'.repeat(24_000))], now);
+    journal.stageSnapshot([item('1', 'e1', 'Page', 'x'.repeat(256 * 1024))], now);
+    const [updated] = journal.stageSnapshot([item('1', 'e2', 'Page', 'y'.repeat(256 * 1024))], now);
     expect(updated!.content!.length).toBeLessThanOrEqual(32_000);
     expect(updated!.content).toContain('Diff truncated');
     expect(journal.pending()).toEqual([updated]);
