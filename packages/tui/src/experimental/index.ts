@@ -1,6 +1,7 @@
-import { TEAMS_MEETINGS_SOURCE, type ExperimentalProvider } from '@fomo/core';
+import { TEAMS_MEETINGS_SOURCE, type ExperimentalProvider, type SharePointSourceConfig } from '@fomo/core';
 import { ExtensionHost } from '../extensions/host.js';
-import { signInWorkIQ, type WorkIQRun } from './workiq.js';
+import { SHAREPOINT_CONSENT } from './sharepoint-consent.js';
+import { openWorkIQ, signInWorkIQ, type WorkIQRun } from './workiq.js';
 
 /** What the TUI needs to run an experimental source (see `EXPERIMENTAL_SOURCE_INFOS` in @fomo/core). */
 export interface ExperimentalSetup {
@@ -17,10 +18,13 @@ export interface ExperimentalSetup {
   provider(): ExperimentalProvider;
 }
 
-export type ExperimentalSetups = Readonly<Record<string, ExperimentalSetup>>;
+export type ExperimentalSetups = Readonly<Record<string, ExperimentalSetup | undefined>> & {
+  addSharePointSource?(siteUrl: string, name: string, signal: AbortSignal): ReturnType<ExtensionHost['addSharePointSource']>;
+  purgeSharePointSource?(sourceId: string): Promise<void>;
+};
 
-export function experimentalSetups(host: ExtensionHost): ExperimentalSetups {
-  return {
+export function experimentalSetups(host: ExtensionHost, sharePointSources: readonly SharePointSourceConfig[] = []): ExperimentalSetups {
+  const setups: Record<string, ExperimentalSetup> = {
     [TEAMS_MEETINGS_SOURCE]: {
       isolation: 'unsandboxed',
       consent: 'UNSANDBOXED: WorkIQ uses the host account and host filesystem/network; FOMO blocks writes, constrains Graph calls, and uses read-only OneDrive/SharePoint search for recordings',
@@ -31,6 +35,24 @@ export function experimentalSetups(host: ExtensionHost): ExperimentalSetups {
       provider: () => host.teamsProvider(),
     },
   };
+  for (const source of sharePointSources) {
+    setups[source.id] = {
+      isolation: 'unsandboxed',
+      consent: SHAREPOINT_CONSENT,
+      signIn: async (_onLine, signal) => {
+        const controller = signal ? AbortSignal.any([host.signal, signal]) : host.signal;
+        const connection = await openWorkIQ(host.profile, controller, source);
+        await connection.close();
+        return { ok: true, output: 'SharePoint source authorization verified' };
+      },
+      provider: () => host.sharePointProvider(source),
+    };
+  }
+  return Object.assign(setups, {
+    addSharePointSource: (siteUrl: string, name: string, signal: AbortSignal) =>
+      host.addSharePointSource(siteUrl, name, signal),
+    purgeSharePointSource: (sourceId: string) => host.purgeSharePointSource(sourceId),
+  });
 }
 
 export const EXPERIMENTAL_SETUPS = experimentalSetups(new ExtensionHost('default'));

@@ -158,10 +158,12 @@ export { timeAgo, formatDate, formatDateTime, formatUpdateTime } from './time.js
 export { canonicalUrl, titleKey, nextDuplicate, DuplicateIndex, TITLE_MATCH_DAYS, type DuplicateRow, type DuplicateCheck } from './duplicates.js';
 export {
   TEAMS_MEETINGS_SOURCE,
+  SHAREPOINT_SOURCE_PREFIX,
   EXPERIMENTAL_SOURCE_INFOS,
   experimentalSourceInfo,
   experimentalSourceInfos,
   isExperimentalSource,
+  isSharePointSourceId,
   type ExperimentalProvider,
   type KeyedChange,
 } from './experimental.js';

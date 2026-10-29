@@ -183,8 +183,12 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
   const sources = useMemo<SourceInfo[]>(() => sourceInfos(fomo.settings), [fomo.settings]);
   const sourceLabels = useMemo(
-    () => ({ ...fomo.settings.sourceNames, ...fomo.settings.sourceLabels }),
-    [fomo.settings.sourceNames, fomo.settings.sourceLabels],
+    () => ({
+      ...Object.fromEntries(fomo.settings.sharePointSources.map((source) => [source.id, source.displayName])),
+      ...fomo.settings.sourceNames,
+      ...fomo.settings.sourceLabels,
+    }),
+    [fomo.settings.sourceNames, fomo.settings.sourceLabels, fomo.settings.sharePointSources],
   );
 
   // Lists are loaded without content; fetch the body of the update being viewed.
@@ -226,8 +230,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   }, [fomo, clearSelection]);
 
   const sourceName = useCallback(
-    (id: string) => fomo.settings.sourceLabels[id] ?? fomo.settings.sourceNames[id] ?? sources.find((s) => s.id === id)?.displayName ?? experimentalSourceInfo(id)?.displayName ?? id,
-    [fomo.settings.sourceLabels, fomo.settings.sourceNames, sources],
+    (id: string) => fomo.settings.sourceLabels[id] ?? fomo.settings.sourceNames[id] ?? sources.find((s) => s.id === id)?.displayName ?? experimentalSourceInfo(id, fomo.settings.sharePointSources)?.displayName ?? id,
+    [fomo.settings.sourceLabels, fomo.settings.sourceNames, fomo.settings.sharePointSources, sources],
   );
 
   /** Pick which sources to show; counts are for the current view and search. */

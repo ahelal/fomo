@@ -212,3 +212,35 @@ Without an artifact or `iCalUId`, link to the meeting chat; keep the chat link i
 refresh, replace older links with the new Recap link, but never downgrade a Recap link to a chat link, or one with a
 recording file to the same link without it (it is rebuilt in the current format; a link of an older format is
 replaced).
+
+### SharePoint Site Pages (`sharepoint-<uuid>`)
+
+Unlike the fixed Teams entry, SharePoint sources are **instances**: each one is a `SharePointSourceConfig` in the
+profile's `sharePointSources` (account, canonical site URL, composite site ID, list ID, scope hash) plus a shared
+`SharePointSourceDescriptor` in the settings table (partition `sourceInstances`, lifecycle `active` → `retired` →
+`purged`, never back). Rows of a purged or unknown instance are hidden and rejected on insert.
+
+- **Setup** (`createSharePointSource` in `packages/tui/src/experimental/workiq.ts`) accepts only a site's own
+  `https://<tenant>.sharepoint.com/(sites|teams)/<name>` URL; the Add source flow reduces any pasted page or library
+  link to it first (`parseSharePointSite` in `packages/tui/src/ui/settings.ts`). It resolves
+  `/sites/{host}:/{path}?$select=id,webUrl,displayName` and pages the list catalog with
+  `$select=id,displayName,webUrl,list,system` (without `system` Site Pages is hidden), matching exactly one list whose
+  URL is `<site>/SitePages`. Keep the commas of the composite site ID raw: `%2C` is rejected (400).
+- **Broker scope:** a source's session may only call `fetch` with one URL: its own list's `/items` with exactly
+  `$select=id,webUrl,eTag,createdDateTime,lastModifiedDateTime&$top=25&$expand=fields($select=Title,FileLeafRef,FSObjType,CanvasContent1)`,
+  plus a non-empty `$skiptoken` on continuations. Teams operations are refused. Delta queries return 403; never use them.
+- **Worker** (`packages/extensions/src/sharepoint/`) follows every page (100 pages/2,500 items at most), extracts
+  bounded plain text from `CanvasContent1`, and returns a complete snapshot or fails; it never returns a partial one.
+- **Journal** (`packages/tui/src/experimental/sharepoint-state.ts`): per-source SQLite under the profile's private
+  extension-state directory, storing normalized page text locally and queuing only added/removed text in revision events.
+  The first complete snapshot records every page's current revision and queues
+  `first-seen` events for pages modified from 20 days before the scan through the scan time, inclusive. Older pages
+  stay quiet. This initial import and the baseline are committed atomically and never repeated for an already
+  baselined source. Later snapshots queue a new or changed ETag regardless of age, keyed
+  `sharepoint-revision-<sha256(source, item, etag)>`. Undelivered events are returned in batches of up to 100 before
+  any new scan and are acknowledged only after the Azure Table write, so a crash replays them with the same row key
+  (at-least-once delivery, idempotent storage). A 15-minute lease, renewed every minute while the source is open,
+  keeps a second TUI from scanning the same source.
+- SharePoint rows are excluded from duplicate detection, Copilot digests, regrouping, gists and reference suggestions.
+  The page-text scope uses approval revision 2; revision-1 metadata-only sources must be explicitly re-added before
+  their worker can read page text.

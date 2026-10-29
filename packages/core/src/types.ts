@@ -8,6 +8,43 @@ export type Status = 'unread' | 'read';
 /** Source identifier, e.g. 'github', 'azure', 'vscode'. Extensible string. */
 export type SourceId = string;
 
+export interface SharePointOrigin {
+  provider: 'sharepoint';
+  revisionBasis: 'list-etag-v1';
+  eventKind: 'first-seen' | 'updated';
+  observedAt: string;
+  createdAt: string;
+  modifiedAt: string;
+  scopeLabel: string;
+  eventFingerprint: string;
+}
+
+export interface SharePointSourceDescriptor {
+  id: SourceId;
+  provider: 'sharepoint';
+  displayName: string;
+  siteHost: string;
+  listName: string;
+  ownerInstallationId?: string;
+  lifecycle: 'active' | 'retired' | 'purged';
+  schemaVersion: 1;
+}
+
+export interface SharePointSourceConfig {
+  id: SourceId;
+  displayName: string;
+  siteUrl: string;
+  siteId: string;
+  listId: string;
+  listName: string;
+  accountId: string;
+  scopeHash: string;
+  ownerInstallationId: string;
+  mode: 'list-snapshot-v1';
+  approvalRevision: 1 | 2;
+  enabled: boolean;
+}
+
 export interface Update {
   /**
    * Opaque ID: `${source}__${sha256(url).slice(0,32)}`
@@ -39,6 +76,8 @@ export interface Update {
   gist?: PostGist;
   /** Id of the earlier update this one repeats (same page or same title), set at fetch. */
   duplicateOf?: string;
+  /** Source metadata for private SharePoint revision events; it is not authorization. */
+  sharePointOrigin?: SharePointOrigin;
 }
 
 /** The gist of one post: what the feature or change is, plus its key facts. */
@@ -74,6 +113,7 @@ export interface ScrapedItem {
    * A keyed item that is fetched again updates its stored row (see `ExperimentalProvider.merge`).
    */
   key?: string;
+  sharePointOrigin?: SharePointOrigin;
 }
 
 /**
@@ -204,6 +244,8 @@ export interface ListOptions {
   saved?: boolean;
   /** Only updates from these sources; an empty list matches nothing. */
   sources?: SourceId[];
+  /** Internal service filter: SharePoint revision events are intentionally outside Copilot digest input. */
+  excludeSharePoint?: boolean;
   limit?: number;
   offset?: number;
   /** Include the (potentially large) `content` field. Default: true. */
@@ -556,6 +598,8 @@ export interface AppSettings {
   sourceDefaultsVersion: number;
   /** Built-in sources the user removed. */
   removedSources: SourceId[];
+  /** Inert, shared display/lifecycle descriptors; never sufficient to authorize a local provider. */
+  sharePointSources: SharePointSourceDescriptor[];
 }
 
 export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
@@ -570,4 +614,5 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = {
   installedLegacySources: [],
   sourceDefaultsVersion: 3,
   removedSources: [],
+  sharePointSources: [],
 };

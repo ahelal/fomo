@@ -1,0 +1,12 @@
+{
+  "apiVersion": 1,
+  "id": "sharepoint",
+  "name": "SharePoint page-text revisions",
+  "version": "2.0.0",
+  "entry": "index.mjs",
+  "permissions": {
+    "http": [],
+    "mcp": ["workiq"],
+    "filesystem": { "readOnly": [], "readWrite": [] }
+  }
+}

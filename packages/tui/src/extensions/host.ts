@@ -3,9 +3,10 @@ import { createRequire } from 'node:module';
 import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { ExperimentalProvider, KeyedChange, SourceExtension, Update } from '@fomo/core';
+import type { ExperimentalProvider, KeyedChange, SharePointSourceConfig, SourceExtension, Update } from '@fomo/core';
 import type { Json } from '@fomo/core/extension-api';
-import { openWorkIQ } from '../experimental/workiq.js';
+import { createSharePointSource, openWorkIQ, removeSharePointApproval } from '../experimental/workiq.js';
+import { SharePointJournal } from '../experimental/sharepoint-state.js';
 import { httpText } from './http.js';
 import { WorkerConnection } from './protocol.js';
 import { closeSandbox, spawnSandbox } from './sandbox.js';
@@ -59,10 +60,13 @@ export class ExtensionHost {
   private readonly state = new Map<string, Map<string, Json>>();
   private readonly active = new Map<AbortController, string>();
   private readonly closers = new Set<() => Promise<void>>();
+  private readonly sourceClosers = new Map<string, Set<() => Promise<void>>>();
   private readonly lifetime = new AbortController();
   private enabled = false;
   private disposed = false;
   private teams?: ExperimentalProvider;
+  private readonly sharePointSources = new Map<string, SharePointSourceConfig>();
+  private readonly sharePointProviders = new Map<string, { config: string; provider: ExperimentalProvider }>();
 
   constructor(readonly profile: string, private readonly log: (message: string) => void = () => {}) {}
 
@@ -70,7 +74,91 @@ export class ExtensionHost {
 
   /** Stops the running Teams meetings invocations (its fetch), failing them with `reason`. */
   revokeTeamsInvocations(reason: string): void {
-    for (const [abort, id] of this.active) if (id === 'teams-meetings') abort.abort(new Error(reason));
+    for (const [abort, sourceId] of this.active) if (sourceId === 'teams-meetings') abort.abort(new Error(reason));
+  }
+
+  revokeSharePointInvocation(sourceId: string, reason: string): void {
+    for (const [abort, activeSource] of this.active) if (activeSource === sourceId) abort.abort(new Error(reason));
+  }
+
+  setSharePointSources(sources: readonly SharePointSourceConfig[], enabledIds: readonly string[]): void {
+    const enabled = new Set(enabledIds);
+    const next = new Map(sources.filter((source) => source.enabled && enabled.has(source.id)).map((source) => [source.id, source]));
+    for (const id of new Set([...this.sharePointSources.keys(), ...next.keys()])) {
+      if (JSON.stringify(this.sharePointSources.get(id)) !== JSON.stringify(next.get(id))) {
+        this.revokeSharePointInvocation(id, 'Stopped: SharePoint source configuration or authorization changed');
+      }
+    }
+    this.sharePointSources.clear();
+    for (const [id, source] of next) this.sharePointSources.set(id, source);
+  }
+
+  async addSharePointSource(siteUrl: string, name: string, signal: AbortSignal) {
+    return createSharePointSource(this.profile, siteUrl, name, signal);
+  }
+
+  async purgeSharePointSource(sourceId: string): Promise<void> {
+    this.revokeSharePointInvocation(sourceId, 'Stopped: SharePoint source was purged');
+    this.sharePointSources.delete(sourceId);
+    await Promise.all([...(this.sourceClosers.get(sourceId) ?? [])].map((close) => close()));
+    await SharePointJournal.purge(this.profile, sourceId);
+    await removeSharePointApproval(this.profile, sourceId);
+    this.sharePointProviders.delete(sourceId);
+  }
+
+  sharePointProvider(source: SharePointSourceConfig): ExperimentalProvider {
+    const config = JSON.stringify(source);
+    const cached = this.sharePointProviders.get(source.id);
+    if (cached?.config === config) return cached.provider;
+    const open = async (): Promise<ExperimentalProvider> => {
+      if (this.sharePointSources.get(source.id) !== source && JSON.stringify(this.sharePointSources.get(source.id)) !== JSON.stringify(source)) {
+        throw new Error('SharePoint source is not enabled in this profile');
+      }
+      // Lease first: a second TUI on this profile must not scan or deliver the same source concurrently.
+      const journal = await SharePointJournal.open(this.profile, source);
+      try { journal.acquireLease(); } catch (error) { journal.close(); throw error; }
+      let session: Awaited<ReturnType<ExtensionHost['open']>>;
+      try { session = await this.open('sharepoint', source.id, source); }
+      catch (error) { journal.releaseLease(); journal.close(); throw error; }
+      // Renewed for the whole invocation, including the storage writes that follow the scan.
+      const renew = setInterval(() => {
+        try { journal.renewLease(); }
+        catch (error) { this.revokeSharePointInvocation(source.id, `Stopped: ${error instanceof Error ? error.message : String(error)}`); }
+      }, 60_000);
+      renew.unref();
+      return {
+        id: source.id,
+        fetch: async () => {
+          session.connection.assertActive();
+          // Undelivered events go out first; scanning again would only grow the backlog.
+          const pending = journal.pending();
+          if (pending.length) return pending;
+          const snapshot = await session.connection.request('fetch', {
+            options: { siteId: source.siteId, listId: source.listId, siteUrl: source.siteUrl },
+          });
+          session.connection.assertActive();
+          return journal.stageSnapshot(snapshot);
+        },
+        merge: () => undefined,
+        assertActive: () => session.connection.assertActive(),
+        acknowledge: async (key) => journal.acknowledge(key),
+        close: async () => {
+          clearInterval(renew);
+          try { journal.releaseLease(); journal.close(); }
+          finally { await session.close(); }
+        },
+      };
+    };
+    const provider: ExperimentalProvider = {
+      id: source.id,
+      open,
+      fetch: async () => {
+        const provider = await open();
+        try { return await provider.fetch(); } finally { await provider.close?.(); }
+      },
+    };
+    this.sharePointProviders.set(source.id, { config, provider });
+    return provider;
   }
 
   sources(): Readonly<Record<string, SourceExtension>> {
@@ -124,11 +212,11 @@ export class ExtensionHost {
     this.state.clear();
   }
 
-  private async open(id: string, sourceId: string) {
+  private async open(id: string, sourceId: string, sharePoint?: SharePointSourceConfig) {
     if (this.disposed) throw new Error('Extension profile has been closed');
     const snapshotInfo = await snapshotExtension(id);
     const abort = new AbortController();
-    this.active.set(abort, id);
+    this.active.set(abort, sourceId);
     let workiq: Promise<WorkIQConnection> | undefined;
     const key = `${sourceId}:${snapshotInfo.digest}`;
     const state = this.state.get(key) ?? new Map<string, Json>();
@@ -147,28 +235,42 @@ export class ExtensionHost {
       } finally {
         this.active.delete(abort);
         this.closers.delete(close);
+        const bySource = this.sourceClosers.get(sourceId);
+        bySource?.delete(close);
+        if (bySource?.size === 0) this.sourceClosers.delete(sourceId);
         await rm(snapshotInfo.directory, { recursive: true, force: true });
       }
     })();
     this.closers.add(close);
+    const sourceClosers = this.sourceClosers.get(sourceId) ?? new Set<() => Promise<void>>();
+    sourceClosers.add(close);
+    this.sourceClosers.set(sourceId, sourceClosers);
     try {
-      if (this.disposed || (id === 'teams-meetings' && !this.enabled)) throw new Error('Extension authorization changed before launch');
+      if (this.disposed || (id === 'teams-meetings' && !this.enabled)
+        || (sharePoint && JSON.stringify(this.sharePointSources.get(sourceId)) !== JSON.stringify(sharePoint))) {
+        throw new Error('Extension authorization changed before launch');
+      }
       launching = spawnSandbox({
         executable: process.execPath,
         args: ['--openssl-config=/dev/null', '--max-old-space-size=128', join(snapshotInfo.directory, 'worker.mjs'), join(snapshotInfo.directory, 'index.mjs')],
         directory: snapshotInfo.directory, readonlyPaths: [snapshotInfo.directory],
-        timeoutMs: id === 'teams-meetings' ? 300_000 : 60_000,
+        timeoutMs: id === 'teams-meetings' || sharePoint ? 300_000 : 60_000,
       });
       const child = await launching;
-      if (this.disposed || (id === 'teams-meetings' && !this.enabled)) throw new Error('Extension authorization changed before launch');
+      if (this.disposed || (id === 'teams-meetings' && !this.enabled)
+        || (sharePoint && JSON.stringify(this.sharePointSources.get(sourceId)) !== JSON.stringify(sharePoint))) {
+        throw new Error('Extension authorization changed before launch');
+      }
       const connection = new WorkerConnection(child, abort.signal, async (method, params) => {
         abort.signal.throwIfAborted();
         if (method === 'http' && text(params.url, 8192)) {
           return httpText(params.url, snapshotInfo.origins, abort.signal);
         }
         if (method === 'mcp' && params.binding === 'workiq' && snapshotInfo.mcp.includes('workiq') && text(params.tool) && object(params.args)) {
-          if (!this.enabled) throw new Error('Teams source disabled');
-          workiq ??= openWorkIQ(this.profile, abort.signal);
+          if (sharePoint) {
+            if (JSON.stringify(this.sharePointSources.get(sourceId)) !== JSON.stringify(sharePoint)) throw new Error('SharePoint source disabled');
+          } else if (!this.enabled) throw new Error('Teams source disabled');
+          workiq ??= openWorkIQ(this.profile, abort.signal, sharePoint);
           return (await workiq).call(params.tool, params.args);
         }
         if ((method === 'state.get' || method === 'state.set') && text(params.key, 100) && params.key) {

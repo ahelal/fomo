@@ -138,6 +138,123 @@ describe('UpdateStore.insertUpdate', () => {
       await expect(store.insertUpdate(meeting, { key: 'k', merge })).resolves.toBe(false);
       expect(seen).toEqual(['revision-1', 'revision-2', 'revision-3', 'revision-4']);
     });
+
+    it('requires an active SharePoint descriptor before storing an event', async () => {
+      const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+      const id = 'sharepoint-12345678-1234-4234-8234-123456789abc';
+      const origin = {
+        provider: 'sharepoint' as const,
+        revisionBasis: 'list-etag-v1' as const,
+        eventKind: 'first-seen' as const,
+        observedAt: '2026-01-03T00:00:00.000Z',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        modifiedAt: '2026-01-02T00:00:00.000Z',
+        scopeLabel: 'Product · Site Pages',
+        eventFingerprint: 'a'.repeat(64),
+      };
+      const active = {
+        id, provider: 'sharepoint', displayName: 'Product', siteHost: 'tenant.sharepoint.com',
+        listName: 'Site Pages', lifecycle: 'active', schemaVersion: 1,
+      };
+      const store = new UpdateStore(conn);
+      const created: Record<string, unknown>[] = [];
+      Object.defineProperty(store, 'settingsClient', { value: { getEntity: async () => ({ data: JSON.stringify(active) }) } });
+      Object.defineProperty(store, 'client', { value: { createEntity: async (entity: Record<string, unknown>) => { created.push(entity); } } });
+      const update = {
+        source: id,
+        title: 'Launch plan',
+        url: 'https://tenant.sharepoint.com/teams/product/SitePages/launch.aspx',
+        datePublished: '2026-01-02T00:00:00.000Z',
+        content: 'SharePoint item first observed',
+        sharePointOrigin: origin,
+      };
+      await expect(store.insertUpdate(update, { key: 'revision', merge: () => undefined })).resolves.toBe(true);
+      expect(created[0]).toMatchObject({ partitionKey: id, sharePointOrigin: JSON.stringify(origin) });
+
+      Object.defineProperty(store, 'settingsClient', {
+        value: { getEntity: async () => ({ data: JSON.stringify({ ...active, lifecycle: 'purged' }) }) },
+      });
+      await expect(store.insertUpdate(update, { key: 'revision-2' })).rejects.toThrow('not active');
+      expect(created).toHaveLength(1);
+    });
+  });
+
+  describe('UpdateStore SharePoint descriptor lifecycle', () => {
+    const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+    const id = 'sharepoint-12345678-1234-4234-8234-123456789abc';
+    const active = {
+      id, provider: 'sharepoint' as const, displayName: 'Product', siteHost: 'tenant.sharepoint.com',
+      listName: 'Site Pages', lifecycle: 'active' as const, schemaVersion: 1 as const,
+    };
+
+    it('checks the lifecycle against the row it conditionally replaces', async () => {
+      const store = new UpdateStore(conn);
+      const writes: { etag?: string }[] = [];
+      Object.defineProperty(store, 'settingsClient', { value: {
+        getEntity: async () => ({ data: JSON.stringify({ ...active, lifecycle: 'purged' }), etag: 'purged-etag' }),
+        updateEntity: async (_entity: unknown, _mode: string, options: { etag?: string }) => { writes.push(options); },
+      } });
+      await expect(store.saveSharePointSource({ ...active, lifecycle: 'retired' })).rejects.toThrow('purged');
+      expect(writes).toEqual([]);
+
+      Object.defineProperty(store, 'settingsClient', { value: {
+        getEntity: async () => ({ data: JSON.stringify(active), etag: 'active-etag' }),
+        updateEntity: async () => { throw Object.assign(new Error('precondition'), { statusCode: 412 }); },
+      } });
+      await expect(store.saveSharePointSource({ ...active, lifecycle: 'retired' })).rejects.toThrow('changed concurrently');
+    });
+
+    it('restores only missing descriptors, as retired, and leaves existing ones untouched', async () => {
+      const store = new UpdateStore(conn);
+      const other = { ...active, id: 'sharepoint-22345678-1234-4234-8234-123456789abc' };
+      const created: { rowKey: string; data: string }[] = [];
+      let replaced = 0;
+      Object.defineProperty(store, 'settingsClient', { value: {
+        getEntity: async (_pk: string, rowKey: string) => {
+          if (rowKey === id) return { data: JSON.stringify(active), etag: 'e' };
+          throw Object.assign(new Error('missing'), { statusCode: 404 });
+        },
+        createEntity: async (entity: { rowKey: string; data: string }) => { created.push(entity); },
+        updateEntity: async () => { replaced++; },
+        listEntities: async function* () { yield { data: JSON.stringify(active) }; },
+      } });
+      await store.restore({ version: 2, exportedAt: '2026-01-01T00:00:00.000Z', entities: [], sharePointSources: [active, other] } as never);
+      expect(replaced).toBe(0);
+      expect(created.map((entity) => [entity.rowKey, JSON.parse(entity.data).lifecycle])).toEqual([[other.id, 'retired']]);
+    });
+  });
+
+  describe('UpdateStore SharePoint digest exclusion', () => {
+    it('filters SharePoint revision events before counting and paging digest input', async () => {
+      const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+      const store = new UpdateStore(conn);
+      const id = 'sharepoint-12345678-1234-4234-8234-123456789abc';
+      const descriptor = {
+        id, provider: 'sharepoint', displayName: 'Product', siteHost: 'tenant.sharepoint.com',
+        listName: 'Site Pages', lifecycle: 'active', schemaVersion: 1,
+      };
+      Object.defineProperty(store, 'settingsClient', {
+        value: {
+          getEntity: async () => ({ data: JSON.stringify(descriptor) }),
+          listEntities: () => (async function* () {
+            yield { partitionKey: 'sourceInstances', rowKey: id, data: JSON.stringify(descriptor) };
+          })(),
+        },
+      });
+      const entity = (partitionKey: string) => ({
+        partitionKey, rowKey: 'r', title: partitionKey, url: 'https://example.com/item',
+        datePublished: '2026-01-02T00:00:00.000Z', dateAdded: '2026-01-03T00:00:00.000Z',
+        status: 'unread', saved: false, content: 'metadata',
+      });
+      Object.defineProperty(store, 'client', {
+        value: { listEntities: () => (async function* () { yield entity(id); yield entity('github'); })() },
+      });
+      await expect(store.listUpdates({ excludeSharePoint: true, limit: 10 })).resolves.toMatchObject({
+        updates: [expect.objectContaining({ source: 'github' })],
+        total: 1,
+        hasMore: false,
+      });
+    });
   });
 });
 

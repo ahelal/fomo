@@ -780,8 +780,9 @@ describe('FomoDirectService', () => {
 
     const result = await svc.digest(summarizer, { newId: () => 'new-topic' });
     expect(result).toMatchObject({ processed: 1, created: 1, updated: 0, remaining: 0, errors: [] });
+    expect(__mockStore.listUpdates).toHaveBeenCalledWith(expect.objectContaining({ excludeSharePoint: true }));
     expect(__mockTopicStore.upsertTopic).toHaveBeenCalledWith(expect.objectContaining({ id: 'new-topic', title: 'T' }));
-    expect(__mockStore.setTopicId).toHaveBeenCalledWith('a__1', 'new-topic');
+    expect(__mockStore.setTopicId).toHaveBeenCalledWith('a__1', 'new-topic', undefined);
   });
 
   describe('summarizePost', () => {

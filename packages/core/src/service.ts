@@ -1,7 +1,7 @@
 import type { BackupPayload, PageInfo } from './store/tables.js';
 import { makeId } from './store/tables.js';
 import { DuplicateIndex, type DuplicateCheck } from './duplicates.js';
-import { isExperimentalSource, type ExperimentalProvider } from './experimental.js';
+import { isExperimentalSource, isSharePointSourceId, type ExperimentalProvider } from './experimental.js';
 import { mapLimit } from './util.js';
 import { getAllSources, getSource, getSourceIds } from './scraper/registry.js';
 import { estimateReadingTimeMinutes } from './scraper/feed.js';
@@ -117,6 +117,9 @@ export class FomoDirectService extends FomoStorageService {
     await this.ensureInit();
     const previous = await this.store.getUpdate(id);
     if (!previous) throw new Error(`Update not found: ${id}`);
+    if (isSharePointSourceId(previous.source) || previous.sharePointOrigin) {
+      throw new Error('SharePoint sources refresh through a metadata scan; authenticated page refresh is unavailable');
+    }
 
     let info: PageInfo;
     if (isYoutubeVideoUrl(previous.url)) {
@@ -147,6 +150,9 @@ export class FomoDirectService extends FomoStorageService {
     await this.ensureInit();
     const update = await this.store.getUpdate(id);
     if (!update) throw new Error(`Update not found: ${id}`);
+    if (isSharePointSourceId(update.source) || update.sharePointOrigin) {
+      throw new Error('SharePoint updates are not sent to Copilot');
+    }
     if (update.gist && !options.force) return { update, outcome: 'cached' };
 
     let pageText: string | undefined;
@@ -186,6 +192,9 @@ export class FomoDirectService extends FomoStorageService {
     if (req.updateId) {
       const update = await this.store.getUpdate(req.updateId);
       if (!update) throw new Error(`Update not found: ${req.updateId}`);
+      if (isSharePointSourceId(update.source) || update.sharePointOrigin) {
+        throw new Error('SharePoint updates are not sent to Copilot');
+      }
       url ||= update.url;
       title ||= update.title;
       if (update.gist) known.push(update.gist.summary, ...update.gist.points.map((p) => `- ${p}`));
@@ -214,7 +223,11 @@ export class FomoDirectService extends FomoStorageService {
     const settings = await this.store.getSettings();
     const deps = { youtube: this.youtube, extensions: this.extensions };
     let sources: Fetcher[] = getAllSources(settings, deps);
-    let providers = this.experimentalProviders;
+    const activeSharePointIds = new Set((settings.sharePointSources ?? [])
+      .filter((source) => source.lifecycle === 'active')
+      .map((source) => source.id));
+    let providers = this.experimentalProviders.filter((provider) =>
+      !isSharePointSourceId(provider.id) || activeSharePointIds.has(provider.id));
 
     if (req.sources && req.sources.length > 0) {
       // Explicit source list — ignore disabledSources
@@ -286,6 +299,7 @@ export class FomoDirectService extends FomoStorageService {
               content: item.content ?? '',
               ...(item.readingTimeMinutes ? { readingTimeMinutes: item.readingTimeMinutes } : {}),
               ...(item.durationSeconds ? { durationSeconds: item.durationSeconds } : {}),
+              ...(item.sharePointOrigin ? { sharePointOrigin: item.sharePointOrigin } : {}),
               ...(check.kind === 'new' && check.duplicateOf ? { duplicateOf: check.duplicateOf } : {}),
             };
             const key = item.key;
@@ -304,6 +318,11 @@ export class FomoDirectService extends FomoStorageService {
                 })
               : await this.store.insertUpdate(update);
             if (inserted) result.added++;
+            if (key && provider?.acknowledge) {
+              if (revoked()) throw new Error('Source authorization changed before delivery acknowledgment');
+              provider.assertActive?.();
+              await provider.acknowledge(key);
+            }
           }
         } catch (err) {
           // Turned off (or off and on again) meanwhile: the user stopped it, which is not a failure.
@@ -354,7 +373,12 @@ export class FomoDirectService extends FomoStorageService {
   /** Group unread, ungrouped updates into topics with highlights using `summarizer`. */
   async digest(summarizer: Summarizer, options: DigestOptions = {}): Promise<DigestResult> {
     await this.ensureInit();
-    return runDigest({ updates: this.store, topics: this.topicStore }, summarizer, options);
+    const updates = {
+      listUpdates: (query: Parameters<typeof this.store.listUpdates>[0]) =>
+        this.store.listUpdates({ ...query, excludeSharePoint: true }),
+      setTopicId: (id: string, topicId: string, summary?: string) => this.store.setTopicId(id, topicId, summary),
+    };
+    return runDigest({ updates, topics: this.topicStore }, summarizer, options);
   }
 }
 

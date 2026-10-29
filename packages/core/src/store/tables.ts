@@ -16,6 +16,8 @@ import type {
   StatsResponse,
   SourceFetchStatus,
   AppSettings,
+  SharePointOrigin,
+  SharePointSourceDescriptor,
   Todo,
   TodoKind,
   TodoStatus,
@@ -34,6 +36,7 @@ const SETTINGS_PK = 'app';
 const SETTINGS_RK = 'global';
 /** Settings-table partition with one row per source: its last fetch time and error. */
 const FETCH_STATUS_PK = 'fetch';
+const SHAREPOINT_SOURCES_PK = 'sourceInstances';
 
 type FetchStatusEntity = TableEntity<{ lastFetchAt: string; lastError: string }>;
 
@@ -54,9 +57,10 @@ type UpdateEntity = TableEntity<{
   gist?: string;
   /** Id of the update this one repeats; `''` or unset when it is not a duplicate. */
   duplicateOf?: string;
+  sharePointOrigin?: string;
 }>;
 
-const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'readingTimeMinutes', 'durationSeconds', 'topicId', 'summary', 'gist', 'duplicateOf'];
+const LIST_COLUMNS = ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'status', 'saved', 'readingTimeMinutes', 'durationSeconds', 'topicId', 'summary', 'gist', 'duplicateOf', 'sharePointOrigin'];
 
 /**
  * Table Storage caps a string property at 64 KiB of UTF-16 (32,768 code units) and rejects the
@@ -127,7 +131,48 @@ function entityToUpdate(e: UpdateEntity): Update {
     ...(e.summary ? { summary: e.summary } : {}),
     ...(gist ? { gist } : {}),
     ...(e.duplicateOf ? { duplicateOf: e.duplicateOf } : {}),
+    ...(parseSharePointOrigin(e.sharePointOrigin) ? { sharePointOrigin: parseSharePointOrigin(e.sharePointOrigin)! } : {}),
   };
+}
+
+function parseSharePointOrigin(value: string | undefined | null): SharePointOrigin | undefined {
+  if (!value || value.length > 4096) return undefined;
+  try {
+    const raw: unknown = JSON.parse(value);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const origin = raw as Record<string, unknown>;
+    if (origin.provider !== 'sharepoint' || origin.revisionBasis !== 'list-etag-v1'
+      || (origin.eventKind !== 'first-seen' && origin.eventKind !== 'updated')
+      || !['observedAt', 'createdAt', 'modifiedAt'].every((key) => typeof origin[key] === 'string' && Number.isFinite(Date.parse(origin[key] as string)))
+      || typeof origin.scopeLabel !== 'string' || origin.scopeLabel.length > 300
+      || typeof origin.eventFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(origin.eventFingerprint)) return undefined;
+    return origin as unknown as SharePointOrigin;
+  } catch { return undefined; }
+}
+
+function parseSharePointDescriptor(value: string | undefined | null): SharePointSourceDescriptor | undefined {
+  if (!value || value.length > 4096) return undefined;
+  try {
+    const raw: unknown = JSON.parse(value);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const source = raw as Record<string, unknown>;
+    if (typeof source.id !== 'string' || !/^sharepoint-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(source.id)
+      || source.provider !== 'sharepoint' || typeof source.displayName !== 'string' || !source.displayName.trim() || source.displayName.length > 100
+      || typeof source.siteHost !== 'string' || !/^[a-z0-9.-]+$/i.test(source.siteHost) || source.siteHost.length > 255
+      || typeof source.listName !== 'string' || !source.listName.trim() || source.listName.length > 200
+      || (source.ownerInstallationId !== undefined && (typeof source.ownerInstallationId !== 'string' || source.ownerInstallationId.length > 100))
+      || !['active', 'retired', 'purged'].includes(String(source.lifecycle)) || source.schemaVersion !== 1) return undefined;
+    return {
+      id: source.id,
+      provider: 'sharepoint',
+      displayName: source.displayName,
+      siteHost: source.siteHost,
+      listName: source.listName,
+      ...(typeof source.ownerInstallationId === 'string' ? { ownerInstallationId: source.ownerInstallationId } : {}),
+      lifecycle: source.lifecycle as SharePointSourceDescriptor['lifecycle'],
+      schemaVersion: 1,
+    };
+  } catch { return undefined; }
 }
 
 // ─── Backup / Restore ──────────────────────────────────────────────────────
@@ -149,13 +194,15 @@ export interface BackupEntity {
   summary?: string;
   gist?: string;
   duplicateOf?: string;
+  sharePointOrigin?: SharePointOrigin;
 }
 
 export interface BackupPayload {
-  version: 1;
+  version: 1 | 2;
   exportedAt: string;
   count: number;
   entities: BackupEntity[];
+  sharePointSources?: SharePointSourceDescriptor[];
 }
 
 /** What re-reading a post's page corrects (`UpdateStore.setPageInfo`). */
@@ -205,6 +252,10 @@ export class UpdateStore {
     update: Omit<Update, 'id' | 'dateAdded' | 'status' | 'saved'>,
     options: InsertOptions = {},
   ): Promise<boolean> {
+    if (/^sharepoint-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(update.source)) {
+      const source = await this.getSharePointSource(update.source);
+      if (source?.lifecycle !== 'active') throw new Error('SharePoint source is not active; its event was not stored');
+    }
     const rowKey = await hashUrl(options.key ?? update.url);
     const content = clampContent(update.content ?? '');
 
@@ -222,6 +273,7 @@ export class UpdateStore {
         ...(update.readingTimeMinutes ? { readingTimeMinutes: update.readingTimeMinutes } : {}),
         ...(update.durationSeconds ? { durationSeconds: update.durationSeconds } : {}),
         ...(update.duplicateOf ? { duplicateOf: update.duplicateOf } : {}),
+        ...(update.sharePointOrigin ? { sharePointOrigin: JSON.stringify(update.sharePointOrigin) } : {}),
       });
       return true;
     } catch (err: unknown) {
@@ -383,6 +435,10 @@ export class UpdateStore {
 
   /** Delete every update of `source`, in batches of 100 (one partition per transaction). Returns how many. */
   async deleteSourceUpdates(source: string): Promise<number> {
+    const descriptor = await this.getSharePointSource(source);
+    if (descriptor && descriptor.lifecycle !== 'purged') {
+      await this.saveSharePointSource({ ...descriptor, lifecycle: 'purged' });
+    }
     const keys: string[] = [];
     const iter = this.client.listEntities<UpdateEntity>({
       queryOptions: { filter: odata`PartitionKey eq ${source}`, select: ['RowKey'] },
@@ -419,11 +475,13 @@ export class UpdateStore {
 
   /** Every update with just what duplicate detection needs. */
   async listDuplicateRows(): Promise<DuplicateRow[]> {
+    const isHiddenSharePointSource = this.sharePointVisibilityChecker();
     const iter = this.client.listEntities<UpdateEntity>({
       queryOptions: { select: ['PartitionKey', 'RowKey', 'title', 'url', 'datePublished', 'dateAdded', 'duplicateOf'] },
     });
     const rows: DuplicateRow[] = [];
     for await (const e of iter) {
+      if (await isHiddenSharePointSource(e.partitionKey)) continue;
       rows.push({
         id: `${e.partitionKey}__${e.rowKey}`,
         url: e.url ?? '',
@@ -438,17 +496,19 @@ export class UpdateStore {
 
   /** Every update flagged as a repeat of another, without content. */
   async listDuplicateCopies(): Promise<Update[]> {
+    const isHiddenSharePointSource = this.sharePointVisibilityChecker();
     // The filter only keeps the response small; the check below guards against a store matching rows that lack the property.
     const iter = this.client.listEntities<UpdateEntity>({ queryOptions: { filter: "duplicateOf gt ''", select: LIST_COLUMNS } });
     const copies: Update[] = [];
     for await (const entity of iter) {
-      if (entity.duplicateOf) copies.push({ ...entityToUpdate(entity as UpdateEntity), content: '' });
+      if (entity.duplicateOf && !await isHiddenSharePointSource(entity.partitionKey)) copies.push({ ...entityToUpdate(entity as UpdateEntity), content: '' });
     }
     return copies;
   }
 
   async getUpdate(id: string): Promise<Update | null> {
     const { source, rowKey } = parseId(id);
+    if (await this.sharePointVisibilityChecker()(source)) return null;
     try {
       const entity = await this.client.getEntity<UpdateEntity>(source, rowKey);
       return entityToUpdate(entity as UpdateEntity);
@@ -481,8 +541,11 @@ export class UpdateStore {
     const iter = this.client.listEntities<UpdateEntity>({ queryOptions: { filter, select } });
 
     const updates: Update[] = [];
+    const isHiddenSharePointSource = this.sharePointVisibilityChecker();
     for await (const entity of iter) {
+      if (await isHiddenSharePointSource(entity.partitionKey)) continue;
       const update = entityToUpdate(entity as UpdateEntity);
+      if (options.excludeSharePoint && (update.sharePointOrigin || update.source.startsWith('sharepoint-'))) continue;
       if (searching && !matchesSearch(update, options.search)) continue;
       updates.push(withContent ? update : { ...update, content: '' });
     }
@@ -510,11 +573,13 @@ export class UpdateStore {
     const bySource: Record<string, number> = {};
     const savedBySource: Record<string, number> = {};
     const fetchStatus = this.getFetchStatus();
+    const isHiddenSharePointSource = this.sharePointVisibilityChecker();
     const lastAdded: Record<string, string> = {};
     let saved = 0;
     let total = 0;
 
     for await (const e of iter) {
+      if (await isHiddenSharePointSource(e.partitionKey)) continue;
       const status = e.status === 'saved' ? 'read' : e.status;
       byStatus[status] = (byStatus[status] ?? 0) + 1;
       bySource[e.partitionKey] = (bySource[e.partitionKey] ?? 0) + 1;
@@ -566,10 +631,12 @@ export class UpdateStore {
 
   /** Export every entity from the table as a serializable backup payload. */
   async backup(): Promise<BackupPayload> {
+    const isHiddenSharePointSource = this.sharePointVisibilityChecker();
     const iter = this.client.listEntities<UpdateEntity>();
     const entities: BackupEntity[] = [];
 
     for await (const e of iter) {
+      if (await isHiddenSharePointSource(e.partitionKey)) continue;
       entities.push({
         partitionKey: e.partitionKey,
         rowKey: e.rowKey,
@@ -586,14 +653,16 @@ export class UpdateStore {
         ...(e.summary ? { summary: e.summary } : {}),
         ...(e.gist ? { gist: e.gist } : {}),
         ...(e.duplicateOf ? { duplicateOf: e.duplicateOf } : {}),
+        ...(parseSharePointOrigin(e.sharePointOrigin) ? { sharePointOrigin: parseSharePointOrigin(e.sharePointOrigin)! } : {}),
       });
     }
 
     return {
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       count: entities.length,
       entities,
+      sharePointSources: await this.listSharePointSources(),
     };
   }
 
@@ -605,7 +674,13 @@ export class UpdateStore {
   async restore(payload: BackupPayload): Promise<number> {
     let restored = 0;
 
+    const purged = new Set((await this.listSharePointSources())
+      .filter((source) => source.lifecycle === 'purged')
+      .map((source) => source.id));
     for (const e of payload.entities) {
+      if (purged.has(e.partitionKey)) continue;
+      const current = await this.getUpdate(`${e.partitionKey}__${e.rowKey}`);
+      const origin = e.sharePointOrigin ?? current?.sharePointOrigin;
       await this.client.upsertEntity<UpdateEntity>(
         {
           partitionKey: e.partitionKey,
@@ -623,10 +698,22 @@ export class UpdateStore {
           ...(e.summary ? { summary: e.summary } : {}),
           ...(e.gist ? { gist: e.gist } : {}),
           ...(e.duplicateOf ? { duplicateOf: e.duplicateOf } : {}),
+          ...(origin ? { sharePointOrigin: JSON.stringify(origin) } : {}),
         },
-        'Replace',
+        e.partitionKey.startsWith('sharepoint-') ? 'Merge' : 'Replace',
       );
       restored++;
+    }
+
+    for (const descriptor of payload.sharePointSources ?? []) {
+      const current = await this.getSharePointSource(descriptor.id);
+      // Restore only fills in missing descriptors; it never moves an existing source's lifecycle.
+      if (current) continue;
+      const restored = {
+        ...descriptor,
+        lifecycle: 'retired' as const,
+      };
+      await this.saveSharePointSource(restored);
     }
 
     return restored;
@@ -665,7 +752,7 @@ export class UpdateStore {
       );
     }
 
-    return settings;
+    return { ...settings, sharePointSources: await this.listSharePointSources() };
   }
 
   private async hasStoredUpdates(): Promise<boolean> {
@@ -678,17 +765,101 @@ export class UpdateStore {
   async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
     const current = await this.getSettings();
     const merged: AppSettings = { ...current, ...patch };
+    for (const descriptor of patch.sharePointSources ?? []) {
+      const prior = current.sharePointSources.find((source) => source.id === descriptor.id);
+      if (!prior || JSON.stringify(prior) !== JSON.stringify(descriptor)) await this.saveSharePointSource(descriptor);
+    }
+    const { sharePointSources: _sharePointSources, ...globalSettings } = merged;
 
     await this.settingsClient.upsertEntity<TableEntity<{ data: string }>>(
       {
         partitionKey: SETTINGS_PK,
         rowKey: SETTINGS_RK,
-        data: JSON.stringify(merged),
+        data: JSON.stringify(globalSettings),
       },
       'Replace',
     );
 
-    return merged;
+    return { ...merged, sharePointSources: await this.listSharePointSources() };
+  }
+
+  async listSharePointSources(): Promise<SharePointSourceDescriptor[]> {
+    const descriptors: SharePointSourceDescriptor[] = [];
+    try {
+      const iter = this.settingsClient.listEntities<TableEntity<{ data: string }>>({
+        queryOptions: { filter: odata`PartitionKey eq ${SHAREPOINT_SOURCES_PK}` },
+      });
+      for await (const entity of iter) {
+        const descriptor = parseSharePointDescriptor(entity.data);
+        if (descriptor && descriptor.id === entity.rowKey) descriptors.push(descriptor);
+      }
+    } catch (error) {
+      if (!isTableError(error, 404)) throw error;
+    }
+    return descriptors;
+  }
+
+  async getSharePointSource(id: string): Promise<SharePointSourceDescriptor | undefined> {
+    try {
+      const entity = await this.settingsClient.getEntity<TableEntity<{ data: string }>>(SHAREPOINT_SOURCES_PK, id);
+      return parseSharePointDescriptor(entity.data);
+    } catch (error) {
+      if (isTableError(error, 404)) return undefined;
+      throw error;
+    }
+  }
+
+  async saveSharePointSource(descriptor: SharePointSourceDescriptor): Promise<void> {
+    const valid = parseSharePointDescriptor(JSON.stringify(descriptor));
+    if (!valid || valid.id !== descriptor.id) throw new Error('Invalid SharePoint source descriptor');
+    const entity = { partitionKey: SHAREPOINT_SOURCES_PK, rowKey: descriptor.id, data: JSON.stringify(descriptor) };
+    // Checks and the conditional write use one read, so a concurrent purge cannot be overwritten.
+    let existing: TableEntity<{ data: string }> & { etag?: string } | undefined;
+    try {
+      existing = await this.settingsClient.getEntity<TableEntity<{ data: string }>>(SHAREPOINT_SOURCES_PK, descriptor.id);
+    } catch (error) {
+      if (!isTableError(error, 404)) throw error;
+    }
+    const current = existing ? parseSharePointDescriptor(existing.data) : undefined;
+    if (existing && !current) throw new Error('Stored SharePoint source descriptor is invalid');
+    if (current?.lifecycle === 'purged' && descriptor.lifecycle !== 'purged') {
+      throw new Error('A purged SharePoint source cannot be reactivated');
+    }
+    if (current?.lifecycle === 'retired' && descriptor.lifecycle === 'active') {
+      throw new Error('A retired SharePoint source cannot be reactivated');
+    }
+    if (current?.ownerInstallationId && descriptor.ownerInstallationId !== current.ownerInstallationId) {
+      throw new Error('SharePoint source ownership cannot be transferred by settings update');
+    }
+    if (!existing) {
+      try { await this.settingsClient.createEntity(entity); }
+      catch (error) {
+        if (!isTableError(error, 409)) throw error;
+        throw new Error('SharePoint source was created concurrently; reload settings');
+      }
+      return;
+    }
+    try {
+      await this.settingsClient.updateEntity({ ...entity }, 'Replace', { etag: existing.etag });
+    } catch (error) {
+      if (!isTableError(error, 412)) throw error;
+      throw new Error('SharePoint source was changed concurrently; reload settings');
+    }
+  }
+
+  private sharePointVisibilityChecker(): (id: string) => Promise<boolean> {
+    const hidden = new Map<string, Promise<boolean>>();
+    return (id) => {
+      if (!/^sharepoint-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+        return Promise.resolve(false);
+      }
+      let check = hidden.get(id);
+      if (!check) {
+        check = this.getSharePointSource(id).then((source) => !source || source.lifecycle === 'purged');
+        hidden.set(id, check);
+      }
+      return check;
+    };
   }
 }
 

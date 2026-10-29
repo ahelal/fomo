@@ -1,5 +1,5 @@
 import type { AppSettings, SourceId, SourceInfo, SourceSpec, UserSourceSpec } from '../types.js';
-import { EXPERIMENTAL_SOURCE_INFOS, experimentalSourceInfo, isExperimentalSource } from '../experimental.js';
+import { EXPERIMENTAL_SOURCE_INFOS, experimentalSourceInfo, experimentalSourceInfos, isExperimentalSource } from '../experimental.js';
 import { normalizeChangelogPath } from './github.js';
 import { parseYoutubeUrl, youtubeName, youtubeUrl } from './youtube.js';
 
@@ -52,7 +52,7 @@ const BUILTIN_IDS = new Set(BUILTIN_SOURCES.map((s) => s.id));
 const LEGACY_BUILTIN_IDS = new Set(LEGACY_BUILTIN_SOURCES.map((s) => s.id));
 const ALL_BUILTIN_IDS = new Set([...BUILTIN_IDS, ...LEGACY_BUILTIN_IDS]);
 
-type SourceSettings = Pick<AppSettings, 'userSources' | 'removedSources' | 'installedLegacySources'> & Partial<Pick<AppSettings, 'sourceNames' | 'extensionNames'>>;
+type SourceSettings = Pick<AppSettings, 'userSources' | 'removedSources' | 'installedLegacySources'> & Partial<Pick<AppSettings, 'sourceNames' | 'extensionNames' | 'sharePointSources'>>;
 
 export const MAX_SOURCE_LABEL_LENGTH = 10;
 
@@ -136,7 +136,7 @@ export function newUserSource(input: NewSourceInput, settings: Partial<SourceSet
   const repo = urls.length === 1 ? urls[0].match(GITHUB_REPO_URL)?.[1] : undefined;
   const defaultName = target ? youtubeName(target) : repo ? `${repo} releases` : new URL(urls[0]).hostname.replace(/^www\./, '');
   const displayName = input.name?.trim() || defaultName;
-  const taken = new Set([...ALL_BUILTIN_IDS, ...EXPERIMENTAL_SOURCE_INFOS.map((s) => s.id), ...(settings.userSources ?? []).map((s) => s.id)]);
+  const taken = new Set([...ALL_BUILTIN_IDS, ...EXPERIMENTAL_SOURCE_INFOS.map((s) => s.id), ...(settings.sharePointSources ?? []).map((s) => s.id), ...(settings.userSources ?? []).map((s) => s.id)]);
   const id = uniqueId(slugify(displayName) || 'source', taken);
 
   if (repo) {
@@ -200,14 +200,14 @@ export interface SourceDraft {
 }
 
 /** The name a built-in or experimental source ships with, and the extension it runs. */
-function sourceDefaults(id: SourceId): { name: string; extensionId?: string; extensionName?: string } {
+function sourceDefaults(id: SourceId, settings: Partial<SourceSettings> = {}): { name: string; extensionId?: string; extensionName?: string } {
   const spec = [...BUILTIN_SOURCES, ...LEGACY_BUILTIN_SOURCES].find((s) => s.id === id);
   if (spec?.kind === 'custom') {
     const extensionId = 'extension' in spec ? spec.extension : spec.module;
     return { name: spec.displayName, extensionId, extensionName: ('extensionName' in spec ? spec.extensionName : undefined) ?? extensionId };
   }
   if (spec) return { name: spec.displayName };
-  const info = experimentalSourceInfo(id);
+  const info = experimentalSourceInfo(id, settings.sharePointSources);
   if (info?.extensionId) return { name: info.displayName, extensionId: info.extensionId, extensionName: info.extensionName ?? info.extensionId };
   return { name: info?.displayName ?? id };
 }
@@ -218,7 +218,7 @@ function sourceDefaults(id: SourceId): { name: string; extensionId?: string; ext
  */
 export function sourceDraft(settings: Pick<AppSettings, 'disabledSources' | 'sourceLabels' | 'sourceColors'> & Partial<SourceSettings>, id: SourceId): SourceDraft {
   const own = userSource(settings, id);
-  const { name, extensionId, extensionName } = sourceDefaults(id);
+  const { name, extensionId, extensionName } = sourceDefaults(id, settings);
   return {
     enabled: !settings.disabledSources.includes(id),
     label: settings.sourceLabels[id] ?? '',
@@ -252,7 +252,7 @@ export function sourceDraftPatch(settings: AppSettings, id: SourceId, draft: Sou
   }
   const patch: Partial<AppSettings> = {};
   const own = userSource(settings, id);
-  const defaults = sourceDefaults(id);
+  const defaults = sourceDefaults(id, settings);
   if (own) {
     const edited = editUserSource(own, {
       url: draft.url,

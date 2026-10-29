@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { colorName, DEFAULT_COLOR, isGithubRepoUrl, isYoutubeChannelUrl, timeAgo, type SourceDraft, type SourceFetchResult, type SourceInfo, type StatsResponse } from '@fomo/core';
+import { colorName, DEFAULT_COLOR, isGithubRepoUrl, isSharePointSourceId, isYoutubeChannelUrl, timeAgo, type SourceDraft, type SourceFetchResult, type SourceInfo, type StatsResponse } from '@fomo/core';
 import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
 
 export type DetailsField = 'enabled' | 'label' | 'color' | 'name' | 'extensionName' | 'url' | 'include' | 'shorts' | 'changelogPath';
@@ -80,6 +80,7 @@ export function SourceDetailsPane({ source, state, own, consent, isolation, chan
   const { draft, focus, editing, confirm, error } = state;
   const removed = !!source.removed;
   const experimental = !!source.experimental;
+  const sharePoint = isSharePointSourceId(source.id);
   const fields = removed ? [] : detailsFields(own, draft);
   const valueW = Math.max(10, columns - 4 - 2 - LABEL_W);
   const history = stats?.sourceStatus?.[source.id];
@@ -101,7 +102,7 @@ export function SourceDetailsPane({ source, state, own, consent, isolation, chan
   };
 
   const saved = stats?.savedBySource?.[source.id] ?? 0;
-  const deleteItems = items > 0 ? `   d delete its ${items} items` : '';
+  const deleteItems = sharePoint ? `   d remove source and its ${items} items` : items > 0 ? `   d delete its ${items} items` : '';
   const footer = editing !== undefined
     ? `type ${field(fields[focus])}   ↵ done   Esc cancel`
     : confirm === 'remove' && items > 0
@@ -109,7 +110,7 @@ export function SourceDetailsPane({ source, state, own, consent, isolation, chan
     : confirm === 'remove'
     ? `press x again to remove${source.builtin ? ' (restore it later from the end of the source list)' : ' for good'} · any other key cancels`
     : confirm === 'items'
-    ? `press d again to delete its ${items} items${saved ? ` (${saved} pending)` : ''}${removed ? ' and remove it for good' : ' · the next fetch adds them back as new'} · any other key cancels`
+    ? `press d again to delete its ${items} items${saved ? ` (${saved} pending)` : ''}${removed || sharePoint ? ' and remove it for good' : ' · the next fetch adds them back as new'} · any other key cancels`
     : confirm === 'consent'
     ? `press s again to ${consent ?? 'turn it on'} · any other key cancels`
     : confirm === 'discard'
@@ -152,7 +153,9 @@ export function SourceDetailsPane({ source, state, own, consent, isolation, chan
 
       {removed && (
         <Text color="#8b949e" wrap="truncate">
-          {`Removed — no longer fetched. Its ${items} items still show in your lists; delete them to remove it for good${source.builtin ? ', or r to restore it' : ''}.`}
+          {sharePoint && items === 0
+            ? 'Removed — no longer fetched. Press d twice to finish removing this source.'
+            : `Removed — no longer fetched. Its ${items} items still show in your lists; delete them to remove it for good${source.builtin ? ', or r to restore it' : ''}.`}
         </Text>
       )}
       {!own && !removed && (

@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TopicSort, UpdateSort } from '@fomo/core';
-import { DEFAULT_SETTINGS, MAX_SOURCE_LABEL_LENGTH, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatDate, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, experimentalSourceInfos, isExperimentalSource, type SourceDraft } from '@fomo/core';
+import { DEFAULT_SETTINGS, MAX_SOURCE_LABEL_LENGTH, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatDate, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, experimentalSourceInfos, isExperimentalSource, isSharePointSourceId, type SourceDraft } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult, DigestInspection } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, readConfigFile, tildify, type LocalConfig } from '../config.js';
@@ -14,7 +14,7 @@ import { openTodoAttachment } from '../attachments.js';
 import { EXPERIMENTAL_SETUPS, type ExperimentalSetups } from '../experimental/index.js';
 import { AuditView } from './components/AuditView.js';
 import { GroupingInspector, groupingLines, inspectionText } from './components/GroupingInspector.js';
-import { automaticAccount, buildSettingsRows, editStartValue, experimentalOn, fetchCovers, findRow, firstFocusable, isPickerField, isSecretField, isToggleField, maskSetting, moveFocus, parseConfigEdit, sectionHeaderIndex, sectionOf, settingsRowText, type AddSourceDraft, type FetchScope, type SettingsRow } from './settings.js';
+import { SHAREPOINT_SETUP, automaticAccount, buildSettingsRows, editStartValue, experimentalOn, fetchCovers, findRow, firstFocusable, isPickerField, isSecretField, isToggleField, maskSetting, moveFocus, parseConfigEdit, parseSharePointSite, sectionHeaderIndex, sectionOf, settingsRowText, yesNo, type AddSourceDraft, type FetchScope, type SettingsRow } from './settings.js';
 import { copyToClipboard } from './clipboard.js';
 import { AccountPicker, accountOptions } from './components/AccountPicker.js';
 import { ProfilePicker } from './components/ProfilePicker.js';
@@ -165,11 +165,15 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   const sources = useMemo<SourceInfo[]>(() => sourceInfos(appSettings), [appSettings]);
   const experimentalInfos = useMemo<SourceInfo[]>(
     () => experimentalSourceInfos(appSettings),
-    [appSettings.sourceNames, appSettings.extensionNames],
+    [appSettings.sourceNames, appSettings.extensionNames, appSettings.sharePointSources],
   );
   const sourceLabels = useMemo(
-    () => ({ ...appSettings.sourceNames, ...appSettings.sourceLabels }),
-    [appSettings.sourceNames, appSettings.sourceLabels],
+    () => ({
+      ...Object.fromEntries(appSettings.sharePointSources.map((source) => [source.id, source.displayName])),
+      ...appSettings.sourceNames,
+      ...appSettings.sourceLabels,
+    }),
+    [appSettings.sourceNames, appSettings.sourceLabels, appSettings.sharePointSources],
   );
   const removedCount = appSettings.removedSources?.length ?? 0;
   /** Removed sources whose updates are still stored. */
@@ -509,8 +513,8 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   }, []);
 
   const sourceName = useCallback(
-    (id: string) => appSettings.sourceLabels[id] || appSettings.sourceNames[id] || sources.find((s) => s.id === id)?.displayName || experimentalSourceInfo(id)?.displayName || id,
-    [appSettings.sourceLabels, appSettings.sourceNames, sources],
+    (id: string) => appSettings.sourceLabels[id] || appSettings.sourceNames[id] || sources.find((s) => s.id === id)?.displayName || experimentalSourceInfo(id, appSettings.sharePointSources)?.displayName || id,
+    [appSettings.sourceLabels, appSettings.sourceNames, appSettings.sharePointSources, sources],
   );
 
   // One fetch / regroup / restore at a time; a second digest run would plan the same items twice.
@@ -552,8 +556,10 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   }, [audit]);
 
   /** Fetch every enabled source, or only `only` (even if disabled), then group with Copilot. */
-  const doFetch = useCallback(async (only?: string[], auto = false) => {
-    const what = only ? only.map(sourceName).join(', ') : 'latest updates';
+  const doFetch = useCallback(async (only?: string[], auto = false, names?: Record<string, string>) => {
+    // A source added a moment ago is not in `sourceName`'s settings yet.
+    const nameOf = (id: string) => names?.[id] ?? sourceName(id);
+    const what = only ? only.map(nameOf).join(', ') : 'latest updates';
     const action = auto ? 'auto-fetch' : 'fetch';
     if (!claimBusy(`${auto ? 'Auto-fetching' : 'Fetching'} ${what}…`)) {
       return;
@@ -571,7 +577,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         setFetching(undefined);
       }
       const results = Object.entries(resp.results);
-      const stopped = results.filter(([, r]) => r.stopped && !r.error).map(([id]) => sourceName(id));
+      const stopped = results.filter(([, r]) => r.stopped && !r.error).map(([id]) => nameOf(id));
       if (stopped.length && stopped.length === results.length) {
         // Every source it ran was turned off meanwhile, which already said so.
         audit.log(action, `${what}: stopped (turned off during the fetch)${resp.added ? `, ${resp.added} added before it stopped` : ''}`);
@@ -582,11 +588,11 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       // A stopped fetch did not run to its end, so the source keeps its last result.
       setLastFetch((prev) => ({ ...prev, ...Object.fromEntries(results.filter(([, r]) => !r.stopped)) }));
       const failedResults = results.filter(([, r]) => r.error);
-      const failed = failedResults.map(([id]) => sourceName(id));
+      const failed = failedResults.map(([id]) => nameOf(id));
       const dupCount = Object.values(resp.results).reduce((n, r) => n + (r.duplicates ?? 0), 0);
       const dupNote = dupCount ? ` · ${dupCount} duplicate${dupCount !== 1 ? 's' : ''} skipped` : '';
       audit.log(action, `${what}: added ${resp.added} from ${results.length} source(s)${dupNote}${failed.length ? `, ${failed.length} failed` : ''}${stopped.length ? `, ${stopped.join(', ')} stopped (turned off)` : ''}`);
-      for (const [id, r] of failedResults) audit.error(action, `${sourceName(id)}: ${r.error}`);
+      for (const [id, r] of failedResults) audit.error(action, `${nameOf(id)}: ${r.error}`);
       const failedNote = failed.length ? ` · ⚠ ${failed.join(', ')} failed` : '';
       const stoppedNote = stopped.length ? ` · ${stopped.join(', ')} stopped (turned off)` : '';
       const added = `✓ ${auto ? 'Auto-fetch: added' : 'Added'} ${resp.added} update${resp.added !== 1 ? 's' : ''}${dupNote}${failedNote}${stoppedNote}`;
@@ -1172,10 +1178,68 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       const value = text.trim();
       const fail = (error: string) => { audit.error('source', `add: ${error}`); showMessage(`⚠ ${error}`, 5000); };
       if (draft.step === 'url') {
+        const site = parseSharePointSite(value);
+        if (site) {
+          if ('error' in site) { fail(site.error); return; }
+          setAddDraft({ step: 'sharepoint-name', url: site.url, name: site.name });
+          setEditBuffer(site.name);
+          return;
+        }
         const guess = newUserSource({ url: value }, appSettings);
         if ('error' in guess) { fail(guess.error); return; }
         setAddDraft({ step: 'name', url: value, name: '' });
         setEditBuffer(guess.spec.displayName);
+        return;
+      }
+      if (draft.step === 'sharepoint-name') {
+        setAddDraft({ ...draft, step: 'sharepoint-consent', name: value || draft.name });
+        setEditBuffer('');
+        return;
+      }
+      if (draft.step === 'sharepoint-consent') {
+        const allowed = yesNo(value);
+        if (allowed === false) { stopEditing(); showMessage('SharePoint source not added', 3000); return; }
+        if (!allowed) { fail('Type y to allow the read-only WorkIQ access, or Esc to cancel'); return; }
+        const create = experimental.addSharePointSource;
+        if (!create) { fail('SharePoint setup is unavailable in this session'); return; }
+        if ((config.sharePointSources ?? []).length >= 50) { fail('This profile already has the maximum of 50 SharePoint sources'); return; }
+        stopEditing();
+        const controller = new AbortController();
+        signInAbort.current = controller;
+        setSigningIn(SHAREPOINT_SETUP);
+        showMessage('Resolving the site and Site Pages list through WorkIQ…', 60_000);
+        void (async () => {
+          try {
+            const result = await create(draft.url, draft.name, controller.signal);
+            if (controller.signal.aborted) return;
+            if ((config.sharePointSources ?? []).some((source) =>
+              source.accountId === result.config.accountId && source.siteId === result.config.siteId && source.listId === result.config.listId)) {
+              throw new Error('This SharePoint Site Pages list is already configured in this profile');
+            }
+            const descriptors = [...appSettings.sharePointSources, result.descriptor];
+            const configs = [...(config.sharePointSources ?? []), result.config];
+            const settings = await service.updateSettings({
+              sharePointSources: descriptors,
+              sourceNames: { ...appSettings.sourceNames, [result.config.id]: result.config.displayName },
+            });
+            if (controller.signal.aborted) return;
+            const err = onConfigChange({
+              sharePointSources: configs,
+              experimentalSources: [...new Set([...(config.experimentalSources ?? []), result.config.id])],
+            });
+            if (err) throw new Error(err);
+            setAppSettings(settings);
+            audit.log('source', `added SharePoint source ${result.config.id} for ${result.config.listName}`);
+            showMessage(`✓ Added ${result.config.displayName} · importing the last 20 days`, 6000);
+            await doFetch([result.config.id], false, { [result.config.id]: result.config.displayName });
+          } catch (error) {
+            audit.error('source', `add SharePoint source: ${errorText(error)}`);
+            showMessage(`⚠ Could not add SharePoint source: ${errorText(error)}`, 8000);
+          } finally {
+            if (signInAbort.current === controller) signInAbort.current = undefined;
+            setSigningIn(undefined);
+          }
+        })();
         return;
       }
       if (draft.step === 'name') {
@@ -1275,7 +1339,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       return;
     }
     save();
-  }, [service, appSettings, addDraft, doFetch, onConfigChange, showMessage, audit, profile]);
+  }, [service, appSettings, addDraft, config, doFetch, experimental, onConfigChange, showMessage, audit, profile]);
 
   /** Save settings shared with the web app; `what` describes the change for the audit trail. */
   const updateRemoteSettings = useCallback((patch: Partial<AppSettings>, action: string, what: string) => {
@@ -1292,19 +1356,35 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   /** Delete every stored update of a source; one that is gone for good also loses its label and color. */
   const deleteSourceItems = useCallback(async (id: string) => {
     const name = sourceName(id);
-    const active = sources.some((s) => s.id === id) || isExperimentalSource(id);
+    const sharePoint = isSharePointSourceId(id);
+    const active = !sharePoint && (sources.some((s) => s.id === id) || isExperimentalSource(id));
+    if (sharePoint) {
+      const error = onConfigChange({
+        sharePointSources: (config.sharePointSources ?? []).filter((source) => source.id !== id),
+        experimentalSources: (config.experimentalSources ?? []).filter((source) => source !== id),
+      });
+      if (error) {
+        audit.error('source', `${id}: could not disable SharePoint source before purge: ${error}`);
+        showMessage(`⚠ Could not disable ${name}: ${error}`, 6000);
+        return;
+      }
+    }
     showMessage(`Deleting the items of ${name}…`, 60_000);
     try {
       const n = await service.deleteSourceUpdates(id);
+      if (sharePoint) {
+        await experimental.purgeSharePointSource?.(id);
+        setAppSettings(await service.getSettings());
+      }
       audit.log('source', `${id}: deleted ${n} items`);
-      showMessage(`✓ Deleted ${n} item${n === 1 ? '' : 's'} of ${name}${active ? ' · f fetches them again' : ''}`, 5000);
-      if (!active && !appSettings.removedSources.includes(id)) updateRemoteSettings(forgetSourcePatch(appSettings, id), 'source', `forgot ${id}`);
+      showMessage(`✓ Deleted ${n} item${n === 1 ? '' : 's'} of ${name}${sharePoint ? ' · source purged and turned off' : active ? ' · f fetches them again' : ''}`, 5000);
+      if (!sharePoint && !active && !appSettings.removedSources.includes(id)) updateRemoteSettings(forgetSourcePatch(appSettings, id), 'source', `forgot ${id}`);
     } catch (err) {
       audit.error('source', `${id}: delete items: ${errorText(err)}`);
       showMessage(`⚠ Could not delete the items of ${name}: ${errorText(err)}`, 6000);
     }
     await refresh();
-  }, [sourceName, sources, showMessage, service, audit, appSettings, updateRemoteSettings, refresh]);
+  }, [sourceName, sources, showMessage, service, audit, appSettings, updateRemoteSettings, refresh, config.sharePointSources, config.experimentalSources, onConfigChange, experimental]);
 
   /** Remove a source, keeping its stored updates (it then shows greyed out) or deleting them too. */
   const removeSource = useCallback((id: string, deleteItems: boolean) => {
@@ -1647,7 +1727,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         setSettingsFocusIndex((i) => moveFocus(settingsRows, i, -1));
         return;
       }
-      if ((input === 'd' || (removed && input === 'x')) && items > 0) {
+      if ((input === 'd' || (removed && input === 'x')) && (items > 0 || isSharePointSourceId(d.id))) {
         if (d.confirm !== 'items') { setSourceDetails({ ...d, confirm: 'items' }); return; }
         if (removed) setSourceDetails(undefined);
         else setSourceDetails({ ...d, confirm: undefined });
@@ -1932,7 +2012,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
           return;
         }
         if (input === 'x') {
-          if (!stats?.bySource[id]) { setConfirmKey(undefined); showMessage(`${sourceName(id)} has no stored items`, 3000); return; }
+          if (!stats?.bySource[id] && !isSharePointSourceId(id)) { setConfirmKey(undefined); showMessage(`${sourceName(id)} has no stored items`, 3000); return; }
           if (confirmKey !== `${row.key}:x`) { setConfirmKey(`${row.key}:x`); return; }
           setConfirmKey(undefined);
           void deleteSourceItems(id);
@@ -1954,6 +2034,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
 
       if (row.kind === 'add-source') {
         if (key.return || input === 'e') {
+          if (signingIn === SHAREPOINT_SETUP) { showMessage('Still setting up the previous SharePoint source', 3000); return; }
           setAddDraft({ step: 'url', url: '', name: '' });
           setEditBuffer('');
           setEditingKey(row.key);

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const openMock = vi.hoisted(() => vi.fn(async (_url: string) => {}));
 vi.mock('open', () => ({ default: openMock }));
-import { COLOR_PALETTE, DEFAULT_COLOR, DEFAULT_SETTINGS, moveInGrid, paletteIndex, retiredSources, sourceInfos } from '@fomo/core';
+import { COLOR_PALETTE, DEFAULT_COLOR, DEFAULT_SETTINGS, experimentalSourceInfos, moveInGrid, paletteIndex, retiredSources, sourceInfos, type AppSettings } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import type { DigestInspection, DigestResult } from '@fomo/core/digest';
 import { App, REGROUP_CONFIRM_MS, type DigestRunOptions } from '../src/ui/App.js';
@@ -539,7 +539,7 @@ describe('Config → sources', () => {
     const { press, frame } = await renderApp();
     await focusRow(press, 'add-source');
     await press('\r');
-    expect(frame()).toContain('feed URL(s) or github.com/owner/repo');
+    expect(frame()).toContain('feed URL(s), github.com/owner/repo');
     await press('https://www.example.com/feed.xml');
     await press('\r');
     expect(frame()).toContain('Add source · name');
@@ -571,6 +571,199 @@ describe('Config → sources', () => {
     await press('\r');
     expect(updateSettings).toHaveBeenCalledWith({
       userSources: [{ kind: 'github-releases', id: 'octo-app-releases', displayName: 'octo/app releases', repo: 'octo/app', changelogPath: 'CHANGELOG.md' }],
+    });
+  });
+
+  describe('adding a SharePoint site', () => {
+    const added = {
+      config: {
+        id: 'sharepoint-12345678-1234-4234-8234-123456789abc',
+        displayName: 'Product',
+        siteUrl: 'https://tenant.sharepoint.com/sites/Product',
+        siteId: 'tenant.sharepoint.com,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222',
+        listId: '33333333-3333-4333-8333-333333333333',
+        listName: 'Site Pages',
+        accountId: 'account',
+        scopeHash: 'a'.repeat(64),
+        ownerInstallationId: 'installation',
+        mode: 'list-snapshot-v1' as const,
+        approvalRevision: 1 as const,
+        enabled: true,
+      },
+      descriptor: {
+        id: 'sharepoint-12345678-1234-4234-8234-123456789abc',
+        provider: 'sharepoint' as const,
+        displayName: 'Product',
+        siteHost: 'tenant.sharepoint.com',
+        listName: 'Site Pages',
+        ownerInstallationId: 'installation',
+        lifecycle: 'active' as const,
+        schemaVersion: 1 as const,
+      },
+    };
+    const PAGE = 'https://tenant.sharepoint.com/sites/Product/SitePages/Home.aspx?csf=1&web=1';
+    type Create = (siteUrl: string, name: string, signal: AbortSignal) => Promise<typeof added>;
+
+    it.each(['d', 'x'])('finishes removing a retired SharePoint source with zero items using %s in details', async (key) => {
+      let settings: AppSettings = { ...DEFAULT_SETTINGS, sharePointSources: [{ ...added.descriptor, lifecycle: 'retired' }] };
+      const deleteSourceUpdates = vi.fn(async () => {
+        settings = { ...settings, sharePointSources: [{ ...added.descriptor, lifecycle: 'purged' }] };
+        return 0;
+      });
+      const purgeSharePointSource = vi.fn(async () => {});
+      const app = await renderApp(undefined, {
+        service: { ...service, getSettings: async () => settings, deleteSourceUpdates } as unknown as FomoDirectService,
+        experimental: { purgeSharePointSource },
+        config: { sharePointSources: [added.config], experimentalSources: [added.config.id] },
+        liveConfig: true,
+      });
+      await app.press('c');
+      const rows = buildSettingsRows(SOURCES, undefined, undefined, 0, [], undefined, experimentalSourceInfos(settings));
+      for (let i = firstFocusable(rows); i < findRow(rows, `x-${added.config.id}`); i = moveFocus(rows, i, 1)) await app.press('j');
+      await app.press('\r');
+      expect(app.frame()).toContain('Press d twice to finish removing this source');
+      await app.press(key);
+      expect(app.frame()).toContain('press d again to delete its 0 items and remove it for good');
+      expect(deleteSourceUpdates).not.toHaveBeenCalled();
+      await app.press(key);
+      await vi.waitFor(() => expect(purgeSharePointSource).toHaveBeenCalledWith(added.config.id));
+      expect(deleteSourceUpdates).toHaveBeenCalledWith(added.config.id);
+      expect(app.onConfigChange).toHaveBeenCalledWith({ sharePointSources: [], experimentalSources: [] });
+      await vi.waitFor(() => expect(app.frame()).not.toContain(added.config.id));
+      expect(experimentalSourceInfos(settings).some((source) => source.id === added.config.id)).toBe(false);
+    });
+
+    async function openConsent(create: Create = async () => added) {
+      const addSharePointSource = vi.fn(create);
+      const app = await renderApp(undefined, { experimental: { addSharePointSource } as unknown as ExperimentalSetups, liveConfig: true });
+      await focusRow(app.press, 'add-source');
+      await app.press('\r');
+      await app.press(PAGE);
+      await app.press('\r');
+      expect(app.frame()).toContain('Add source · name');
+      await app.press('\r');
+      return { ...app, addSharePointSource };
+    }
+    const erase = async (press: (key: string) => Promise<void>, text: string) => {
+      for (let i = 0; i < text.length; i++) await press('\x7f');
+    };
+
+    it('takes a link to any page of the site, then asks to confirm in the row', async () => {
+      const { frame, addSharePointSource } = await openConsent();
+      expect(frame()).toContain('Add source · confirm');
+      expect(frame()).toContain('Let WorkIQ read page text and metadata from this list? [y/N]');
+      expect(frame()).toContain('UNSANDBOXED');
+      expect(frame()).toContain('reads page text and metadata');
+      expect(frame()).not.toContain('type type');
+      expect(addSharePointSource).not.toHaveBeenCalled();
+    });
+
+    it('prefills the site name from the link and takes a typed name instead', async () => {
+      const addSharePointSource = vi.fn<Create>(async () => added);
+      const { press, frame } = await renderApp(undefined, { experimental: { addSharePointSource } as unknown as ExperimentalSetups, liveConfig: true });
+      await focusRow(press, 'add-source');
+      await press('\r');
+      await press(PAGE);
+      await press('\r');
+      expect(frame()).toContain('a name for this SharePoint site');
+      expect(frame()).toContain('Product');
+      await erase(press, 'Product');
+      await press('Roadmap');
+      await press('\r');
+      await press('y');
+      await press('\r');
+      await vi.waitFor(() => expect(addSharePointSource).toHaveBeenCalledTimes(1));
+      expect(addSharePointSource).toHaveBeenCalledWith('https://tenant.sharepoint.com/sites/Product', 'Roadmap', expect.any(AbortSignal));
+    });
+
+    it.each(['yes', 'YES', 'Yes', 'y', 'Y'])('accepts %j in any case, then adds and fetches the source', async (answer) => {
+      const { press, frame, onConfigChange, addSharePointSource } = await openConsent();
+      await press(answer);
+      await press('\r');
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith({ sources: [added.config.id] }));
+      expect(addSharePointSource).toHaveBeenCalledWith('https://tenant.sharepoint.com/sites/Product', 'Product', expect.any(AbortSignal));
+      expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ sharePointSources: [added.descriptor] }));
+      expect(onConfigChange).toHaveBeenCalledWith({ sharePointSources: [added.config], experimentalSources: [added.config.id] });
+      expect(frame()).not.toContain('Add source · confirm');
+    });
+
+    it('keeps asking, and says how to answer, for anything but yes or no', async () => {
+      const { press, frame, audit, addSharePointSource } = await openConsent();
+      await press('maybe');
+      await press('\r');
+      expect(frame()).toContain('Type y to allow');
+      expect(frame()).toContain('Add source · confirm');
+      expect(audit.recent().some((entry) => entry.level === 'error' && entry.detail?.includes('Type y to allow'))).toBe(true);
+      expect(addSharePointSource).not.toHaveBeenCalled();
+      await erase(press, 'maybe');
+      await press('yes');
+      await press('\r');
+      await vi.waitFor(() => expect(addSharePointSource).toHaveBeenCalledTimes(1));
+    });
+
+    it.each(['n', 'No', 'NO'])('does not add anything on %j', async (answer) => {
+      const { press, frame, onConfigChange, addSharePointSource } = await openConsent();
+      await press(answer);
+      await press('\r');
+      expect(frame()).toContain('SharePoint source not added');
+      expect(frame()).not.toContain('Add source · confirm');
+      expect(addSharePointSource).not.toHaveBeenCalled();
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(onConfigChange).not.toHaveBeenCalled();
+    });
+
+    it('explains what to paste for a link that is not a site, and stays on the link', async () => {
+      const addSharePointSource = vi.fn<Create>(async () => added);
+      const { press, frame } = await renderApp(undefined, { experimental: { addSharePointSource } as unknown as ExperimentalSetups });
+      await focusRow(press, 'add-source');
+      await press('\r');
+      await press('https://tenant-my.sharepoint.com/personal/someone_tenant_com/Documents');
+      await press('\r');
+      expect(frame()).toContain('Paste a SharePoint site URL');
+      expect(frame()).toContain('Add source · url');
+      expect(addSharePointSource).not.toHaveBeenCalled();
+    });
+
+    it('shows that it is setting up, and does not start a second add meanwhile', async () => {
+      let finish: (value: typeof added) => void = () => {};
+      const { press, frame, addSharePointSource } = await openConsent(() => new Promise((resolve) => { finish = resolve; }));
+      await press('y');
+      await press('\r');
+      await vi.waitFor(() => expect(addSharePointSource).toHaveBeenCalledTimes(1));
+      expect(frame()).toContain('setting up the SharePoint source through WorkIQ');
+      await press('\r');
+      expect(frame()).toContain('Still setting up the previous SharePoint source');
+      expect(frame()).not.toContain('Add source · url');
+      await act(async () => { finish(added); });
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith({ sources: [added.config.id] }));
+      await press('\r');
+      expect(frame()).toContain('Add source · url');
+    });
+
+    it('names the site and the 20-day import window while the first scan runs', async () => {
+      let scanned: (r: unknown) => void = () => {};
+      fetch.mockImplementationOnce(() => new Promise((resolve) => { scanned = resolve; }));
+      const { press, frame } = await openConsent();
+      await press('y');
+      await press('\r');
+      await vi.waitFor(() => expect(frame()).toContain('Fetching Product'));
+      expect(frame()).toContain('importing the last 20 days');
+      expect(frame()).not.toContain('sharepoint-12345678');
+      await act(async () => { scanned({ added: 0, results: {} }); });
+      await vi.waitFor(() => expect(frame()).not.toContain('Fetching Product'));
+    });
+
+    it('reports a failed setup and can be tried again', async () => {
+      const { press, frame, audit, onConfigChange } = await openConsent(async () => { throw new Error('WorkIQ could not read the selected SharePoint metadata'); });
+      await press('yes');
+      await press('\r');
+      await vi.waitFor(() => expect(frame()).toContain('Could not add SharePoint source: WorkIQ could not read the selected SharePoint metadata'));
+      expect(audit.recent().some((entry) => entry.level === 'error' && entry.detail?.includes('add SharePoint source'))).toBe(true);
+      expect(updateSettings).not.toHaveBeenCalled();
+      expect(onConfigChange).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      await press('\r');
+      expect(frame()).toContain('Add source · url');
     });
   });
 

@@ -4,7 +4,7 @@ import { DEFAULT_COLOR, MAX_SOURCE_LABEL_LENGTH, timeAgo, type AppSettings, type
 import type { LocalConfig } from '../../config.js';
 import { EXPERIMENTAL_SETUPS, type ExperimentalSetups } from '../../experimental/index.js';
 import { DEFAULT_SOURCE_COLOR } from './UpdatesTable.js';
-import { ADD_SOURCE_PROMPTS, configDisplay, experimentalOn, fetchCovers, isSecretField, maskSetting, rowHint, type AddSourceStep, type FetchScope, type SettingsRow } from '../settings.js';
+import { ADD_SOURCE_LABELS, ADD_SOURCE_QUESTIONS, SHAREPOINT_SETUP, addSourceFooter, configDisplay, experimentalOn, fetchCovers, isSecretField, maskSetting, rowHint, type AddSourceStep, type FetchScope, type SettingsRow } from '../settings.js';
 
 interface Props {
   rows: SettingsRow[];
@@ -100,9 +100,17 @@ export const SettingsPane = React.memo(function SettingsPane({
   const editing = editBuffer !== undefined;
   const focused = rows[focusIndex];
 
-  const editBox = (text: string) => (
-    <Text color="#e3b341" backgroundColor="#2d1b00">{` ${tail(text, restW - 3)}▏`.padEnd(restW)}</Text>
-  );
+  /** `question` is shown in front of what is typed, so what the answer is for stays in view. */
+  const editBox = (text: string, question = '') => {
+    if (!question) return <Text color="#e3b341" backgroundColor="#2d1b00">{` ${tail(text, restW - 3)}▏`.padEnd(restW)}</Text>;
+    const asked = clip(question, Math.max(0, restW - 6));
+    return (
+      <Text backgroundColor="#2d1b00">
+        <Text color="#8b949e" backgroundColor="#2d1b00">{` ${asked}`}</Text>
+        <Text color="#e3b341" backgroundColor="#2d1b00">{`${tail(text, restW - 3 - asked.length)}▏`.padEnd(restW - 1 - asked.length)}</Text>
+      </Text>
+    );
+  };
 
   const renderRow = (row: SettingsRow, index: number) => {
     const isFocused = index === focusIndex;
@@ -203,7 +211,7 @@ export const SettingsPane = React.memo(function SettingsPane({
 
     if (row.kind === 'experimental') {
       const id = row.source.id;
-      const on = experimentalOn(config, id);
+      const on = !row.source.removed && experimentalOn(config, id);
       const items = stats?.bySource[id] ?? 0;
       const signing = signingIn === id;
       const fetchingNow = on && fetchCovers(fetching, id, !disabledSet.has(id));
@@ -314,18 +322,30 @@ export const SettingsPane = React.memo(function SettingsPane({
 
     if (row.kind === 'add-source' || row.kind === 'restore-sources') {
       const add = row.kind === 'add-source';
-      const label = add ? (isFocused && editing && addStep ? `Add source · ${addStep}` : 'Add source') : 'Restore removed';
+      const label = add ? (isFocused && editing && addStep ? `Add source · ${ADD_SOURCE_LABELS[addStep]}` : 'Add source') : 'Restore removed';
       if (add && isFocused && editing) {
         return (
           <Text key={row.key} wrap="truncate">
             {cursor}
             <Text color="#3fb950" backgroundColor={bg}>{'+ '}</Text>
             {name(label)}
-            {editBox(editBuffer)}
+            {editBox(editBuffer, addStep && ADD_SOURCE_QUESTIONS[addStep])}
           </Text>
         );
       }
-      const hint = clip(add ? 'RSS/Atom feed, GitHub repository releases or YouTube channel' : `${row.count} built-in source${row.count === 1 ? '' : 's'} removed`, restW);
+      if (add && signingIn === SHAREPOINT_SETUP) {
+        const note = clip('setting up the SharePoint source through WorkIQ…', restW);
+        return (
+          <Text key={row.key} wrap="truncate">
+            {cursor}
+            <Text color="#3fb950" backgroundColor={bg}>{'+ '}</Text>
+            {name(label)}
+            <Text color="#e3b341" backgroundColor={bg}>{note}</Text>
+            {fill(note.length)}
+          </Text>
+        );
+      }
+      const hint = clip(add ? 'RSS/Atom, GitHub releases, YouTube or SharePoint Site Pages' : `${row.count} built-in source${row.count === 1 ? '' : 's'} removed`, restW);
       return (
         <Text key={row.key} wrap="truncate">
           {cursor}
@@ -378,7 +398,7 @@ export const SettingsPane = React.memo(function SettingsPane({
   const footer = searchTyping
     ? `/${search}▏   ↵ keep   ↑↓ move   Esc clear`
     : editing && addStep
-    ? `type ${ADD_SOURCE_PROMPTS[addStep]}   ↵ next   Esc cancel`
+    ? addSourceFooter(addStep)
     : editing
     ? `type ${focused?.kind === 'source' || focused?.kind === 'experimental' ? `a label (max ${MAX_SOURCE_LABEL_LENGTH})` : 'a value'}   ↵ save   Esc cancel   (empty resets to the default)`
     : `${rowHint(focused)}${rowHint(focused) ? '   ' : ''}/ search   ${search ? 'Esc clear search' : 'Esc close'}   h help`;

@@ -92,7 +92,10 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
   }));
   const { profile, config, profiles, notice } = session;
   const extensionHost = useMemo(() => new ExtensionHost(profile, (message) => audit?.log('extension', message)), [profile, config.connectionString, audit]);
-  const experimental = useMemo(() => experimentalSetups(extensionHost), [extensionHost]);
+  const experimental = useMemo(
+    () => experimentalSetups(extensionHost, config.sharePointSources),
+    [extensionHost, config.sharePointSources],
+  );
   const groupingHistory = useMemo(() => createGroupingHistory(profile), [profile]);
   // The YouTube key is applied in place below, so changing it keeps the service (and the app) as they are.
   const { service, error } = useMemo(() => createService(config.connectionString, config.youtubeApiKey), [profile, config.connectionString]);
@@ -111,6 +114,7 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
   }, [service, extensionHost, audit]);
   useLayoutEffect(() => {
     extensionHost.setTeamsEnabled(config.experimentalSources?.includes('teams-meetings') ?? false);
+    extensionHost.setSharePointSources(config.sharePointSources ?? [], config.experimentalSources ?? []);
     service?.setExperimentalProviders(experimentalProviders(config.experimentalSources, experimental));
   }, [service, extensionHost, experimental, config.experimentalSources]);
 
@@ -121,7 +125,16 @@ export function Root({ initialProfile, initialConfig, summarizers, audit, auditF
       // Right away, so a fetch started in the same handler (turning a source on) runs it.
       if ('experimentalSources' in patch) {
         extensionHost.setTeamsEnabled(next.experimentalSources?.includes('teams-meetings') ?? false);
-        service?.setExperimentalProviders(experimentalProviders(next.experimentalSources, experimental));
+        extensionHost.setSharePointSources(next.sharePointSources ?? [], next.experimentalSources ?? []);
+      }
+      if ('sharePointSources' in patch) {
+        extensionHost.setSharePointSources(next.sharePointSources ?? [], next.experimentalSources ?? []);
+      }
+      if ('experimentalSources' in patch || 'sharePointSources' in patch) {
+        const setups = 'sharePointSources' in patch
+          ? experimentalSetups(extensionHost, next.sharePointSources)
+          : experimental;
+        service?.setExperimentalProviders(experimentalProviders(next.experimentalSources, setups));
       }
       const list = readProfiles();
       setSession((s) => ({ ...s, config: next, profiles: list ?? s.profiles, notice: undefined }));

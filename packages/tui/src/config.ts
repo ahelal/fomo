@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isExperimentalSource } from '@fomo/core';
+import type { SharePointSourceConfig } from '@fomo/core';
 
 /** Config, logs and backups live here. FOMO_CONFIG_DIR moves them off ~/.fomo (tests, a second setup). */
 export const CONFIG_DIR = process.env.FOMO_CONFIG_DIR ? resolve(process.env.FOMO_CONFIG_DIR) : join(homedir(), '.fomo');
@@ -54,6 +55,8 @@ export interface LocalConfig {
   backupDir?: string;
   /** Experimental sources turned on for this profile (ids from EXPERIMENTAL_SOURCE_INFOS), e.g. Teams meetings. Default none. */
   experimentalSources?: string[];
+  /** Per-profile SharePoint target, approval and monitoring configuration. */
+  sharePointSources?: SharePointSourceConfig[];
   /** YouTube Data API v3 key; YouTube sources use the public feeds (no video lengths) without one. Never leaves this machine. */
   youtubeApiKey?: string;
 }
@@ -114,6 +117,40 @@ function sanitizeProfile(raw: Record<string, unknown>): LocalConfig {
   if (Array.isArray(raw.experimentalSources)) {
     const ids = [...new Set(raw.experimentalSources.filter((id): id is string => typeof id === 'string' && isExperimentalSource(id)))];
     if (ids.length) out.experimentalSources = ids;
+  }
+  if (raw.sharePointSources !== undefined) {
+    if (!Array.isArray(raw.sharePointSources) || raw.sharePointSources.length > 50) {
+      throw new Error('sharePointSources must be an array of at most 50 source configurations');
+    }
+    out.sharePointSources = raw.sharePointSources.map((value) => {
+      if (!isRecord(value) || typeof value.id !== 'string'
+        || !/^sharepoint-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.id)
+        || typeof value.displayName !== 'string' || !value.displayName.trim() || value.displayName.length > 100
+        || typeof value.siteUrl !== 'string' || value.siteUrl.length > 2048
+        || typeof value.siteId !== 'string' || value.siteId.length > 512
+        || typeof value.listId !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.listId)
+        || typeof value.listName !== 'string' || !value.listName.trim() || value.listName.length > 200
+        || typeof value.accountId !== 'string' || !value.accountId || value.accountId.length > 200
+        || typeof value.scopeHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.scopeHash)
+        || typeof value.ownerInstallationId !== 'string' || !value.ownerInstallationId
+        || value.mode !== 'list-snapshot-v1' || (value.approvalRevision !== 1 && value.approvalRevision !== 2)
+        || typeof value.enabled !== 'boolean') {
+        throw new Error('Invalid SharePoint source configuration; remove or correct the invalid entry');
+      }
+      const url = new URL(value.siteUrl);
+      let sitePath: string;
+      try { sitePath = decodeURIComponent(url.pathname); }
+      catch { throw new Error('Invalid SharePoint site URL in local configuration'); }
+      if (url.protocol !== 'https:' || !/^[a-z0-9.-]+\.sharepoint\.com$/i.test(url.hostname)
+        || !/^\/(?:sites|teams)\/[A-Za-z0-9._ -]+\/?$/.test(sitePath)
+        || url.username || url.password || url.search || url.hash) {
+        throw new Error('Invalid SharePoint site URL in local configuration');
+      }
+      return value as unknown as SharePointSourceConfig;
+    });
+    if (new Set(out.sharePointSources.map((source) => source.id)).size !== out.sharePointSources.length) {
+      throw new Error('SharePoint source IDs must be unique in the local profile');
+    }
   }
   return out;
 }

@@ -20,8 +20,9 @@ import {
   youtubeApiKeyProblem,
   type LocalConfig,
 } from '../config.js';
+import { SHAREPOINT_CONSENT } from '../experimental/sharepoint-consent.js';
 
-export type ConfigField = keyof LocalConfig;
+export type ConfigField = Exclude<keyof LocalConfig, 'sharePointSources'>;
 export type ActionId = 'link' | 'webapp' | 'regroup' | 'backup' | 'restore' | 'profiles';
 
 export type SettingsRow =
@@ -221,15 +222,68 @@ export const isPickerField = (field: ConfigField): field is PickerField =>
   (PICKER_FIELDS as readonly ConfigField[]).includes(field);
 
 /** Steps of adding a source: what is typed, and the footer prompt. */
-export type AddSourceStep = 'url' | 'name' | 'include' | 'changelog';
+export type AddSourceStep = 'url' | 'name' | 'include' | 'changelog' | 'sharepoint-name' | 'sharepoint-consent';
 export interface AddSourceDraft { step: AddSourceStep; url: string; name: string; changelogPath?: string }
 
 export const ADD_SOURCE_PROMPTS: Record<AddSourceStep, string> = {
-  url: 'feed URL(s) or github.com/owner/repo — several feeds: separate with spaces',
+  url: 'feed URL(s), github.com/owner/repo, YouTube channel, or SharePoint site',
   name: 'a name   (empty keeps the suggestion)',
   include: 'keywords to keep, as a regex, e.g. copilot|agents   (empty keeps everything)',
   changelog: 'changelog file path (empty uses GitHub release notes)',
+  'sharepoint-name': 'a name for this SharePoint site   (empty keeps the site name)',
+  'sharepoint-consent': SHAREPOINT_CONSENT,
 };
+
+/** The step as the row names it: `Add source · <label>`. It must stay short; the row's name column is narrow. */
+export const ADD_SOURCE_LABELS: Record<AddSourceStep, string> = {
+  url: 'url',
+  name: 'name',
+  include: 'include',
+  changelog: 'changelog',
+  'sharepoint-name': 'name',
+  'sharepoint-consent': 'confirm',
+};
+
+/** A question the row shows in front of what is typed, for the steps that ask one. */
+export const ADD_SOURCE_QUESTIONS: Partial<Record<AddSourceStep, string>> = {
+  'sharepoint-consent': 'Let WorkIQ read page text and metadata from this list? [y/N] ',
+};
+
+/** The footer while a step of adding a source is typed. */
+export function addSourceFooter(step: AddSourceStep): string {
+  return step === 'sharepoint-consent'
+    ? `${ADD_SOURCE_PROMPTS[step]}   ↵ confirm   Esc cancel`
+    : `type ${ADD_SOURCE_PROMPTS[step]}   ↵ next   Esc cancel`;
+}
+
+/** A typed yes or no, in any case (`y`, `yes`, `n`, `no`); undefined for anything else. */
+export function yesNo(text: string): boolean | undefined {
+  const answer = text.trim().toLowerCase();
+  return answer === 'y' || answer === 'yes' ? true : answer === 'n' || answer === 'no' ? false : undefined;
+}
+
+/** `signingIn` while a new SharePoint source is being resolved through WorkIQ; no row stands for it yet. */
+export const SHAREPOINT_SETUP = 'sharepoint-setup';
+
+const SHAREPOINT_URL_HELP = 'Paste a SharePoint site URL such as https://tenant.sharepoint.com/sites/Team (a link to one of its pages works too)';
+
+/**
+ * The SharePoint site a pasted link points into. A page, a library or a link with a query all name the
+ * site, so only its `/sites/<name>` or `/teams/<name>` part is kept. Undefined when the link is on
+ * another host, or when several are typed (a list of feeds), so it can still be a feed.
+ */
+export function parseSharePointSite(text: string): { url: string; name: string } | { error: string } | undefined {
+  const typed = text.trim();
+  if (/\s/.test(typed)) return undefined;
+  let link: URL;
+  try { link = new URL(typed); } catch { return undefined; }
+  if (!/^https?:$/.test(link.protocol) || !/^[a-z0-9.-]+\.sharepoint\.com$/i.test(link.hostname)) return undefined;
+  const [area, site] = link.pathname.split('/').filter(Boolean);
+  let name: string;
+  try { name = decodeURIComponent(site ?? ''); } catch { return { error: SHAREPOINT_URL_HELP }; }
+  if (!area || !/^(?:sites|teams)$/i.test(area) || !/^[A-Za-z0-9._ -]+$/.test(name)) return { error: SHAREPOINT_URL_HELP };
+  return { url: `https://${link.hostname.toLowerCase()}/${area.toLowerCase()}/${site}`, name };
+}
 
 /** Starting text when editing a field, from the profile's stored config `file`. Secrets start empty so they are never shown. */
 export function editStartValue(field: ConfigField, file: LocalConfig): string {

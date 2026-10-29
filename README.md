@@ -300,20 +300,50 @@ profiles where they are enabled; their items appear in the web app like any othe
 | Source | ID | What it tracks |
 |--------|----|----------------|
 | Teams meetings | `teams-meetings` | Teams meetings of the last 7 days that you missed, or that have a recording or a transcript; one item per occurrence, linking directly to the meeting recap when recorded or transcribed, otherwise to the meeting chat |
+| SharePoint Site Pages | `sharepoint-<id>` | Page-text changes from one selected site's Site Pages list; add separate sources for separate sites |
 
 The Teams meetings source uses the host's WorkIQ sign-in and runs outside FOMO's sandbox. FOMO requires explicit
 consent, limits the broker to read-only operations, and does not expose WorkIQ credentials to the extension.
 Approval is per profile; disabling the source or switching profiles stops active fetches.
 
+To add SharePoint, use **Config → Sources → Add source**, paste a SharePoint site URL (a link to any page of the
+site works), choose a local display name, then answer `y` (any case) to approve the scope; `n` or Esc cancels. FOMO
+resolves the site and its **Site Pages** list through the signed-in
+WorkIQ account. Each source is bound to that account, site and list; adding the same list twice to one profile is
+rejected. Consent covers bounded list-item metadata and page text from that list. FOMO keeps the latest normalized
+page-text snapshot in a private local journal; first-seen page text and later added/removed text diffs sync to the
+connected FOMO storage. It never writes to SharePoint or sends these items to Copilot, and reads no files or content
+outside Site Pages.
+On a new source's first complete scan, pages modified in the last **20 days** are
+imported as new, unread items; older pages are tracked quietly. These are first-observed pages, not necessarily
+newly created pages, so their first event says that no earlier text snapshot is available. Later complete snapshots
+create one event when an item's ETag changes, showing lines added and removed since the previous fetch. The initial
+import is not repeated for existing sources. This is snapshot detection, not a history of every edit: intermediate
+revisions and deletions are not reported, and a timestamp change alone is not treated as an edit. Text reordering without additions or removals is called out as such. Pages are limited to 24,000 normalized
+characters and a scan's local text snapshots to 48 MiB. Snapshots are also capped at 100 pages/2,500 items; an
+oversized or incomplete scan is rejected without advancing the local journal. Imports are delivered in batches of
+up to 100 per fetch; any remaining events stay queued for the
+next fetch. WorkIQ delta queries are not used.
+
+SharePoint diffs are stored as private revision events and are deliberately excluded from Copilot grouping,
+summaries and reference suggestions. Events are keyed by list-item ID plus ETag, journaled locally in SQLite, and
+acknowledged only after the Azure Table write succeeds; retries therefore do not create duplicate events. The local
+journal and source approval are per profile and user-private. SharePoint monitoring currently requires macOS and
+WorkIQ. Deleting a SharePoint source's items purges its source and local journal; create a new source to monitor it
+again. In the TUI source details, press `d` twice to remove it, even when it has zero stored items.
+Purged sources no longer appear in the source list. Existing metadata-only sources need to be removed and re-added to approve the expanded page-text scope. The
+web app only displays the stored events and never reads SharePoint.
+
 ---
 
 ## Security
 
-- **Code-backed sources:** Anthropic (news and engineering) and Teams run in checksum-verified,
+- **Code-backed sources:** Anthropic (news and engineering), Teams and SharePoint run in checksum-verified,
   read-only snapshots under deny-by-default MXC policies. Workers cannot fork processes, access host credentials
   or connect directly to the network. Public HTTPS requests go through a bounded, origin-allowlisted broker
-  that validates and pins DNS addresses and rechecks redirects. WorkIQ alone has separate HTTPS access and its
-  own private profile directory; it is not an unrestricted host MCP connection.
+  that validates and pins DNS addresses and rechecks redirects. WorkIQ alone has a separate, read-only broker and
+  private profile directory; SharePoint calls are limited to the approved account, site and list, not an unrestricted
+  host MCP connection.
 - **Current limits:** only bundled extensions are accepted. CPU/wall time, messages and response sizes are bounded;
   the worker's 128 MiB V8 heap setting is **not** a hard total-memory cap. Arbitrary extension installs, approved
   user-folder grants, other OS backends and sandboxing the whole FOMO process remain future work.

@@ -112,6 +112,29 @@ describe('profiles', () => {
     expect(stored().profiles.default).toEqual({});
   });
 
+  it('validates multiple local SharePoint scopes and rejects non-SharePoint targets', () => {
+    const source = {
+      id: 'sharepoint-12345678-1234-4234-8234-123456789abc',
+      displayName: 'Product',
+      siteUrl: 'https://tenant.sharepoint.com/teams/product',
+      siteId: 'tenant.sharepoint.com,site,web',
+      listId: '12345678-1234-4234-8234-123456789abc',
+      listName: 'Site Pages',
+      accountId: 'account',
+      scopeHash: 'a'.repeat(64),
+      ownerInstallationId: 'installation',
+      mode: 'list-snapshot-v1' as const,
+      approvalRevision: 1 as const,
+      enabled: true,
+    };
+    saveConfig('default', { sharePointSources: [source, { ...source, id: 'sharepoint-22345678-1234-4234-8234-123456789abc', siteUrl: 'https://tenant.sharepoint.com/sites/another' }] });
+    expect(loadConfig('default').sharePointSources).toHaveLength(2);
+    write({ profiles: { default: { sharePointSources: [{ ...source, siteUrl: 'https://example.com/teams/product' }] } } });
+    expect(() => loadConfig('default')).toThrow('Invalid SharePoint site URL');
+    write({ profiles: { default: { sharePointSources: [source, source] } } });
+    expect(() => loadConfig('default')).toThrow('IDs must be unique');
+  });
+
   it('says which profiles exist when the requested one does not', () => {
     addProfile('work');
     expect(() => selectProfile('nope')).toThrow('Unknown profile “nope” (have: default, work)');
