@@ -66,9 +66,14 @@ export class WorkerConnection {
       } catch (error) { fail(error); }
     });
     output.on('error', fail);
-    input.on('error', fail);
+    input.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') return fail(error);
+      // The worker died before reading its request: let its exit outcome explain why.
+      setTimeout(() => fail(new Error('Extension worker exited before reading its request')), 1000).unref();
+    });
     void child.wait().then((outcome) => {
-      const reason = outcome.timedOut ? 'timed out' : `exited (${outcome.exitCode})`;
+      const reason = outcome.timedOut ? 'timed out'
+        : outcome.exitCode === -1 ? 'was killed by a signal (exit -1)' : `exited (${outcome.exitCode})`;
       fail(new Error(`Extension worker ${reason}${stderr ? `: ${stderr}` : ''}`));
     }, fail).finally(() => signal.removeEventListener('abort', onAbort));
     if (signal.aborted) onAbort();

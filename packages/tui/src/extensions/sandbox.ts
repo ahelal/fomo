@@ -9,6 +9,7 @@ const closing = new WeakMap<MxcProcess, Promise<void>>();
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const literal = (path: string) => `(literal ${JSON.stringify(path)})`;
 const subtree = (path: string) => `(subpath ${JSON.stringify(path)})`;
+const SYSTEM_LIBRARIES = ['/System/Library', '/usr/lib'] as const;
 
 export interface SandboxLaunch {
   executable: string;
@@ -49,6 +50,15 @@ async function runtimeImages(): Promise<string[]> {
 export function seatbeltProfile(input: SandboxLaunch, images: readonly string[]): string {
   const read = [...input.readonlyPaths, input.directory];
   const write = input.readwritePaths ?? [];
+  // A Homebrew Node links ~500 images. One huge (or ...) overflows libsandbox's
+  // compiler stack in MXC's forked child, so skip images the subpaths below
+  // already cover and split the rest into small rules.
+  const runtime = [...new Set([input.executable, ...images])]
+    .filter((path) => !SYSTEM_LIBRARIES.some((root) => path.startsWith(`${root}/`)));
+  const runtimeRules: string[] = [];
+  for (let i = 0; i < runtime.length; i += 16) {
+    runtimeRules.push(`(allow file-read* file-map-executable ${runtime.slice(i, i + 16).map(literal).join(' ')})`);
+  }
   return [
     '(version 1)',
     '(deny default)',
@@ -58,8 +68,9 @@ export function seatbeltProfile(input: SandboxLaunch, images: readonly string[])
     '(allow sysctl-read)',
     '(allow signal (target self))',
     `(allow process-exec ${['/bin/sh', '/bin/bash', input.executable].map(literal).join(' ')})`,
-    `(allow file-read* file-map-executable ${['/bin/sh', '/bin/bash', input.executable, ...images].map(literal).join(' ')})`,
-    '(allow file-read* file-map-executable (subpath "/System/Library") (subpath "/usr/lib"))',
+    '(allow file-read* file-map-executable (literal "/bin/sh") (literal "/bin/bash"))',
+    ...runtimeRules,
+    `(allow file-read* file-map-executable ${SYSTEM_LIBRARIES.map(subtree).join(' ')})`,
     '(allow file-read* (subpath "/usr/share/icu") (subpath "/private/var/db/timezone") (literal "/dev/null") (literal "/dev/zero") (literal "/dev/random") (literal "/dev/urandom"))',
     '(allow file-write* (literal "/dev/null"))',
     ...write.map((path) => `(allow file-read* file-write* ${subtree(path)})`),
