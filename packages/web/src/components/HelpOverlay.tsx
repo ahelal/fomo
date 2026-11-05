@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references' | 'todos';
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references' | 'todos' | 'manual';
 
 interface Props {
   context: HelpContext;
@@ -97,6 +97,12 @@ const TODO_KEYS: [string, string][] = [
   ['Esc',   'Clear the search'],
 ];
 
+const MANUAL_KEYS: [string, string][] = [
+  ['+ Add entry', 'Create a title and body; it starts unread in the Manual source'],
+  ['Edit', 'Update the selected entry'],
+  ['Delete', 'Delete the selected entry'],
+];
+
 const GLOBAL_KEYS: [string, string][] = [
   ['↑/k',  'Move up in the list / scroll the focused preview'],
   ['↓/j',  'Move down in the list / scroll the focused preview'],
@@ -107,6 +113,7 @@ const GLOBAL_KEYS: [string, string][] = [
   ['2 / 4','Again: switch Unread / Pending between topics and a list'],
   ['5',    'Bookmarks: links filed into folders'],
   ['6',    'Todos: tasks filed into folders'],
+  ['7',    'Learning Manual: write and manage your own reading'],
   ['b',    'File the selected update in Bookmarks'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],
@@ -134,6 +141,9 @@ function buildSections(context: Props['context']): Section[] {
   if (context === 'todos') {
     return [{ title: 'Todos', keys: TODO_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
+  if (context === 'manual') {
+    return [{ title: 'Learning Manual', keys: MANUAL_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
+  }
   if (context === 'saved') {
     return [{ title: 'Pending topics', keys: SAVED_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
@@ -154,6 +164,7 @@ const CONTEXT_LABEL: Record<string, string> = {
   saved: 'Saved · topics',
   references: 'Bookmarks',
   todos: 'Todos',
+  manual: 'Learning Manual',
 };
 
 export function HelpOverlay({ context, onClose }: Props) {

@@ -1,4 +1,4 @@
-import { UpdateStore, TodoStore } from './store/tables.js';
+import { UpdateStore, TodoStore, makeId } from './store/tables.js';
 import { TopicStore } from './store/topics.js';
 import { ReferenceStore } from './store/references.js';
 import { FolderColorStore } from './store/folder-colors.js';
@@ -34,7 +34,10 @@ import type {
   FolderColorMap,
   FolderMetadata,
   FolderMetadataMap,
+  CreateManualEntryRequest,
+  UpdateManualEntryRequest,
 } from './types.js';
+import { MANUAL_SOURCE_ID } from './types.js';
 
 /** How long the list of duplicate copies is reused before it is read again. */
 const DUPLICATES_TTL_MS = 30_000;
@@ -108,6 +111,52 @@ export class FomoStorageService implements FomoService {
   async setSaved(id: string, saved: boolean): Promise<Update> {
     await this.ensureInit();
     return this.store.setSaved(id, saved);
+  }
+
+  async listManualEntries(): Promise<Update[]> {
+    await this.ensureInit();
+    const { updates } = await this.store.listUpdates({
+      sources: [MANUAL_SOURCE_ID],
+      status: 'all',
+      limit: Number.MAX_SAFE_INTEGER,
+      includeContent: true,
+    });
+    return updates;
+  }
+
+  async createManualEntry(req: CreateManualEntryRequest): Promise<Update> {
+    await this.ensureInit();
+    const title = req.title.trim();
+    const body = req.body.trim();
+    if (!title) throw new Error('Title is required');
+    if (!body) throw new Error('Body is required');
+    const url = `fomo://manual/${crypto.randomUUID()}`;
+    const datePublished = new Date().toISOString();
+    await this.store.insertUpdate({
+      source: MANUAL_SOURCE_ID,
+      title,
+      url,
+      datePublished,
+      content: body,
+    });
+    const id = await makeId(MANUAL_SOURCE_ID, url);
+    const update = await this.store.getUpdate(id);
+    if (!update) throw new Error('Learning Manual entry was not stored');
+    return update;
+  }
+
+  async updateManualEntry(id: string, patch: UpdateManualEntryRequest): Promise<Update> {
+    await this.ensureInit();
+    const title = patch.title.trim();
+    const body = patch.body.trim();
+    if (!title) throw new Error('Title is required');
+    if (!body) throw new Error('Body is required');
+    return this.store.updateManualEntry(id, { title, body });
+  }
+
+  async deleteManualEntry(id: string): Promise<void> {
+    await this.ensureInit();
+    return this.store.deleteManualEntry(id);
   }
 
   async deleteSourceUpdates(source: SourceId): Promise<number> {

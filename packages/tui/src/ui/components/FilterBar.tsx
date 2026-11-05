@@ -12,6 +12,7 @@ const FILTERS = [
 const PANES = [
   { key: '5', label: 'B.Marks', value: 'refs' },
   { key: '6', label: 'Todos', value: 'todos' },
+  { key: '7', label: 'Manual', value: 'manual' },
 ] as const;
 
 type GroupableView = 'unread' | 'saved';
@@ -22,7 +23,7 @@ const isGroupable = (value: string): value is GroupableView => value === 'unread
 const ESC_HINT = ' · Esc clears';
 
 interface Props {
-  /** Active view: a feed filter, or `todos` / `refs` while one of those is open. */
+  /** Active view: a feed filter, or a pane such as `todos`, `refs` or `manual`. */
   active: string;
   /** Whether Unread and Pending are listed as topics. */
   groupedViews: GroupedViews;

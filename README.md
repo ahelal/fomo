@@ -16,6 +16,7 @@ it from the terminal app or a connected browser.
 - [Copilot Digest](#copilot-digest)
   - [Post Summaries](#post-summaries)
   - [Bookmarks](#bookmarks)
+  - [Learning Manual](#learning-manual)
   - [Todos](#todos)
 - [Installation](#installation)
   - [Azure Deployment](#azure-deployment)
@@ -70,7 +71,7 @@ packages/
 
 ## Profiles
 
-A profile connects one Azure Storage account with its local FOMO settings. Use separate profiles for contexts such as **work** and **personal**: updates, topics, todos and bookmarks stay in the account for that profile, while settings such as Copilot account, interests, YouTube key and backup location travel with it. Each profile has its own connection string and local credentials; the TUI remembers the last active profile.
+A profile connects one Azure Storage account with its local FOMO settings. Use separate profiles for contexts such as **work** and **personal**: updates, topics, todos, bookmarks and Learning Manual entries stay in the account for that profile, while settings such as Copilot account, interests, YouTube key and backup location travel with it. Each profile has its own connection string and local credentials; the TUI remembers the last active profile.
 
 Add an account by creating a profile with its storage connection string. Switching profiles changes which account the TUI reads and writes; it does not copy or merge data. An operation already fetching, digesting or restoring must finish before switching.
 
@@ -138,6 +139,10 @@ The TUI can refresh an update's details from its linked page, for example when t
 - Folders come from their contents or saved metadata. Bookmarks and Todos use the same folder editor for name/location, color, local directory and GitHub repository, without a type. Renaming or moving a folder also moves its contents and metadata; each view keeps its folders separate. Deleting a folder (`d`) asks first: move its contents (items and subfolders) up into the parent folder, or delete everything in it. Either way the folder's own color and metadata go with it.
 - In both views, Enter edits the selected item or folder; Left/Right navigate folders. In Bookmarks, `o` opens a link.
 - Bookmarks are stored with the profile's Azure account and can be browsed in either app.
+
+### Learning Manual
+
+The Learning Manual stores your own reading as entries with a title and body. Add or edit entries from view **7** in either app. New entries start **unread** and also appear in the regular All, Unread and Read lists with their source labeled **Manual**; mark them read or unread there like any other update. Manual entries have no external link and are not sent to Copilot for digest grouping or post summaries.
 
 ### Todos
 

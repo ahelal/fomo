@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { clampContent, hashUrl, makeId, MAX_CONTENT_CHARS, parseId, UpdateStore } from '../store/tables.js';
+import { MANUAL_SOURCE_ID } from '../types.js';
 
 describe('clampContent', () => {
   it('keeps content within the limit unchanged', () => {
@@ -40,6 +41,68 @@ describe('UpdateStore.insertUpdate', () => {
     expect(inserted).toBe(true);
     expect(created[0]!.content).toHaveLength(MAX_CONTENT_CHARS);
     expect(created[0]).toMatchObject({ readingTimeMinutes: 4, durationSeconds: 849 });
+  });
+
+  describe('UpdateStore manual entries', () => {
+    const conn = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdA==;TableEndpoint=http://localhost:10002/devstoreaccount1;';
+
+    it('creates new manual entries unread', async () => {
+      const store = new UpdateStore(conn);
+      const created: Record<string, unknown>[] = [];
+      Object.defineProperty(store, 'client', { value: { createEntity: async (entity: Record<string, unknown>) => { created.push(entity); } } });
+
+      await store.insertUpdate({
+        source: MANUAL_SOURCE_ID,
+        title: 'Study',
+        url: 'fomo://manual/entry',
+        datePublished: '2026-10-18T00:00:00Z',
+        content: 'Notes',
+      });
+
+      expect(created[0]).toMatchObject({ partitionKey: MANUAL_SOURCE_ID, status: 'unread', title: 'Study', content: 'Notes' });
+    });
+
+    it('updates the title and body without changing read state', async () => {
+      const store = new UpdateStore(conn);
+      const entity = {
+        partitionKey: MANUAL_SOURCE_ID,
+        rowKey: 'row',
+        title: 'Old',
+        url: 'fomo://manual/entry',
+        datePublished: '2026-10-18T00:00:00Z',
+        dateAdded: '2026-10-18T00:00:00Z',
+        status: 'read',
+        saved: true,
+        content: 'Old body',
+        etag: 'etag-1',
+      };
+      const writes: { entity: Record<string, unknown>; mode: string }[] = [];
+      Object.defineProperty(store, 'client', { value: {
+        getEntity: async () => entity,
+        updateEntity: async (updated: Record<string, unknown>, mode: string) => { writes.push({ entity: updated, mode }); },
+      } });
+
+      await expect(store.updateManualEntry(`${MANUAL_SOURCE_ID}__row`, { title: ' New ', body: ' New body ' })).resolves.toMatchObject({
+        source: MANUAL_SOURCE_ID,
+        title: 'New',
+        content: 'New body',
+        status: 'read',
+        saved: true,
+      });
+      expect(writes).toEqual([{ entity: expect.objectContaining({ title: 'New', content: 'New body', status: 'read', saved: true }), mode: 'Replace' }]);
+    });
+
+    it('rejects edits and deletes for non-manual update IDs', async () => {
+      const store = new UpdateStore(conn);
+      const updateEntity = vi.fn();
+      const deleteEntity = vi.fn();
+      Object.defineProperty(store, 'client', { value: { updateEntity, deleteEntity } });
+
+      await expect(store.updateManualEntry('github__row', { title: 'Title', body: 'Body' })).rejects.toThrow('Not a Learning Manual entry');
+      await expect(store.deleteManualEntry('github__row')).rejects.toThrow('Not a Learning Manual entry');
+      expect(updateEntity).not.toHaveBeenCalled();
+      expect(deleteEntity).not.toHaveBeenCalled();
+    });
   });
 
   it('backfills a missing duration on an existing update, keeping its status', async () => {

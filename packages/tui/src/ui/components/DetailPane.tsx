@@ -1,6 +1,6 @@
 import React, { type Ref } from 'react';
 import { Box, Text } from 'ink';
-import { formatDate, formatDateTime, formatUpdateTime, previewText, type Update } from '@fomo/core';
+import { formatDate, formatDateTime, formatUpdateTime, MANUAL_SOURCE_ID, previewText, type Update } from '@fomo/core';
 import { PreviewViewport, type PreviewLine, type PreviewScroll } from './PreviewViewport.js';
 import { DUP_COLOR } from './UpdatesTable.js';
 
@@ -71,8 +71,9 @@ export function DetailPane({
   const sourceColor = SOURCE_COLOR[update.source] ?? '#58a6ff';
   const time = formatUpdateTime(update);
   const fetched = formatDateTime(update.dateAdded);
+  const manual = update.source === MANUAL_SOURCE_ID;
 
-  const content = previewText(update.content);
+  const content = manual ? update.content : previewText(update.content);
 
   // Title, source, status, URL and divider (+ the top divider at the bottom); the rest is the body.
   const fixedRows = position === 'bottom' ? 6 : 5;
@@ -109,7 +110,7 @@ export function DetailPane({
       <Box paddingX={2} flexShrink={0}>
         <Text color="#8b949e" wrap="truncate">
           {'Source '}
-          <Text color={sourceColor} bold>{update.source}</Text>
+          <Text color={sourceColor} bold>{labelOf(update.source)}</Text>
           {'   Published '}
           <Text color="#c9d1d9">{formatDate(update.datePublished)}</Text>
           {time && (
@@ -126,7 +127,7 @@ export function DetailPane({
           )}
           {fetched && (
             <>
-              {'   Fetched '}
+              {manual ? '   Added ' : '   Fetched '}
               <Text color="#c9d1d9">{fetched}</Text>
             </>
           )}
@@ -138,7 +139,9 @@ export function DetailPane({
         <Text color="#8b949e">{'Status '}</Text>
         <Text color={badge.color} bold>{badge.label.toLowerCase()}</Text>
         {update.saved && <Text color="#e3b341" bold>{' ⭐'}</Text>}
-        {summarizing ? (
+        {manual ? (
+          <Text color="#8b949e" dimColor wrap="truncate">{'   edit in Learning Manual'}</Text>
+        ) : summarizing ? (
           <Text color={GIST_COLOR} wrap="truncate">{'   ⟳ Copilot is summarising…'}</Text>
         ) : refreshing ? (
           <Text color="#8b949e" wrap="truncate">{'   ⟳ Refreshing from the page…'}</Text>
@@ -149,7 +152,7 @@ export function DetailPane({
 
       {/* URL */}
       <Box paddingX={2} flexShrink={0}>
-        <Text color="#58a6ff" underline wrap="truncate">{update.url}</Text>
+        <Text color="#58a6ff" underline wrap="truncate">{update.source === MANUAL_SOURCE_ID ? 'Manual entry' : update.url}</Text>
       </Box>
 
       <PreviewViewport

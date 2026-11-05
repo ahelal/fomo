@@ -25,8 +25,9 @@ import type {
   UpdateTodoRequest,
   ListTodosOptions,
   ListTodosResponse,
+  UpdateManualEntryRequest,
 } from '../types.js';
-import { DEFAULT_SETTINGS } from '../types.js';
+import { DEFAULT_SETTINGS, MANUAL_SOURCE_ID } from '../types.js';
 import { LEGACY_BUILTIN_SOURCES, LEGACY_COPILOT_CLI_SOURCE, LEGACY_USER_SOURCES } from '../scraper/specs.js';
 import type { DuplicateRow } from '../duplicates.js';
 
@@ -398,6 +399,39 @@ export class UpdateStore {
     }
 
     throw new Error('Too many concurrent status-update conflicts; please retry.');
+  }
+
+  async updateManualEntry(id: string, patch: UpdateManualEntryRequest): Promise<Update> {
+    const { source, rowKey } = parseId(id);
+    if (source !== MANUAL_SOURCE_ID) throw new Error('Not a Learning Manual entry');
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const entity = await this.client.getEntity<UpdateEntity>(source, rowKey);
+      const updated: UpdateEntity = {
+        ...entity,
+        title: patch.title.trim(),
+        content: clampContent(patch.body.trim()),
+        topicId: '',
+        summary: '',
+        gist: '',
+      };
+      try {
+        await this.client.updateEntity(updated, 'Replace', { etag: entity.etag });
+        return entityToUpdate(updated);
+      } catch (err: unknown) {
+        if (!isTableError(err, 412) || attempt === 4) throw err;
+      }
+    }
+    throw new Error(`Could not update Learning Manual entry: ${id}`);
+  }
+
+  async deleteManualEntry(id: string): Promise<void> {
+    const { source, rowKey } = parseId(id);
+    if (source !== MANUAL_SOURCE_ID) throw new Error('Not a Learning Manual entry');
+    try {
+      await this.client.deleteEntity(source, rowKey);
+    } catch (err: unknown) {
+      if (!isTableError(err, 404)) throw err;
+    }
   }
 
   /** Toggle the saved/bookmark flag independently of read/unread status. */

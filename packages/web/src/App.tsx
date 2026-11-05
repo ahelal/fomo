@@ -16,6 +16,7 @@ import {
   jumpStep,
   nextDuplicate,
   locateUpdate,
+  MANUAL_SOURCE_ID,
   type Update,
   type Status,
   type PreviewPosition,
@@ -43,6 +44,7 @@ import { SettingsPanel } from './components/SettingsPanel.js';
 import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { TodosPane } from './components/TodosPane.js';
 import { ReferencesPane } from './components/ReferencesPane.js';
+import { ManualPane } from './components/ManualPane.js';
 import { ReferenceDialog } from './components/ReferenceDialog.js';
 import { ConnectScreen } from './components/ConnectScreen.js';
 import { SearchBox } from './components/SearchBox.js';
@@ -55,10 +57,11 @@ const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: '4 Pending', value: 'saved' },
   { label: '5 B.Marks', value: 'refs' },
   { label: '6 Todos', value: 'todos' },
+  { label: '7 Manual', value: 'manual' },
 ];
 
 const FILTER_KEYS: Record<string, FilterStatus> = {
-  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'refs', '6': 'todos',
+  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'refs', '6': 'todos', '7': 'manual',
 };
 
 /** Rows of text that fit in the window (≈20px each), for `jumpStep`. */
@@ -151,6 +154,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const sourcePickerSeq = useRef(0);
   /** Filing an update in Bookmarks (b). */
   const [refDialog, setRefDialog] = useState<{ update: Update; reference?: Reference; note?: string } | undefined>();
+  const [manualDialogOpen, setManualDialogOpen] = useState(false);
   const refDialogSeq = useRef(0);
 
   const previewPosition = fomo.settings.previewPosition;
@@ -160,7 +164,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const pane = isPaneView(fomo.filter);
   const viewHelp: HelpContext = fomo.filter === 'todos'
     ? 'todos'
-    : fomo.filter === 'refs' ? 'references' : isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
+    : fomo.filter === 'refs' ? 'references'
+      : fomo.filter === 'manual' ? 'manual'
+        : isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
 
   const digestRows = useMemo(() => flattenDigest(fomo.digest, expanded), [fomo.digest, expanded]);
   const digestRow = digestKey ? digestRows.find((r) => r.key === digestKey) : undefined;
@@ -184,6 +190,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const sources = useMemo<SourceInfo[]>(() => sourceInfos(fomo.settings), [fomo.settings]);
   const sourceLabels = useMemo(
     () => ({
+      [MANUAL_SOURCE_ID]: 'Manual',
       ...Object.fromEntries(fomo.settings.sharePointSources.map((source) => [source.id, source.displayName])),
       ...fomo.settings.sourceNames,
       ...fomo.settings.sourceLabels,
@@ -230,7 +237,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   }, [fomo, clearSelection]);
 
   const sourceName = useCallback(
-    (id: string) => fomo.settings.sourceLabels[id] ?? fomo.settings.sourceNames[id] ?? sources.find((s) => s.id === id)?.displayName ?? experimentalSourceInfo(id, fomo.settings.sharePointSources)?.displayName ?? id,
+    (id: string) => id === MANUAL_SOURCE_ID ? 'Manual' : fomo.settings.sourceLabels[id] ?? fomo.settings.sourceNames[id] ?? sources.find((s) => s.id === id)?.displayName ?? experimentalSourceInfo(id, fomo.settings.sharePointSources)?.displayName ?? id,
     [fomo.settings.sourceLabels, fomo.settings.sourceNames, fomo.settings.sharePointSources, sources],
   );
 
@@ -478,7 +485,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       // Shift+↑/↓ jumps several rows (more on a tall window).
       const step = e.shiftKey && (key === 'ArrowDown' || key === 'ArrowUp') ? jumpStep(screenLines()) : 1;
 
-      if (sourcePicker || refDialog) return;
+      if (sourcePicker || refDialog || manualDialogOpen) return;
       if (showHelp) {
         if (key === 'Escape' || key === 'Backspace' || key === 'h') setShowHelp(false);
         return;
@@ -570,7 +577,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
       if (key === 'b') {
         const update = isGrouped ? rowUpdate(digestRow) : selected;
-        if (update) void fileReference(update);
+        if (update?.source === MANUAL_SOURCE_ID) fomo.notify('Manual entries cannot be filed as bookmarks');
+        else if (update) void fileReference(update);
         else fomo.notify(isGrouped && digestRow ? 'Expand the topic to file a single update' : 'Select an update to file it in Bookmarks');
         return;
       }
@@ -625,7 +633,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         if (key === 'p' && update) { groupedToggleSaved(update); return; }
         if (key === 'o') {
           const target = update ?? row.entry.items[0];
-          if (target) openUrl(target.url);
+          if (target && target.source !== MANUAL_SOURCE_ID) openUrl(target.url);
           return;
         }
         return;
@@ -656,13 +664,13 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       if (key === 'x') { handleReadAndNext(); return; }
       if (key === 'r') { handleSetStatus(selected.id, selected.status === 'unread' ? 'read' : 'unread'); return; }
       if (key === 'p') { handleToggleSaved(selected.id, !selected.saved); return; }
-      if (key === 'o' && selected.url) { openUrl(selected.url); return; }
+      if (key === 'o' && selected.url && selected.source !== MANUAL_SOURCE_ID) { openUrl(selected.url); return; }
     }
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    fomo, selected, isGrouped, isSaved, pane, viewHelp, digestRow, refDialog, fileReference, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
+    fomo, selected, isGrouped, isSaved, pane, viewHelp, digestRow, refDialog, manualDialogOpen, fileReference, digestKey, digestRows, expanded, hasSelection, showSettings, showHelp,
     sourcePicker, openSourcePicker, applySourceFilter,
     showPreview, focusedPane,
     previewPosition, setFilter, setSearch, clearSelection, setTopicExpanded, digestMarkRead, digestReadAndNext, savedReadAndNext, toggleDigestRead, groupedToggleSaved,
@@ -789,8 +797,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           onToggleSaved={() => groupedToggleSaved(update)}
           onReadAndNext={() => (isSaved ? savedReadAndNext(digestRow) : digestReadAndNext(digestRow))}
           onNextUnread={digestNextTopic}
-          onOpen={() => openUrl(update.url)}
-          onFileReference={() => void fileReference(update)}
+          onOpen={update.source === MANUAL_SOURCE_ID ? undefined : () => openUrl(update.url)}
+          onFileReference={update.source === MANUAL_SOURCE_ID ? undefined : () => void fileReference(update)}
           onClose={goBack}
           {...duplicateProps}
         />
@@ -805,8 +813,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         onToggleSaved={handleToggleSaved}
         onReadAndNext={handleReadAndNext}
         onNextUnread={handleNextUnread}
-        onOpen={() => selected.url && openUrl(selected.url)}
-        onFileReference={() => void fileReference(selected)}
+        onOpen={selected.source === MANUAL_SOURCE_ID ? undefined : () => selected.url && openUrl(selected.url)}
+        onFileReference={selected.source === MANUAL_SOURCE_ID ? undefined : () => void fileReference(selected)}
         onClose={() => setSelected(undefined)}
         {...duplicateProps}
       />
@@ -935,6 +943,8 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           <TodosPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
         ) : fomo.filter === 'refs' ? (
           <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
+        ) : fomo.filter === 'manual' ? (
+          <ManualPane service={service} onDialogOpenChange={setManualDialogOpen} />
         ) : (
           <div
             ref={listPaneRef}

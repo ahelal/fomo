@@ -5,6 +5,9 @@ import type { YoutubeApi } from './scraper/youtube-api.js';
 
 export type Status = 'unread' | 'read';
 
+/** Updates added by the user in the Learning Manual. */
+export const MANUAL_SOURCE_ID = 'fomo-learning-manual';
+
 /** Source identifier, e.g. 'github', 'azure', 'vscode'. Extensible string. */
 export type SourceId = string;
 
@@ -394,6 +397,10 @@ export interface FomoService {
   /** Set status on many updates (e.g. every item in a digest topic). */
   setStatusMany(ids: string[], status: Status): Promise<void>;
   setSaved(id: string, saved: boolean): Promise<Update>;
+  listManualEntries(): Promise<Update[]>;
+  createManualEntry(req: CreateManualEntryRequest): Promise<Update>;
+  updateManualEntry(id: string, patch: UpdateManualEntryRequest): Promise<Update>;
+  deleteManualEntry(id: string): Promise<void>;
   /** Delete every stored update of a source (saved ones too); the next fetch adds them back as new. Returns how many. */
   deleteSourceUpdates(source: SourceId): Promise<number>;
   getStats(): Promise<StatsResponse>;
@@ -490,6 +497,16 @@ export interface ListReferencesResponse {
   references: Reference[];
   folderColors?: FolderColorMap;
   folderMetadata?: FolderMetadataMap;
+}
+
+export interface CreateManualEntryRequest {
+  title: string;
+  body: string;
+}
+
+export interface UpdateManualEntryRequest {
+  title: string;
+  body: string;
 }
 
 /** Copilot's proposal for filing a link (TUI only). */

@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { Update } from '@fomo/core';
+import { MANUAL_SOURCE_ID, type Update } from '@fomo/core';
 import { DetailPane } from './DetailPane.js';
 
 const update: Update = {
@@ -27,5 +27,18 @@ describe('release-note previews', () => {
     const html = render('<p>Features</p><ul><li>First</li><li>Second</li></ul><script>alert(1)</script>');
     expect(html).toContain('- First\n\n- Second</pre>');
     expect(html).not.toContain('alert(1)');
+  });
+
+  it('labels manual entries and displays their body without an external URL', () => {
+    const html = renderToStaticMarkup(
+      <DetailPane
+        update={{ ...update, id: 'manual__1', source: MANUAL_SOURCE_ID, url: 'fomo://manual/1', content: 'Study notes' }}
+        onSetStatus={() => {}}
+        onToggleSaved={() => {}}
+      />,
+    );
+    expect(html).toContain('Manual');
+    expect(html).toContain('Study notes');
+    expect(html).not.toContain('fomo://manual/1');
   });
 });

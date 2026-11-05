@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FomoDirectService, extractText, extractTitle } from '../service.js';
+import { MANUAL_SOURCE_ID } from '../types.js';
 import type { ExperimentalProvider } from '../experimental.js';
 
 const metadataStores = vi.hoisted(() => {
@@ -29,6 +30,8 @@ vi.mock('../store/tables.js', () => {
     setTopicId: vi.fn().mockResolvedValue(undefined),
     setGist: vi.fn().mockResolvedValue(undefined),
     setSaved: vi.fn(),
+    updateManualEntry: vi.fn(),
+    deleteManualEntry: vi.fn().mockResolvedValue(undefined),
     setPageInfo: vi.fn().mockResolvedValue(undefined),
     insertUpdate: vi.fn().mockResolvedValue(true),
     recordFetch: vi.fn().mockResolvedValue(undefined),
@@ -579,6 +582,53 @@ describe('FomoDirectService', () => {
     expect(result).toEqual(mockUpdate);
   });
 
+  it('lists Learning Manual entries from the Manual source with their bodies', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const entries = [{ id: `${MANUAL_SOURCE_ID}__one`, source: MANUAL_SOURCE_ID, title: 'Study', content: 'Read this', status: 'unread' }];
+    __mockStore.listUpdates.mockResolvedValueOnce({ updates: entries, total: 1, hasMore: false });
+
+    await expect(svc.listManualEntries()).resolves.toEqual(entries);
+    expect(__mockStore.listUpdates).toHaveBeenCalledWith({
+      sources: [MANUAL_SOURCE_ID],
+      status: 'all',
+      limit: Number.MAX_SAFE_INTEGER,
+      includeContent: true,
+    });
+  });
+
+  it('creates manual entries as regular unread updates', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const entry = { id: `${MANUAL_SOURCE_ID}__hash`, source: MANUAL_SOURCE_ID, title: 'Study', content: 'Read this', status: 'unread' };
+    __mockStore.getUpdate.mockResolvedValueOnce(entry);
+
+    await expect(svc.createManualEntry({ title: ' Study ', body: ' Read this ' })).resolves.toEqual(entry);
+    expect(__mockStore.insertUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      source: MANUAL_SOURCE_ID,
+      title: 'Study',
+      content: 'Read this',
+      datePublished: expect.any(String),
+      url: expect.stringMatching(/^fomo:\/\/manual\//),
+    }));
+    expect(__mockStore.getUpdate).toHaveBeenCalledWith(`${MANUAL_SOURCE_ID}__hash`);
+  });
+
+  it('requires both manual entry fields', async () => {
+    await expect(svc.createManualEntry({ title: ' ', body: 'text' })).rejects.toThrow('Title is required');
+    await expect(svc.createManualEntry({ title: 'title', body: ' ' })).rejects.toThrow('Body is required');
+  });
+
+  it('updates and deletes only manual entries', async () => {
+    const { __mockStore } = await import('../store/tables.js') as any;
+    const id = `${MANUAL_SOURCE_ID}__hash`;
+    const entry = { id, title: 'Updated', content: 'New body' };
+    __mockStore.updateManualEntry.mockResolvedValueOnce(entry);
+
+    await expect(svc.updateManualEntry(id, { title: 'Updated', body: 'New body' })).resolves.toEqual(entry);
+    await svc.deleteManualEntry(id);
+    expect(__mockStore.updateManualEntry).toHaveBeenCalledWith(id, { title: 'Updated', body: 'New body' });
+    expect(__mockStore.deleteManualEntry).toHaveBeenCalledWith(id);
+  });
+
   it('getSources lists built-ins and user sources from the settings', async () => {
     const { __mockStore } = await import('../store/tables.js') as any;
     __mockStore.getSettings.mockResolvedValueOnce({
@@ -768,8 +818,9 @@ describe('FomoDirectService', () => {
     __mockStore.listUpdates.mockResolvedValueOnce({
       updates: [
         { id: 'a__1', source: 'a', title: 'A1', url: 'u', datePublished: '2026-01-02', dateAdded: 'x', status: 'unread', saved: false, content: '' },
+        { id: `${MANUAL_SOURCE_ID}__1`, source: MANUAL_SOURCE_ID, title: 'Private note', url: 'fomo://manual/1', datePublished: '2026-01-02', dateAdded: 'x', status: 'unread', saved: false, content: 'Private body' },
       ],
-      total: 1,
+      total: 2,
       hasMore: false,
     });
     const summarizer = {
@@ -783,6 +834,7 @@ describe('FomoDirectService', () => {
     expect(__mockStore.listUpdates).toHaveBeenCalledWith(expect.objectContaining({ excludeSharePoint: true }));
     expect(__mockTopicStore.upsertTopic).toHaveBeenCalledWith(expect.objectContaining({ id: 'new-topic', title: 'T' }));
     expect(__mockStore.setTopicId).toHaveBeenCalledWith('a__1', 'new-topic', undefined);
+    expect(__mockStore.setTopicId).not.toHaveBeenCalledWith(`${MANUAL_SOURCE_ID}__1`, expect.anything(), expect.anything());
   });
 
   describe('summarizePost', () => {
@@ -808,6 +860,17 @@ describe('FomoDirectService', () => {
       __mockStore.getUpdate.mockResolvedValue(update);
       return __mockStore;
     }
+
+    it('does not send Learning Manual content to Copilot', async () => {
+      await mockStore({ ...post, source: MANUAL_SOURCE_ID });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const summarizer = { generateJson: vi.fn() };
+
+      await expect(svc.summarizePost(`${MANUAL_SOURCE_ID}__1`, summarizer)).rejects.toThrow('Learning Manual entries are not sent to Copilot');
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(summarizer.generateJson).not.toHaveBeenCalled();
+    });
 
     it('returns a saved gist without fetching or calling the model', async () => {
       await mockStore({ ...post, gist: { summary: 'Saved', points: [] } });

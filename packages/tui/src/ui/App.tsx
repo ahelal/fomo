@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Box, useInput, useApp } from 'ink';
 import type { Update, Status, StatsResponse, PreviewPosition, SourceInfo, AppSettings, DigestEntry, DigestRow, SourceFetchResult, ReferenceSuggestion, TopicSort, UpdateSort } from '@fomo/core';
-import { DEFAULT_SETTINGS, MAX_SOURCE_LABEL_LENGTH, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatDate, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, experimentalSourceInfos, isExperimentalSource, isSharePointSourceId, type SourceDraft } from '@fomo/core';
+import { DEFAULT_SETTINGS, MANUAL_SOURCE_ID, MAX_SOURCE_LABEL_LENGTH, addSourcePatch, buildConnectLink, newUserSource, removeSourcePatch, restoreSourcesPatch, retiredSources, forgetSourcePatch, sourceDraft, sourceDraftPatch, sourceInfos, userSource, flattenDigest, formatDate, formatUpdateTime, isDefaultSort, jumpStep, locateUpdate, nextDuplicate, nextRowKey, nextSort, sortDigestEntries, sortLabel, TOPIC_SORTS, DEFAULT_COLOR, updateSorts, patchDigest, removeAndAdvance, searchTerms, shortcutKey, soloUpdate, experimentalSourceInfo, experimentalSourceInfos, isExperimentalSource, isSharePointSourceId, type SourceDraft } from '@fomo/core';
 import { FomoDirectService, type PostGistResult, type SuggestReferenceRequest } from '@fomo/core/service';
 import type { DigestResult, DigestInspection } from '@fomo/core/digest';
 import { AUDIT_FILE, autoFetchInterval, DEFAULT_LINK_DAYS, DEFAULT_PROFILE, defaultBackupDir, envSource, readConfigFile, tildify, type LocalConfig } from '../config.js';
@@ -35,10 +35,12 @@ import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, FETCHING_NOTE, SIGNING_IN_NOTE } from './components/SettingsPane.js';
 import { TodosView } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
+import { ManualView } from './components/ManualView.js';
 import { ColorPicker } from './components/ColorPicker.js';
 import { editText, editMultiline } from './editText.js';
 import { useReferences } from './hooks/useReferences.js';
 import { useTodos } from './hooks/useTodos.js';
+import { useManual } from './hooks/useManual.js';
 import { useColorPicker } from './hooks/useColorPicker.js';
 import { useProfilePicker, type ProfileControls } from './hooks/useProfilePicker.js';
 import { useDuplicates } from './hooks/useDuplicates.js';
@@ -49,10 +51,10 @@ type GroupableView = 'unread' | 'saved';
 type GroupedViews = Record<GroupableView, boolean>;
 const canGroup = (f: FilterStatus): f is GroupableView => f === 'unread' || f === 'saved';
 const isGrouped = (f: FilterStatus, g: GroupedViews) => canGroup(f) && g[f];
-const VIEW_ORDER = ['all', 'unread', 'read', 'saved', 'refs', 'todos'] as const;
+const VIEW_ORDER = ['all', 'unread', 'read', 'saved', 'refs', 'todos', 'manual'] as const;
 type View = typeof VIEW_ORDER[number];
-/** The view a number key (1–6) shows. */
-const viewForKey = (input: string): View | undefined => (/^[1-6]$/.test(input) ? VIEW_ORDER[Number(input) - 1] : undefined);
+/** The view a number key (1–7) shows. */
+const viewForKey = (input: string): View | undefined => (/^[1-7]$/.test(input) ? VIEW_ORDER[Number(input) - 1] : undefined);
 
 /** Sort of each view (cycled with s); kept for the session only. */
 interface ViewSorts {
@@ -167,8 +169,9 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     () => experimentalSourceInfos(appSettings),
     [appSettings.sourceNames, appSettings.extensionNames, appSettings.sharePointSources],
   );
-  const sourceLabels = useMemo(
+  const sourceLabels = useMemo<Record<string, string>>(
     () => ({
+      [MANUAL_SOURCE_ID]: 'Manual',
       ...Object.fromEntries(appSettings.sharePointSources.map((source) => [source.id, source.displayName])),
       ...appSettings.sourceNames,
       ...appSettings.sourceLabels,
@@ -445,6 +448,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     jump: jumpStep(rows),
   });
   const todos = useTodos({ service, audit, pickColor: colorPicker.open, notify: showMessage, openAttachment: openTodoAttachment, jump: jumpStep(rows) });
+  const manual = useManual({ service, audit, notify: showMessage });
 
   const loadSeq = useRef(0);
   const loadUpdates = useCallback(
@@ -513,7 +517,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   }, []);
 
   const sourceName = useCallback(
-    (id: string) => appSettings.sourceLabels[id] || appSettings.sourceNames[id] || sources.find((s) => s.id === id)?.displayName || experimentalSourceInfo(id, appSettings.sharePointSources)?.displayName || id,
+    (id: string) => id === MANUAL_SOURCE_ID ? 'Manual' : appSettings.sourceLabels[id] || appSettings.sourceNames[id] || sources.find((s) => s.id === id)?.displayName || experimentalSourceInfo(id, appSettings.sharePointSources)?.displayName || id,
     [appSettings.sourceLabels, appSettings.sourceNames, appSettings.sharePointSources, sources],
   );
 
@@ -905,6 +909,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       showMessage(isGrouped(filterRef.current, groupedViewsRef.current) ? 'Expand the topic to refresh a single update' : 'Nothing selected');
       return;
     }
+    if (selected.source === MANUAL_SOURCE_ID) { showMessage('Manual entries do not have an external page'); return; }
     setShowDetail(true);
     const { id } = selected;
     if (refreshingRef.current.has(id)) { showMessage('⏳ Already refreshing this post'); return; }
@@ -941,6 +946,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       showMessage(isGrouped(filterRef.current, groupedViewsRef.current) ? 'Expand the topic to summarise a single update' : 'Nothing selected');
       return;
     }
+    if (selected.source === MANUAL_SOURCE_ID) { showMessage('Manual entries are not sent to Copilot'); return; }
     setShowDetail(true);
     const alreadySaved = () => {
       regenArmed.current = { id: selected.id, at: Date.now() };
@@ -1104,6 +1110,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   const doOpen = useCallback(async () => {
     const selected = updatesRef.current[selectedRef.current];
     if (!selected) return;
+    if (selected.source === MANUAL_SOURCE_ID) { showMessage('Manual entries have no external link'); return; }
     try {
       const { default: open } = await import('open');
       await open(selected.url);
@@ -1468,18 +1475,20 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     showMessage(`${name} off${wasFetching ? ' · its fetch was stopped' : ''}${items ? ` · its ${items} items stay (x deletes them)` : ''}`, 5000);
   }, [sourceName, fetchingExperimental, onConfigChange, config.experimentalSources, stats, audit, showMessage]);
 
-  /** Tab / Shift+Tab: step through the views in tab order (1–6), wrapping around. */
+  /** Tab / Shift+Tab: step through the views in tab order (1–7), wrapping around. */
   const cycleView = (dir: 1 | -1) => {
-    const current = refs.active ? 'refs' : todos.active ? 'todos' : filter;
+    const current = refs.active ? 'refs' : todos.active ? 'todos' : manual.active ? 'manual' : filter;
     showView(VIEW_ORDER[(VIEW_ORDER.indexOf(current) + dir + VIEW_ORDER.length) % VIEW_ORDER.length]!);
   };
 
-  /** Show one of the views 1–6, leaving Bookmarks or Todos first. */
+  /** Show one of the views 1–7, leaving Bookmarks or Todos first. */
   const showView = (next: View) => {
     if (refs.active) refs.close();
     if (todos.active) todos.close();
+    if (manual.active) manual.close();
     if (next === 'refs') { refs.openView(); return; }
     if (next === 'todos') { todos.openView(); return; }
+    if (next === 'manual') { manual.openView(); return; }
     setFilter(next);
     setSelectedIndex(0);
     void refresh(next);
@@ -1834,6 +1843,16 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         return;
       }
       todos.handleInput(raw, key);
+      return;
+    }
+
+    if (manual.active) {
+      if (input === 'h' && !manual.typing) { setHelpContext('manual'); setShowHelp(true); return; }
+      if (key.tab && !manual.typing) { cycleView(key.shift ? -1 : 1); return; }
+      if (input === 'w' && !manual.typing) { profilePicker.open(); return; }
+      const view = manual.typing ? undefined : viewForKey(input);
+      if (view && view !== 'manual') { showView(view); return; }
+      manual.handleInput(raw, key);
       return;
     }
 
@@ -2213,7 +2232,8 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     }
     if (input === 'b') {
       const sel = currentUpdate();
-      if (sel) refs.fileUpdate(sel);
+      if (sel?.source === MANUAL_SOURCE_ID) showMessage('Manual entries cannot be filed as bookmarks');
+      else if (sel) refs.fileUpdate(sel);
       else showMessage(grouped ? 'Expand the topic to file a single update' : 'Nothing selected');
       return;
     }
@@ -2355,6 +2375,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       }
       if (input === 'o') {
         const target = update ?? entry.items[0];
+        if (target?.source === MANUAL_SOURCE_ID) { showMessage('Manual entries have no external link'); return; }
         if (target) {
           void import('open')
             .then(({ default: open }) => open(target.url))
@@ -2434,12 +2455,12 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
 
   const filterBar = (
     <FilterBar
-      active={refs.active ? 'refs' : todos.active ? 'todos' : filter}
+      active={refs.active ? 'refs' : todos.active ? 'todos' : manual.active ? 'manual' : filter}
       groupedViews={groupedViews}
       columns={columns}
       sourceLabel={sourceFilterLabel}
-      search={!todos.active && !refs.active && search ? search : undefined}
-      matches={!todos.active && !refs.active && search ? searchMatches : undefined}
+      search={!todos.active && !refs.active && !manual.active && search ? search : undefined}
+      matches={!todos.active && !refs.active && !manual.active && search ? searchMatches : undefined}
       searchDraft={searchDraft}
       sortLabel={activeSortLabel}
     />
@@ -2688,6 +2709,16 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         {filterBar}
         <TodosView {...todos.view} height={availableH} columns={columns} />
         {colorPopup}
+      </Box>
+    );
+  }
+
+  if (manual.active) {
+    return (
+      <Box flexDirection="column" height={rows}>
+        {statusBar}
+        {filterBar}
+        <ManualView {...manual.view} height={availableH} columns={columns} />
       </Box>
     );
   }

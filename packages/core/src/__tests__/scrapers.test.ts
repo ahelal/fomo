@@ -18,6 +18,7 @@ import {
   updateSourcePatch,
   userSource,
 } from '../scraper/specs.js';
+import { MANUAL_SOURCE_ID } from '../types.js';
 import { parseFeed } from '../scraper/feed.js';
 import { experimentalSourceInfos } from '../experimental.js';
 import { DEFAULT_SETTINGS, type AppSettings, type SourcePlugin, type SourceSpec } from '../types.js';
@@ -572,6 +573,9 @@ describe('source specs', () => {
   });
 
   it('picks an id no other source uses', () => {
+    expect(newUserSource({ url: 'https://example.com/rss', name: 'Fomo Learning Manual' })).toMatchObject({
+      spec: { id: `${MANUAL_SOURCE_ID}-2` },
+    });
     const taken = newUserSource({ url: 'https://example.com/rss', name: 'FOMO Releases' });
     expect(taken).toMatchObject({ spec: { id: 'fomo-releases-2' } });
     const first = newUserSource({ url: 'https://example.com/rss', name: 'Mine' });

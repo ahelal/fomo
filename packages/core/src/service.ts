@@ -23,6 +23,7 @@ import type {
   ScrapedItem,
   SourceDeps,
 } from './types.js';
+import { MANUAL_SOURCE_ID } from './types.js';
 
 /** A source as `fetch` runs it: a scraper, or an experimental provider. */
 interface Fetcher {
@@ -117,6 +118,7 @@ export class FomoDirectService extends FomoStorageService {
     await this.ensureInit();
     const previous = await this.store.getUpdate(id);
     if (!previous) throw new Error(`Update not found: ${id}`);
+    if (previous.source === MANUAL_SOURCE_ID) throw new Error('Learning Manual entries do not have an external page');
     if (isSharePointSourceId(previous.source) || previous.sharePointOrigin) {
       throw new Error('SharePoint sources refresh through a metadata scan; authenticated page refresh is unavailable');
     }
@@ -150,6 +152,7 @@ export class FomoDirectService extends FomoStorageService {
     await this.ensureInit();
     const update = await this.store.getUpdate(id);
     if (!update) throw new Error(`Update not found: ${id}`);
+    if (update.source === MANUAL_SOURCE_ID) throw new Error('Learning Manual entries are not sent to Copilot');
     if (isSharePointSourceId(update.source) || update.sharePointOrigin) {
       throw new Error('SharePoint updates are not sent to Copilot');
     }
@@ -192,6 +195,7 @@ export class FomoDirectService extends FomoStorageService {
     if (req.updateId) {
       const update = await this.store.getUpdate(req.updateId);
       if (!update) throw new Error(`Update not found: ${req.updateId}`);
+      if (update.source === MANUAL_SOURCE_ID) throw new Error('Learning Manual entries are not sent to Copilot');
       if (isSharePointSourceId(update.source) || update.sharePointOrigin) {
         throw new Error('SharePoint updates are not sent to Copilot');
       }
@@ -374,8 +378,11 @@ export class FomoDirectService extends FomoStorageService {
   async digest(summarizer: Summarizer, options: DigestOptions = {}): Promise<DigestResult> {
     await this.ensureInit();
     const updates = {
-      listUpdates: (query: Parameters<typeof this.store.listUpdates>[0]) =>
-        this.store.listUpdates({ ...query, excludeSharePoint: true }),
+      listUpdates: async (query: Parameters<typeof this.store.listUpdates>[0]) => {
+        const result = await this.store.listUpdates({ ...query, excludeSharePoint: true });
+        const visible = result.updates.filter((update) => update.source !== MANUAL_SOURCE_ID);
+        return { ...result, updates: visible, total: visible.length, hasMore: false };
+      },
       setTopicId: (id: string, topicId: string, summary?: string) => this.store.setTopicId(id, topicId, summary),
     };
     return runDigest({ updates, topics: this.topicStore }, summarizer, options);

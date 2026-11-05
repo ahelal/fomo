@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDate, formatDateTime, previewText, type Update, type Status } from '@fomo/core';
+import { formatDate, formatDateTime, MANUAL_SOURCE_ID, previewText, type Update, type Status } from '@fomo/core';
 import { DuplicateLinks } from './DuplicateLinks.js';
 
 interface Props {
@@ -31,7 +31,7 @@ export function DetailPane({
   update, onSetStatus, onToggleSaved, contentLoading, onReadAndNext, onNextUnread, onOpen, onFileReference, onClose,
   duplicates = [], listed = NO_IDS, onJumpDuplicate, labelOf = sourceId, colorOf = noColor,
 }: Props) {
-  const content = previewText(update.content);
+  const content = update.source === MANUAL_SOURCE_ID ? update.content : previewText(update.content);
   const hasContent = !!content;
 
   return (
@@ -41,7 +41,7 @@ export function DetailPane({
       <div className="detail-pane__meta">
         <div className="detail-pane__meta-row">
           <span>Source</span>
-          <span className="detail-pane__meta-val">{update.source}</span>
+          <span className="detail-pane__meta-val">{update.source === MANUAL_SOURCE_ID ? 'Manual' : update.source}</span>
         </div>
         <div className="detail-pane__meta-row">
           <span>Published</span>
@@ -49,7 +49,7 @@ export function DetailPane({
         </div>
         {update.dateAdded && (
           <div className="detail-pane__meta-row">
-            <span>Fetched</span>
+            <span>{update.source === MANUAL_SOURCE_ID ? 'Added' : 'Fetched'}</span>
             <span className="detail-pane__meta-val">{formatDateTime(update.dateAdded)}</span>
           </div>
         )}
@@ -65,14 +65,16 @@ export function DetailPane({
         )}
       </div>
 
-      <a
-        className="detail-pane__url"
-        href={update.url}
-        target="_blank"
-        rel="noreferrer noopener"
-      >
-        {update.url}
-      </a>
+      {update.source !== MANUAL_SOURCE_ID && (
+        <a
+          className="detail-pane__url"
+          href={update.url}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          {update.url}
+        </a>
+      )}
 
       {/* Mobile-only quick actions: shown when callbacks provided */}
       {(onReadAndNext || onNextUnread || onOpen || onClose) && (

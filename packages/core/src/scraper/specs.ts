@@ -1,4 +1,5 @@
 import type { AppSettings, SourceId, SourceInfo, SourceSpec, UserSourceSpec } from '../types.js';
+import { MANUAL_SOURCE_ID } from '../types.js';
 import { EXPERIMENTAL_SOURCE_INFOS, experimentalSourceInfo, experimentalSourceInfos, isExperimentalSource } from '../experimental.js';
 import { normalizeChangelogPath } from './github.js';
 import { parseYoutubeUrl, youtubeName, youtubeUrl } from './youtube.js';
@@ -136,7 +137,7 @@ export function newUserSource(input: NewSourceInput, settings: Partial<SourceSet
   const repo = urls.length === 1 ? urls[0].match(GITHUB_REPO_URL)?.[1] : undefined;
   const defaultName = target ? youtubeName(target) : repo ? `${repo} releases` : new URL(urls[0]).hostname.replace(/^www\./, '');
   const displayName = input.name?.trim() || defaultName;
-  const taken = new Set([...ALL_BUILTIN_IDS, ...EXPERIMENTAL_SOURCE_INFOS.map((s) => s.id), ...(settings.sharePointSources ?? []).map((s) => s.id), ...(settings.userSources ?? []).map((s) => s.id)]);
+  const taken = new Set([MANUAL_SOURCE_ID, ...ALL_BUILTIN_IDS, ...EXPERIMENTAL_SOURCE_INFOS.map((s) => s.id), ...(settings.sharePointSources ?? []).map((s) => s.id), ...(settings.userSources ?? []).map((s) => s.id)]);
   const id = uniqueId(slugify(displayName) || 'source', taken);
 
   if (repo) {
