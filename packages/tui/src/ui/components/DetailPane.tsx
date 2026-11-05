@@ -140,7 +140,7 @@ export function DetailPane({
         <Text color={badge.color} bold>{badge.label.toLowerCase()}</Text>
         {update.saved && <Text color="#e3b341" bold>{' ⭐'}</Text>}
         {manual ? (
-          <Text color="#8b949e" dimColor wrap="truncate">{'   edit in Learning Manual'}</Text>
+          <Text color="#8b949e" dimColor wrap="truncate">{'   Manual'}</Text>
         ) : summarizing ? (
           <Text color={GIST_COLOR} wrap="truncate">{'   ⟳ Copilot is summarising…'}</Text>
         ) : refreshing ? (

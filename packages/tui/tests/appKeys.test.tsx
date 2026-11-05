@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const openMock = vi.hoisted(() => vi.fn(async (_url: string) => {}));
 vi.mock('open', () => ({ default: openMock }));
-import { COLOR_PALETTE, DEFAULT_COLOR, DEFAULT_SETTINGS, experimentalSourceInfos, moveInGrid, paletteIndex, retiredSources, sourceInfos, type AppSettings } from '@fomo/core';
+import { COLOR_PALETTE, DEFAULT_COLOR, DEFAULT_SETTINGS, MANUAL_SOURCE_ID, experimentalSourceInfos, moveInGrid, paletteIndex, retiredSources, sourceInfos, type AppSettings, type Update } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import type { DigestInspection, DigestResult } from '@fomo/core/digest';
 import { App, REGROUP_CONFIRM_MS, type DigestRunOptions } from '../src/ui/App.js';
@@ -367,7 +367,113 @@ describe('navigation', () => {
   });
 });
 
-describe('a audit trail', () => {
+describe('a adds manual items from the feed', () => {
+  const entry: Update = {
+    id: `${MANUAL_SOURCE_ID}__1`, source: MANUAL_SOURCE_ID, title: 'Study notes',
+    content: 'First line\nSecond line', url: 'fomo://manual/1',
+    datePublished: '2026-11-05', dateAdded: '2026-11-05', status: 'unread', saved: false,
+  };
+
+  it.each(['1', '2', '3', '4'])('adds from view %s without switching to a new tab', async (view) => {
+    const createManualEntry = vi.fn(async () => entry);
+    const getStats = vi.fn(service.getStats);
+    const svc = { ...service, createManualEntry, getStats } as FomoDirectService;
+    const { press, frame, audit } = await renderApp(undefined, { service: svc });
+    await press(view);
+    expect(frame()).not.toContain('7 Manual');
+    await press('A');
+    expect(frame()).toContain('Add manual item');
+    expect(frame()).not.toContain('Audit trail');
+    await press('Study notes');
+    await press('\t');
+    await press('First line');
+    await press('\r');
+    await press('Second line');
+    const statsCalls = getStats.mock.calls.length;
+    await press('\u0013');
+    expect(createManualEntry).toHaveBeenCalledTimes(1);
+    expect(createManualEntry).toHaveBeenCalledWith({ title: entry.title, body: entry.content });
+    expect(getStats.mock.calls.length).toBeGreaterThan(statsCalls);
+    expect(frame()).not.toContain('Add manual item');
+    expect(frame()).toContain('unread in Manual');
+    expect(audit.recent()).toContainEqual(expect.objectContaining({ action: 'manual', detail: 'created “Study notes”' }));
+  });
+
+  it('cancels without saving and keeps number keys inside the form', async () => {
+    const createManualEntry = vi.fn();
+    const { press, frame } = await renderApp(undefined, {
+      service: { ...service, createManualEntry } as FomoDirectService,
+    });
+    await press('a');
+    await press('1234');
+    expect(frame()).toContain('1234');
+    await press('q');
+    expect(frame()).toContain('1234q');
+    await press('\t');
+    await press('q');
+    expect(frame()).toContain('q▏');
+    await press('\u001b');
+    expect(frame()).not.toContain('Add manual item');
+    expect(createManualEntry).not.toHaveBeenCalled();
+    await press('7');
+    expect(frame()).not.toContain('Add manual item');
+  });
+
+  it('requires both fields and keeps the draft after a save error', async () => {
+    const createManualEntry = vi.fn().mockRejectedValue(new Error('Storage unavailable'));
+    const { press, frame, audit } = await renderApp(undefined, {
+      service: { ...service, createManualEntry } as FomoDirectService,
+    });
+    await press('a');
+    await press('\u0013');
+    expect(frame()).toContain('Title is required');
+    await press('Study notes');
+    await press('\u0013');
+    expect(frame()).toContain('Body is required');
+    expect(createManualEntry).not.toHaveBeenCalled();
+    await press('\t');
+    await press('Keep this draft');
+    await press('\u0013');
+    expect(frame()).toContain('Storage unavailable');
+    expect(frame()).toContain('Study notes');
+    expect(frame()).toContain('Keep this draft');
+    expect(audit.recent()).toContainEqual(expect.objectContaining({ action: 'manual', level: 'error' }));
+  });
+});
+
+describe('topic expansion shortcuts', () => {
+  it.each(['2', '4'])('uses arrows and Enter in view %s while l opens logs', async (view) => {
+    const items: Update[] = ['First release', 'Second release'].map((title, i) => ({
+      id: `app__${i}`, source: 'app', title, url: `https://example.com/${i}`,
+      datePublished: '2026-11-05', dateAdded: '2026-11-05', status: 'unread', saved: true, content: 'Preview',
+    }));
+    const entries = [{
+      topic: { id: 'topic', title: 'App releases', summary: 'Overview', highlights: [], createdAt: '2026-11-05', updatedAt: '2026-11-05' },
+      items, latestDate: '2026-11-05', sources: ['app'], synthetic: false,
+    }];
+    const { press, frame } = await renderApp(undefined, {
+      service: { ...service, getDigest: async () => ({ entries, pending: 0 }), getDuplicates: async () => [] } as FomoDirectService,
+    });
+    const children = () => frame().split('\n').filter((line) => line.includes('└ ')).join('\n');
+    if (view === '4') await press(view);
+    expect(children()).not.toContain('Second');
+    await press('\u001b[C');
+    expect(children()).toContain('Second');
+    await press('\u001b[D');
+    expect(children()).not.toContain('Second');
+    await press('\r');
+    expect(children()).toContain('Second');
+    await press('\r');
+    expect(children()).not.toContain('Second');
+    await press('L');
+    expect(frame()).toContain('Audit trail');
+    await press('l');
+    expect(frame()).not.toContain('Audit trail');
+    expect(children()).not.toContain('Second');
+  });
+});
+
+describe('l audit trail', () => {
   it('records regroup errors and shows them, with e for errors only', async () => {
     const failure: DigestResult = { ...result, remaining: 66, errors: ['planning: quota exceeded'] };
     const { audit, press, frame } = await renderApp(async () => failure);
@@ -380,7 +486,7 @@ describe('a audit trail', () => {
       expect.objectContaining({ level: 'error', action: 'regroup', detail: 'planning: quota exceeded' }),
     ]));
 
-    await press('a');
+    await press('l');
     expect(frame()).toContain('Audit trail');
     expect(frame()).toContain('planning: quota exceeded');
     expect(frame()).toContain('update(s)');
@@ -404,7 +510,7 @@ describe('a audit trail', () => {
 
   it('shows new entries while it is open', async () => {
     const { audit, press, frame } = await renderApp();
-    await press('a');
+    await press('l');
     expect(frame()).toContain('Nothing recorded yet');
     await act(async () => { audit.error('fetch', 'GitHub: 401'); });
     expect(frame()).toContain('GitHub: 401');

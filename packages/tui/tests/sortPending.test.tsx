@@ -209,7 +209,7 @@ describe('sort (s)', () => {
 });
 
 describe('Tab cycles the views', () => {
-  it('steps 1–7 with Tab, wrapping, and back with Shift+Tab', async () => {
+  it('steps 1–6 with Tab, wrapping, and back with Shift+Tab', async () => {
     const { press, frame, listCalls } = await renderApp();
     await press('\t'); // Unread → Read
     expect(listCalls.at(-1)?.status).toBe('read');
@@ -217,12 +217,10 @@ describe('Tab cycles the views', () => {
     await press('\t'); // → Refs
     await press('\t'); // → Todos
     expect(frame()).toContain('Zulu task');
-    await press('\t'); // → Manual
-    expect(frame()).toContain('Learning Manual');
     await press('\t'); // → All (wraps)
     expect(frame()).not.toContain('Zulu task');
     expect(listCalls.at(-1)?.status).toBe('all');
-    await press('\u001b[Z'); // Shift+Tab → Manual
-    expect(frame()).toContain('Learning Manual');
+    await press('\u001b[Z'); // Shift+Tab → Todos
+    expect(frame()).toContain('Zulu task');
   });
 });

@@ -142,7 +142,9 @@ The TUI can refresh an update's details from its linked page, for example when t
 
 ### Learning Manual
 
-The Learning Manual stores your own reading as entries with a title and body. Add or edit entries from view **7** in either app. New entries start **unread** and also appear in the regular All, Unread and Read lists with their source labeled **Manual**; mark them read or unread there like any other update. Manual entries have no external link and are not sent to Copilot for digest grouping or post summaries.
+Add your own reading directly from any of the first four tabs: press **a** in either app (or click **+ Add** in the web app), enter a title and body, then save with **Ctrl+S** (**Cmd+S** also works on the web). New entries start **unread** with source **Manual**, alongside other updates in the normal lists; mark them read or pending using the usual controls. There is no separate Manual tab. Manual entries have no external link and are not sent to Copilot for digest grouping or post summaries.
+
+In the TUI, **l** opens logs. Use **Right Arrow** to expand a topic, **Left Arrow** to collapse it, or **Enter** to toggle it.
 
 ### Todos
 

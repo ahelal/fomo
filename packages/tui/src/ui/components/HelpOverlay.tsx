@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import { searchTerms } from '@fomo/core';
 import { VERSION } from '../../version.js';
 
-export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references' | 'todos' | 'manual';
+export type HelpContext = 'list' | 'detail' | 'settings' | 'digest' | 'saved' | 'references' | 'todos';
 
 interface Props {
   context: HelpContext;
@@ -23,7 +23,7 @@ interface Section {
 const DIGEST_KEYS: [string, string][] = [
   ['i',    'Inspect grouping without starting a run'],
   ['↵',    'Expand topic / toggle detail'],
-  ['→/l',  'Expand topic'],
+  ['→',    'Expand topic'],
   ['←',    'Collapse topic'],
   ['r',    'Toggle topic (or update) read / unread'],
   ['x',    'Mark read & next unread'],
@@ -40,7 +40,7 @@ const DIGEST_KEYS: [string, string][] = [
 const SAVED_KEYS: [string, string][] = [
   ['i',    'Inspect grouping without starting a run'],
   ['↵',    'Expand topic / toggle detail'],
-  ['→/l',  'Expand topic'],
+  ['→',    'Expand topic'],
   ['←',    'Collapse topic'],
   ['r',    'Toggle topic (or update) read / unread'],
   ['x',    'Mark read & next'],
@@ -94,14 +94,14 @@ const GLOBAL_KEYS: [string, string][] = [
   ['w',    'Switch profile (storage account): ↵ switch, a add, e rename, x remove'],
   ['5',    'Bookmarks: links filed into folders'],
   ['6',    'Todos: tasks filed into folders'],
-  ['7',    'Learning Manual: write and manage your own reading'],
+  ['a',    'In views 1–4: add a manual item (title + body; starts unread)'],
   ['b',    'File the selected update in Bookmarks (Copilot suggests folder + note)'],
   ['d',    'Jump to the duplicate / original of the update, if it is in this view'],
   ['/',    'Search titles & content in this view (↵ search)'],
   ['v',    'Pick which sources to show (works with the search)'],
   ['Esc',  'Clear the search, then the source filter'],
   ['.',    'Show preview / toggle its position'],
-  ['a',    'Audit trail: every action and error (e: errors only)'],
+  ['l',    'Logs: audit trail of every action and error (e: errors only)'],
   ['h',    'Show this help'],
 ];
 
@@ -160,15 +160,6 @@ const TODO_FORM_KEYS: [string, string][] = [
   ['Esc',  'Cancel'],
 ];
 
-const MANUAL_KEYS: [string, string][] = [
-  ['a', 'Add an entry with a title and body; it starts unread'],
-  ['e / ↵', 'Edit the selected entry'],
-  ['d d', 'Delete the selected entry'],
-  ['↑↓ / j k', 'Select an entry'],
-  ['Tab', 'Switch between title and body while editing'],
-  ['Ctrl+S', 'Save the entry'],
-];
-
 const SETTINGS_KEYS: [string, string][] = [
   ['↑/k',  'Move up'],
   ['↓/j',  'Move down'],
@@ -209,9 +200,6 @@ function buildSections(context: Props['context']): Section[] {
       { title: 'Add / edit form', keys: TODO_FORM_KEYS },
     ];
   }
-  if (context === 'manual') {
-    return [{ title: 'Learning Manual', keys: MANUAL_KEYS }];
-  }
   if (context === 'digest') {
     return [{ title: 'Unread topics', keys: DIGEST_KEYS }, { title: 'Global', keys: GLOBAL_KEYS }];
   }
@@ -235,7 +223,6 @@ const CONTEXT_LABEL: Record<string, string> = {
   saved: 'Pending · topics',
   references: 'Bookmarks',
   todos: 'Todos',
-  manual: 'Learning Manual',
 };
 
 const KEY_W = 8;

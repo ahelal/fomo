@@ -26,7 +26,8 @@ Everything happens inside the UI:
   c   config: sources, local settings, link a device, regroup, backup / restore
   t   todos
   b   references: links filed into folders (m files the selected update)
-  a   audit trail of actions and errors
+  a   add a manual item from views 1–4
+  l   logs: audit trail of actions and errors
   h   keyboard help
 
 Local config: ${CONFIG_FILE}

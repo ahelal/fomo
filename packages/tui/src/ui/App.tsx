@@ -35,7 +35,7 @@ import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, FETCHING_NOTE, SIGNING_IN_NOTE } from './components/SettingsPane.js';
 import { TodosView } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
-import { ManualView } from './components/ManualView.js';
+import { ManualForm } from './components/ManualForm.js';
 import { ColorPicker } from './components/ColorPicker.js';
 import { editText, editMultiline } from './editText.js';
 import { useReferences } from './hooks/useReferences.js';
@@ -51,10 +51,10 @@ type GroupableView = 'unread' | 'saved';
 type GroupedViews = Record<GroupableView, boolean>;
 const canGroup = (f: FilterStatus): f is GroupableView => f === 'unread' || f === 'saved';
 const isGrouped = (f: FilterStatus, g: GroupedViews) => canGroup(f) && g[f];
-const VIEW_ORDER = ['all', 'unread', 'read', 'saved', 'refs', 'todos', 'manual'] as const;
+const VIEW_ORDER = ['all', 'unread', 'read', 'saved', 'refs', 'todos'] as const;
 type View = typeof VIEW_ORDER[number];
-/** The view a number key (1–7) shows. */
-const viewForKey = (input: string): View | undefined => (/^[1-7]$/.test(input) ? VIEW_ORDER[Number(input) - 1] : undefined);
+/** The view a number key (1–6) shows. */
+const viewForKey = (input: string): View | undefined => (/^[1-6]$/.test(input) ? VIEW_ORDER[Number(input) - 1] : undefined);
 
 /** Sort of each view (cycled with s); kept for the session only. */
 interface ViewSorts {
@@ -82,7 +82,7 @@ interface Props {
   summarize?(id: string, force?: boolean): Promise<PostGistResult>;
   /** Ask Copilot where to file a link in Bookmarks and how to describe it. */
   suggestReference?(req: SuggestReferenceRequest): Promise<ReferenceSuggestion>;
-  /** Audit trail of actions and errors (viewed with `a`); in-memory when omitted. */
+  /** Audit trail of actions and errors (viewed with `l`); in-memory when omitted. */
   audit?: AuditLog;
   /** Where `audit` is stored (shown in the audit view). */
   auditFile?: string;
@@ -320,7 +320,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
   const refreshingRef = useRef(new Set<string>());
   const digestRows = useMemo(() => flattenDigest(digestEntries, expanded), [digestEntries, expanded]);
 
-  // ── Audit trail view (a) ────────────────────────────────────────────────────
+  // ── Audit trail view (l) ────────────────────────────────────────────────────
   const [showAudit, setShowAudit] = useState(false);
   const [auditIndex, setAuditIndex] = useState(0);
   const [auditErrorsOnly, setAuditErrorsOnly] = useState(false);
@@ -448,7 +448,6 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     jump: jumpStep(rows),
   });
   const todos = useTodos({ service, audit, pickColor: colorPicker.open, notify: showMessage, openAttachment: openTodoAttachment, jump: jumpStep(rows) });
-  const manual = useManual({ service, audit, notify: showMessage });
 
   const loadSeq = useRef(0);
   const loadUpdates = useCallback(
@@ -504,6 +503,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     },
     [loadUpdates, loadStats],
   );
+  const manual = useManual({ service, audit, notify: showMessage, onSaved: refresh });
 
   // Initial load
   useEffect(() => {
@@ -1475,20 +1475,18 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     showMessage(`${name} off${wasFetching ? ' · its fetch was stopped' : ''}${items ? ` · its ${items} items stay (x deletes them)` : ''}`, 5000);
   }, [sourceName, fetchingExperimental, onConfigChange, config.experimentalSources, stats, audit, showMessage]);
 
-  /** Tab / Shift+Tab: step through the views in tab order (1–7), wrapping around. */
+  /** Tab / Shift+Tab: step through the views in tab order (1–6), wrapping around. */
   const cycleView = (dir: 1 | -1) => {
-    const current = refs.active ? 'refs' : todos.active ? 'todos' : manual.active ? 'manual' : filter;
+    const current = refs.active ? 'refs' : todos.active ? 'todos' : filter;
     showView(VIEW_ORDER[(VIEW_ORDER.indexOf(current) + dir + VIEW_ORDER.length) % VIEW_ORDER.length]!);
   };
 
-  /** Show one of the views 1–7, leaving Bookmarks or Todos first. */
+  /** Show one of the views 1–6, leaving Bookmarks or Todos first. */
   const showView = (next: View) => {
     if (refs.active) refs.close();
     if (todos.active) todos.close();
-    if (manual.active) manual.close();
     if (next === 'refs') { refs.openView(); return; }
     if (next === 'todos') { todos.openView(); return; }
-    if (next === 'manual') { manual.openView(); return; }
     setFilter(next);
     setSelectedIndex(0);
     void refresh(next);
@@ -1556,7 +1554,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     // ── Color picker popup: takes every key until a color is picked or Esc ──
     if (colorPicker.active) { colorPicker.handleInput(raw, key); return; }
     // ── Quit from any screen (but not while typing) ──
-    if (input === 'q' && !editingKey && sourceDetails?.editing === undefined && !todos.typing && !refs.typing && !profilePicker.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
+    if (input === 'q' && !editingKey && sourceDetails?.editing === undefined && !todos.typing && !refs.typing && !manual.view && !profilePicker.typing && searchDraft === undefined && !settingsSearchTyping && !helpSearchTyping) { exit(); return; }
 
     // ── Search prompt (opened with /) ──
     if (searchDraft !== undefined) {
@@ -1591,9 +1589,9 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     // Shift+↑/↓ jumps 5 rows, or 10 on a tall terminal
     const step = key.shift && (key.upArrow || key.downArrow) ? jumpStep(rows) : 1;
 
-    // ── Audit trail (opened with a) ──
+    // ── Audit trail (opened with l) ──
     if (showAudit) {
-      if (key.escape || key.backspace || key.delete || input === 'a') { setShowAudit(false); return; }
+      if (key.escape || key.backspace || key.delete || input === 'l') { setShowAudit(false); return; }
       const last = Math.max(0, auditEntries.length - 1);
       if (key.upArrow || input === 'k') { setAuditIndex((i) => Math.max(0, i - step)); return; }
       if (key.downArrow || input === 'j') { setAuditIndex((i) => Math.min(last, i + step)); return; }
@@ -1846,12 +1844,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       return;
     }
 
-    if (manual.active) {
-      if (input === 'h' && !manual.typing) { setHelpContext('manual'); setShowHelp(true); return; }
-      if (key.tab && !manual.typing) { cycleView(key.shift ? -1 : 1); return; }
-      if (input === 'w' && !manual.typing) { profilePicker.open(); return; }
-      const view = manual.typing ? undefined : viewForKey(input);
-      if (view && view !== 'manual') { showView(view); return; }
+    if (manual.view) {
       manual.handleInput(raw, key);
       return;
     }
@@ -2159,8 +2152,13 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
       return;
     }
 
-    // Audit trail of actions and errors
     if (input === 'a') {
+      manual.open();
+      return;
+    }
+
+    // Audit trail of actions and errors
+    if (input === 'l') {
       setShowAudit(true);
       setAuditIndex(0);
       return;
@@ -2338,7 +2336,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         }
         return;
       }
-      if (key.rightArrow || input === 'l') {
+      if (key.rightArrow) {
         if (isTopic) setTopicExpanded(entry.topic.id, true);
         return;
       }
@@ -2455,12 +2453,12 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
 
   const filterBar = (
     <FilterBar
-      active={refs.active ? 'refs' : todos.active ? 'todos' : manual.active ? 'manual' : filter}
+      active={refs.active ? 'refs' : todos.active ? 'todos' : filter}
       groupedViews={groupedViews}
       columns={columns}
       sourceLabel={sourceFilterLabel}
-      search={!todos.active && !refs.active && !manual.active && search ? search : undefined}
-      matches={!todos.active && !refs.active && !manual.active && search ? searchMatches : undefined}
+      search={!todos.active && !refs.active && search ? search : undefined}
+      matches={!todos.active && !refs.active && search ? searchMatches : undefined}
       searchDraft={searchDraft}
       sortLabel={activeSortLabel}
     />
@@ -2713,12 +2711,12 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     );
   }
 
-  if (manual.active) {
+  if (manual.view) {
     return (
       <Box flexDirection="column" height={rows}>
         {statusBar}
         {filterBar}
-        <ManualView {...manual.view} height={availableH} columns={columns} />
+        <ManualForm form={manual.view} height={availableH} columns={columns} />
       </Box>
     );
   }

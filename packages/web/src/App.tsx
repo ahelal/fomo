@@ -44,7 +44,7 @@ import { SettingsPanel } from './components/SettingsPanel.js';
 import { HelpOverlay, type HelpContext } from './components/HelpOverlay.js';
 import { TodosPane } from './components/TodosPane.js';
 import { ReferencesPane } from './components/ReferencesPane.js';
-import { ManualPane } from './components/ManualPane.js';
+import { ManualDialog } from './components/ManualDialog.js';
 import { ReferenceDialog } from './components/ReferenceDialog.js';
 import { ConnectScreen } from './components/ConnectScreen.js';
 import { SearchBox } from './components/SearchBox.js';
@@ -57,11 +57,10 @@ const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: '4 Pending', value: 'saved' },
   { label: '5 B.Marks', value: 'refs' },
   { label: '6 Todos', value: 'todos' },
-  { label: '7 Manual', value: 'manual' },
 ];
 
 const FILTER_KEYS: Record<string, FilterStatus> = {
-  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'refs', '6': 'todos', '7': 'manual',
+  '1': 'all', '2': 'unread', '3': 'read', '4': 'saved', '5': 'refs', '6': 'todos',
 };
 
 /** Rows of text that fit in the window (≈20px each), for `jumpStep`. */
@@ -165,8 +164,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const viewHelp: HelpContext = fomo.filter === 'todos'
     ? 'todos'
     : fomo.filter === 'refs' ? 'references'
-      : fomo.filter === 'manual' ? 'manual'
-        : isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
+      : isGrouped ? (isSaved ? 'saved' : 'digest') : selected ? 'detail' : 'list';
 
   const digestRows = useMemo(() => flattenDigest(fomo.digest, expanded), [fomo.digest, expanded]);
   const digestRow = digestKey ? digestRows.find((r) => r.key === digestKey) : undefined;
@@ -559,6 +557,12 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
 
       if (pane) return;
 
+      if (key === 'a' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setManualDialogOpen(true);
+        return;
+      }
+
       if (showPreview && focusedPane === 'preview') {
         const preview = previewPaneRef.current;
         if (preview) {
@@ -610,7 +614,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           return;
         }
         if (!row) return;
-        if (key === 'ArrowRight' || key === 'l') {
+        if (key === 'ArrowRight') {
           if (row.kind === 'topic' && row.entry.items.length > 1) setTopicExpanded(row.entry.topic.id, true);
           return;
         }
@@ -918,6 +922,11 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           })}
         </div>
         {!pane && (
+          <button type="button" className="btn" onClick={() => setManualDialogOpen(true)} title="Add a manual item (a)">
+            + Add
+          </button>
+        )}
+        {!pane && (
           <SourceFilterChip
             filter={fomo.sourceFilter}
             label={sourceFilterLabel}
@@ -943,8 +952,6 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           <TodosPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
         ) : fomo.filter === 'refs' ? (
           <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
-        ) : fomo.filter === 'manual' ? (
-          <ManualPane service={service} onDialogOpenChange={setManualDialogOpen} />
         ) : (
           <div
             ref={listPaneRef}
@@ -1026,6 +1033,18 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
             fomo.notify(`🔖 ${created ? 'Filed' : 'Updated'} in Bookmarks → ${saved.folder || 'top level'}`, 4000);
           }}
           onClose={() => setRefDialog(undefined)}
+        />
+      )}
+
+      {manualDialogOpen && (
+        <ManualDialog
+          service={service}
+          onSaved={() => {
+            setManualDialogOpen(false);
+            void fomo.refresh();
+            fomo.notify('Added manual item · unread in Manual');
+          }}
+          onClose={() => setManualDialogOpen(false)}
         />
       )}
 
