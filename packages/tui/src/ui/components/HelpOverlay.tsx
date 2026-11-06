@@ -107,7 +107,9 @@ const GLOBAL_KEYS: [string, string][] = [
 
 const REFERENCE_KEYS: [string, string][] = [
   ['↑/k ↓/j', 'Move (⇧↑/⇧↓ jumps 5, or 10 on a tall terminal)'],
-  ['↵',    'Edit bookmark · edit folder: name/location, local directory, GitHub repo, color'],
+  ['↵',    'Toggle bookmark preview · edit folder'],
+  ['Tab',  'Switch focus between the list and an open preview'],
+  ['.',    'Move the preview right / bottom'],
   ['→/l ←','Open folder · close folder / go to parent'],
   ['o',    'Open link in browser / associated folder directory'],
   ['g',    'Open the selected folder’s GitHub repository'],
@@ -118,7 +120,7 @@ const REFERENCE_KEYS: [string, string][] = [
   ['d',    'Delete link (press twice) · delete folder: p move its contents up, a delete all'],
   ['/',    'Search titles, links, folders & notes'],
   ['s',    'Sort links: title, date added (press again for the next)'],
-  ['Esc',  'Clear the search'],
+  ['Esc',  'Close preview, then clear the search'],
 ];
 
 const REFERENCE_FORM_KEYS: [string, string][] = [

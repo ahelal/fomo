@@ -137,7 +137,7 @@ The TUI can refresh an update's details from its linked page, for example when t
 
 - Links can be added directly or saved from an update. The TUI can suggest a folder and description; in the web app, these are entered by hand.
 - Folders come from their contents or saved metadata. Bookmarks and Todos use the same folder editor for name/location, color, local directory and GitHub repository, without a type. Renaming or moving a folder also moves its contents and metadata; each view keeps its folders separate. Deleting a folder (`d`) asks first: move its contents (items and subfolders) up into the parent folder, or delete everything in it. Either way the folder's own color and metadata go with it.
-- In both views, Enter edits the selected item or folder; Left/Right navigate folders. In Bookmarks, `o` opens a link.
+- In Bookmarks, Enter toggles the selected bookmark's preview and `e` edits it. The preview shows the saved update's full content (including Manual entries), or the bookmark's description for links added directly. Use `.` for right/bottom placement, Tab to focus the list or preview, and arrows to navigate or scroll; Esc closes the preview. `o` opens a link or the original Manual entry. In Todos, Enter still edits the selected item. Enter edits folders in both views; Left/Right navigate folders.
 - Bookmarks are stored with the profile's Azure account and can be browsed in either app.
 
 ### Learning Manual

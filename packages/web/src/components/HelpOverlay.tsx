@@ -62,7 +62,9 @@ const DETAIL_KEYS: [string, string][] = [
 ];
 
 const REFERENCE_KEYS: [string, string][] = [
-  ['↵',     'Edit bookmark / edit folder: name, local directory, GitHub repo, color'],
+  ['↵',     'Toggle bookmark preview / edit folder'],
+  ['Tab',   'Switch focus between the list and an open preview'],
+  ['.',     'Move the preview right / bottom'],
   ['→/l',   'Open folder'],
   ['←',     'Close folder, or go to its parent'],
   ['a',     'Add a link (in the selected folder)'],
@@ -74,7 +76,7 @@ const REFERENCE_KEYS: [string, string][] = [
   ['c',     'Color the link or folder (←↑↓→ ↵ pick, # hex, d reset)'],
   ['s',     'Cycle sort order (title, date added)'],
   ['/',     'Search titles, links, folders & descriptions'],
-  ['Esc',   'Clear the search'],
+  ['Esc',   'Close preview, then clear the search'],
 ];
 
 const TODO_KEYS: [string, string][] = [

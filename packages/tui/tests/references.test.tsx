@@ -49,6 +49,11 @@ function fakeService(initial: Reference[], updates: Update[] = [update]) {
     getSettings: async () => ({ ...DEFAULT_SETTINGS }),
     getSources: async () => [],
     getDigest: async () => ({ entries: [], pending: 0 }),
+    getUpdate: vi.fn(async (id: string) => {
+      const item = updates.find((u) => u.id === id);
+      if (!item) throw new Error(`Update not found: ${id}`);
+      return item;
+    }),
     listUpdates: vi.fn(async (_query: { status?: string; saved?: boolean }) => ({ updates, total: updates.length })),
     getStats: async () => ({ total: 1, byStatus: { unread: 1, read: 0 }, bySource: {}, saved: 0 }),
     listReferences: vi.fn(async () => ({ references: refs, folderColors, folderMetadata })),
@@ -301,12 +306,75 @@ describe('5 Bookmarks view', () => {
     expect(frame()).not.toContain('Edit folder');
   });
 
-  it('uses Enter to edit a bookmark, leaving o to open it', async () => {
+  it('uses Enter to preview a bookmark and e to edit it', async () => {
     const { svc, press, frame } = await renderApp([ref('1', 'Bookmark', '')]);
     await press('5', ENTER);
+    expect(frame()).toContain('Preview  [Tab] focus');
+    expect(frame()).toContain('About Bookmark');
+    expect(frame()).not.toContain('Edit bookmark');
+    expect(svc.getUpdate).not.toHaveBeenCalled();
+    await press('e');
     expect(frame()).toContain('Edit bookmark');
     await press(CTRL_U, ...'work', ENTER);
     expect(svc.updateReference).toHaveBeenCalledWith('1', expect.objectContaining({ folder: 'work' }));
+  });
+
+  it('previews the original Manual body in both layouts and closes without leaving Bookmarks', async () => {
+    const manual: Update = {
+      ...update, id: `${MANUAL_SOURCE_ID}__1`, source: MANUAL_SOURCE_ID,
+      url: 'fomo://manual/entry-1', content: 'Full manual body\n\nSecond paragraph',
+    };
+    const bookmark = { ...ref('1', 'Manual bookmark', '', manual.url), updateId: manual.id };
+    const { svc, press, frame } = await renderApp([bookmark], undefined, undefined, [manual]);
+    await press('5', ENTER);
+    expect(svc.getUpdate).toHaveBeenCalledWith(manual.id);
+    expect(frame()).toContain('Full manual body');
+    expect(frame()).toContain('Second paragraph');
+    expect(frame()).not.toContain('Edit bookmark');
+    await press('.');
+    expect(frame()).toContain('Full manual body');
+    await press(ESC);
+    expect(frame()).toContain('Bookmarks');
+    expect(frame()).not.toContain('Preview  [Tab] focus');
+    await press(ENTER, ENTER);
+    expect(frame()).not.toContain('Preview  [Tab] focus');
+  });
+
+  it('scrolls the preview with Tab without moving the selected bookmark', async () => {
+    const first = { ...ref('1', 'First', '', update.url), updateId: update.id };
+    const longUpdate = { ...update, content: Array.from({ length: 60 }, (_, i) => `Body line ${i}`).join('\n') };
+    const { svc, press, frame } = await renderApp([first, ref('2', 'Second', '')], undefined, undefined, [longUpdate]);
+    await press('5', ENTER, TAB);
+    expect(frame()).toContain('Body line 0');
+    await press(...Array(12).fill(SHIFT_DOWN));
+    expect(frame()).toContain('Body line 59');
+    expect(svc.getUpdate).toHaveBeenCalledTimes(1);
+    await press(TAB, DOWN);
+    expect(frame()).toContain('About Second');
+    expect(frame()).not.toContain('Body line 59');
+    expect(frame()).toContain('Preview  [Tab] focus');
+  });
+
+  it('reports a missing original entry in the preview and still permits editing the bookmark', async () => {
+    const missing = { ...ref('1', 'Missing', ''), updateId: 'missing__1' };
+    const { press, frame } = await renderApp([missing]);
+    await press('5', ENTER);
+    expect(frame()).toContain('Could not load bookmark content');
+    expect(frame()).toContain('Update not found:');
+    expect(frame()).toContain('missing__1');
+    await press('e');
+    expect(frame()).toContain('Edit bookmark');
+  });
+
+  it('ignores a late body response after selecting another bookmark', async () => {
+    const first = { ...ref('1', 'First', ''), updateId: update.id };
+    const { svc, press, frame } = await renderApp([first, ref('2', 'Second', '')]);
+    let resolve: ((value: Update) => void) | undefined;
+    svc.getUpdate.mockImplementationOnce(() => new Promise<Update>((done) => { resolve = done; }));
+    await press('5', ENTER, DOWN);
+    await act(async () => { resolve?.({ ...update, content: 'Old body must not appear' }); });
+    expect(frame()).toContain('About Second');
+    expect(frame()).not.toContain('Old body must not appear');
   });
 
   it('deletes a link only on the second d', async () => {

@@ -28,6 +28,7 @@ export { DETAILS_H };
 interface Props extends ReferencesViewState {
   height: number;
   columns: number;
+  focused?: boolean;
 }
 
 const FIELD_LABEL: Record<RefField, string> = {
@@ -117,7 +118,7 @@ function Details({ row, columns, confirmDelete, folderColorOf }: { row?: Referen
       <Text key="m" color={confirmDelete === ref.id ? ERROR : MUTED} wrap="truncate-end">
         {confirmDelete === ref.id
           ? ' d again to delete · any other key cancels'
-          : ` ${ref.folder || 'top level'} · added ${formatDate(ref.createdAt)}  [o] open  [y] copy link  [↵/e] edit  [c] color  [d] delete`}
+          : ` ${ref.folder || 'top level'} · added ${formatDate(ref.createdAt)}  [↵] preview  [e] edit  [o] open  [y] copy link  [c] color  [d] delete`}
       </Text>,
     );
   }
@@ -130,12 +131,12 @@ export function ReferencesView(props: Props) {
   const colorOf = (ref: Reference) => ref.color || folderColor(folderColors, ref.folder);
 
   const header = (
-    <Box width={columns} borderStyle="single" borderBottom borderTop={false} borderLeft={false} borderRight={false} borderColor="gray">
+    <Box width={columns} borderStyle="single" borderBottom borderTop={false} borderLeft={false} borderRight={false} borderColor={props.focused ? '#58a6ff' : 'gray'}>
       <Box flexShrink={0}>
         <Text color={ACCENT} bold>{' 🔖 Bookmarks'}</Text>
         <Text color={MUTED}>{` · ${total} link${total === 1 ? '' : 's'}${loading ? ' · loading…' : ''}`}</Text>
       </Box>
-      {!form && !folderMetadataForm && <Text color={MUTED} wrap="truncate-end">{'   [a] add  [↵/e] edit  [d] delete  [c] color  [o] open  [/] search  [s] sort'}</Text>}
+      {!form && !folderMetadataForm && <Text color={MUTED} wrap="truncate-end">{'   [↵] preview  [e] edit  [a] add  [d] delete  [c] color  [o] open  [/] search  [s] sort'}</Text>}
     </Box>
   );
 

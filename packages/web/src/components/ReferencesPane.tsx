@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   REFERENCE_SORTS,
   buildReferenceRows,
   formatDate,
   isManualReferenceUrl,
   isDefaultSort,
+  jumpStep,
   nextSort,
   rowFolder,
   sortLabel,
@@ -12,9 +13,12 @@ import {
   type FolderMetadataMap,
   type Reference,
   type ReferenceSort,
+  type PreviewPosition,
+  type Update,
 } from '@fomo/core';
 import { ColorButton } from './ColorPicker.js';
 import { ReferenceDialog, type ReferenceDraft } from './ReferenceDialog.js';
+import { ReferencePreview } from './ReferencePreview.js';
 import { DeleteFolderDialog, FolderDialog, FolderMetadataEditor } from './FolderDialog.js';
 import { DeleteButton, FolderDetails, FolderTreeList, Pill, RenameBar, TreeMessage, TreeSearch } from './FolderTree.js';
 import { plural, useFolderTree, type PaneKeyHandler } from '../hooks/useFolderTree.js';
@@ -25,6 +29,8 @@ interface Props {
   /** Keyboard shortcuts are on (no overlay is open above the pane). */
   active: boolean;
   onOpenManual(updateId: string): void;
+  previewPosition: PreviewPosition;
+  onEnablePreview(): void;
 }
 
 interface DialogState {
@@ -51,10 +57,15 @@ function openUrl(url: string) {
 let lastSort: ReferenceSort | undefined;
 
 /** Links filed into folders: browse the tree, search, add, edit, color, move folders and delete. */
-export function ReferencesPane({ service, active, onOpenManual }: Props) {
+export function ReferencesPane({ service, active, onOpenManual, previewPosition, onEnablePreview }: Props) {
   const [dialog, setDialog] = useState<DialogState | undefined>();
   const [folderDialog, setFolderDialog] = useState<string | undefined>();
   const [sort, setSort] = useState<ReferenceSort | undefined>(lastSort);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [focusedPane, setFocusedPane] = useState<'list' | 'preview'>('list');
+  const listRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [content, setContent] = useState<{ id: string; update?: Update; error?: string }>();
   const buildRows = useCallback(
     (refs: Reference[], expanded: ReadonlySet<string>, search: string, metadata?: FolderMetadataMap) => buildReferenceRows(refs, expanded, search, sort, metadata),
     [sort],
@@ -76,8 +87,44 @@ export function ReferencesPane({ service, active, onOpenManual }: Props) {
     remove: (ref) => service.deleteReference(ref.id),
   });
   const { load, say, row, rows, search, items } = tree;
+  const reference = row?.kind === 'item' ? row.item : undefined;
+  const showPreview = previewOpen && !!reference && previewPosition !== 'off';
 
   useEffect(() => { void load(); }, [load, service]);
+
+  useEffect(() => {
+    if (!showPreview || !reference?.updateId) return;
+    let live = true;
+    service.getUpdate(reference.updateId).then(
+      (update) => { if (live) setContent({ id: reference.id, update }); },
+      (err: unknown) => {
+        if (live) setContent({ id: reference.id, error: `Could not load bookmark content: ${err instanceof Error ? err.message : String(err)}` });
+      },
+    );
+    return () => { live = false; };
+  }, [showPreview, reference?.id, reference?.updateId, service]);
+
+  useEffect(() => {
+    if (previewRef.current) previewRef.current.scrollTop = 0;
+  }, [reference?.id]);
+
+  useEffect(() => {
+    if (!showPreview) setFocusedPane('list');
+  }, [showPreview]);
+
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setFocusedPane('list');
+    listRef.current?.focus({ preventScroll: true });
+  };
+  const togglePreview = () => {
+    onEnablePreview();
+    setPreviewOpen((open) => !open);
+  };
+  const openPreview = () => {
+    onEnablePreview();
+    setPreviewOpen(true);
+  };
 
   const addLink = (folder: string) => setDialog({ initial: { folder } });
   const editLink = (reference: Reference) => setDialog({ reference });
@@ -105,10 +152,44 @@ export function ReferencesPane({ service, active, onOpenManual }: Props) {
       return true;
     }
     if (k === 'y') { copyLink(r.item); return true; }
-    if (k === 'e' || k === 'Enter') { editLink(r.item); return true; }
+    if (k === 'Enter') { togglePreview(); return true; }
+    if (k === 'e') { editLink(r.item); return true; }
     return false;
   };
-  useWindowKeys(active && !dialog && folderDialog === undefined, (e) => tree.handleKey(e, onKey));
+  useWindowKeys(active && !dialog && folderDialog === undefined, (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (tree.rename || tree.folderDelete || tree.picker.active) {
+      tree.handleKey(e, onKey);
+      return;
+    }
+    const target = e.target as HTMLElement;
+    if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (showPreview && e.key === 'Tab') {
+      if (target.closest('a, button')) { e.stopPropagation(); return; }
+      e.preventDefault();
+      const next = focusedPane === 'list' ? 'preview' : 'list';
+      setFocusedPane(next);
+      (next === 'preview' ? previewRef : listRef).current?.focus({ preventScroll: true });
+      return;
+    }
+    if (showPreview && (e.key === 'Escape' || e.key === 'Backspace')) {
+      e.preventDefault();
+      closePreview();
+      return;
+    }
+    if (showPreview && focusedPane === 'preview') {
+      const k = e.key.toLowerCase();
+      const direction = k === 'arrowdown' || k === 'j' || k === 'pagedown' ? 1
+        : k === 'arrowup' || k === 'k' || k === 'pageup' ? -1 : 0;
+      if (direction && previewRef.current) {
+        e.preventDefault();
+        const step = e.shiftKey || k === 'pagedown' || k === 'pageup' ? jumpStep(Math.floor(window.innerHeight / 20)) : 1;
+        previewRef.current.scrollTop += direction * step * 24;
+        return;
+      }
+    }
+    tree.handleKey(e, onKey);
+  }, true);
 
   const onSaved = useCallback((saved: Reference, created: boolean) => {
     setDialog(undefined);
@@ -120,7 +201,16 @@ export function ReferencesPane({ service, active, onOpenManual }: Props) {
   const matches = tree.searching ? rows.filter((r) => r.kind === 'item').length : undefined;
 
   return (
-    <div className="tree-pane">
+    <div className={`main main--preview-${showPreview ? previewPosition : 'none'}`}>
+    <div
+      ref={listRef}
+      className={`tree-pane feed-panel${showPreview && focusedPane === 'list' ? ' pane--focused' : ''}`}
+      tabIndex={0}
+      role="region"
+      aria-label="Bookmarks list"
+      onFocusCapture={() => setFocusedPane('list')}
+      onPointerDownCapture={() => setFocusedPane('list')}
+    >
       <div className="tree-header">
         <span className="tree-title">
           🔖 Bookmarks <span className="tree-count">· {items ? plural(items.length, NOUN) : 'loading…'}</span>
@@ -154,7 +244,7 @@ export function ReferencesPane({ service, active, onOpenManual }: Props) {
         rowRef={tree.rowRef}
         onSelect={tree.select}
         onToggle={tree.setOpen}
-        onActivate={editLink}
+        onActivate={openPreview}
         itemTitle={(ref) => ref.url}
         renderItem={(ref) => {
           const color = tree.colorOf(ref);
@@ -197,6 +287,7 @@ export function ReferencesPane({ service, active, onOpenManual }: Props) {
                   ? <button type="button" className="btn btn--primary" onClick={() => onOpenManual(row.item.updateId!)}>o · Open Manual entry</button>
                   : <button type="button" className="btn btn--primary" onClick={() => openUrl(row.item.url)}>o · Open ↗</button>}
                 <button type="button" className="btn" onClick={() => editLink(row.item)}>e · Edit</button>
+                <button type="button" className="btn" onClick={togglePreview}>↵ · Preview</button>
                 <button type="button" className="btn" onClick={() => copyLink(row.item)}>y · Copy</button>
                 <ColorButton
                   {...tree.itemColorButton(row.item.folder, row.item.color)}
@@ -249,6 +340,27 @@ export function ReferencesPane({ service, active, onOpenManual }: Props) {
           onClose={() => setFolderDialog(undefined)}
         />
       )}
+    </div>
+    {showPreview && reference && (
+      <div
+        ref={previewRef}
+        className={`preview-panel${focusedPane === 'preview' ? ' pane--focused' : ''}`}
+        role="region"
+        aria-label="Bookmark preview"
+        tabIndex={0}
+        onFocusCapture={() => setFocusedPane('preview')}
+        onPointerDownCapture={() => setFocusedPane('preview')}
+      >
+        <ReferencePreview
+          reference={reference}
+          update={content?.id === reference.id ? content.update : undefined}
+          loading={!!reference.updateId && content?.id !== reference.id}
+          error={content?.id === reference.id ? content.error : undefined}
+          onEdit={() => editLink(reference)}
+          onClose={closePreview}
+        />
+      </div>
+    )}
     </div>
   );
 }

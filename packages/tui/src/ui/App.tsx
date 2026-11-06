@@ -35,6 +35,7 @@ import { FilterBar } from './components/FilterBar.js';
 import { SettingsPane, PREVIEW_OPTIONS, FETCHING_NOTE, SIGNING_IN_NOTE } from './components/SettingsPane.js';
 import { TodosView } from './components/TodosView.js';
 import { ReferencesView } from './components/ReferencesView.js';
+import { ReferencePreview } from './components/ReferencePreview.js';
 import { ManualForm } from './components/ManualForm.js';
 import { ColorPicker } from './components/ColorPicker.js';
 import { editText, editMultiline } from './editText.js';
@@ -453,6 +454,10 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     jump: jumpStep(rows),
   });
   const todos = useTodos({ service, audit, pickColor: colorPicker.open, notify: showMessage, openAttachment: openTodoAttachment, jump: jumpStep(rows) });
+
+  useEffect(() => {
+    setPreviewFocused(false);
+  }, [refs.preview?.reference.id, !!refs.preview]);
 
   const loadSeq = useRef(0);
   const loadUpdates = useCallback(
@@ -1819,7 +1824,24 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
         setShowHelp(true);
         return;
       }
-      if (key.tab && !refs.typing) { cycleView(key.shift ? -1 : 1); return; }
+      if (key.tab && !refs.typing) {
+        if (refs.preview) setPreviewFocused((value) => !value);
+        else cycleView(key.shift ? -1 : 1);
+        return;
+      }
+      if (input === '.' && !refs.typing) {
+        setPreviewPosition((position) => position === 'bottom' ? 'right' : 'bottom');
+        refs.openPreview();
+        return;
+      }
+      if (refs.preview && previewFocused && !refs.typing) {
+        const direction = key.downArrow || input === 'j' || key.pageDown ? 1
+          : key.upArrow || input === 'k' || key.pageUp ? -1 : 0;
+        if (direction) {
+          previewScroll.current?.scroll(direction * (key.pageDown || key.pageUp ? jumpStep(rows) : step));
+          return;
+        }
+      }
       if (input === 'w' && !refs.typing) { profilePicker.open(); return; }
       const view = refs.typing ? undefined : viewForKey(input);
       if (view) {
@@ -2693,11 +2715,29 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
 
   // References view / file-a-link form — replaces main content area
   if (refs.active) {
+    const preview = refs.preview;
+    const detailH = preview ? Math.min(Math.max(0, availableH - 3), Math.max(8, Math.floor(availableH * 0.4))) : 0;
+    const detailW = Math.max(30, Math.floor(columns * 0.4));
+    const previewPane = (height: number, width: number) => preview ? (
+      <ReferencePreview key={preview.reference.id} {...preview} height={height} columns={width} focused={previewFocused} scrollRef={previewScroll} />
+    ) : null;
     return (
       <Box flexDirection="column" height={rows}>
         {statusBar}
         {filterBar}
-        <ReferencesView {...refs.view} height={availableH} columns={columns} />
+        {preview && previewPosition === 'right' ? (
+          <Box height={availableH}>
+            <ReferencesView {...refs.view} height={availableH} columns={columns - detailW - 1} focused={!previewFocused} />
+            <Box borderStyle="single" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor={previewFocused ? '#58a6ff' : '#30363d'}>
+              <Box width={detailW - 2}>{previewPane(availableH, detailW - 2)}</Box>
+            </Box>
+          </Box>
+        ) : (
+          <>
+            <ReferencesView {...refs.view} height={availableH - detailH} columns={columns} focused={!!preview && !previewFocused} />
+            {previewPane(detailH, columns)}
+          </>
+        )}
         {colorPopup}
       </Box>
     );

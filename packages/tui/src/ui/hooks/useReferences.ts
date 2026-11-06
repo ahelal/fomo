@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Key } from 'ink';
 import {
   buildReferenceRows,
@@ -109,6 +109,8 @@ export function useReferences({ service, audit, suggest, notify, openUrl, openMa
   /** Order of links within a folder (cycled with s). */
   const [sort, setSort] = useState<ReferenceSort | undefined>();
   const [form, setForm] = useState<RefForm | undefined>();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewContent, setPreviewContent] = useState<{ id: string; update?: Update; error?: string }>();
   /** Bumped whenever a form opens or closes, so late Copilot replies are dropped. */
   const formSeq = useRef(0);
 
@@ -140,6 +142,21 @@ export function useReferences({ service, audit, suggest, notify, openUrl, openMa
     jump,
   });
   const { load, reveal, say, folders, folderColors, folderMetadata } = tree;
+  const selectedRow = tree.rows[tree.selectedIndex];
+  const reference = selectedRow?.kind === 'item' ? selectedRow.item : undefined;
+  useEffect(() => {
+    if (!open || !previewOpen || !reference?.updateId) return;
+    let live = true;
+    service.getUpdate(reference.updateId).then(
+      (update) => { if (live) setPreviewContent({ id: reference.id, update }); },
+      (err: unknown) => {
+        if (!live) return;
+        audit.error('reference', `preview “${reference.title}”: ${errorText(err)}`);
+        setPreviewContent({ id: reference.id, error: `Could not load bookmark content: ${errorText(err)}` });
+      },
+    );
+    return () => { live = false; };
+  }, [open, previewOpen, reference?.id, reference?.updateId, service, audit]);
   const folderEditor = useFolderEditor({
     area: 'reference', noun: ['link', 'links'], folderMetadata, folderColors, audit, pickColor,
     revealFolder: tree.revealFolder, load, say,
@@ -160,6 +177,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, openMa
     folderEditor.close();
     tree.reset();
     setOpen(false);
+    setPreviewOpen(false);
   }, [tree.reset, folderEditor.close]);
 
   const runSuggest = useCallback((current: RefForm, explicit: boolean) => {
@@ -289,7 +307,8 @@ export function useReferences({ service, audit, suggest, notify, openUrl, openMa
       return true;
     }
     if (input === 'y') { copy(ref.url); say('✓ Link copied'); return true; }
-    if (input === 'e' || key.return) { formSeq.current++; setForm(editForm(ref)); return true; }
+    if (key.return) { setPreviewOpen((value) => !value); return true; }
+    if (input === 'e') { formSeq.current++; setForm(editForm(ref)); return true; }
     return false;
   };
 
@@ -297,6 +316,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, openMa
   const handleInput = (raw: string, key: Key) => {
     if (folderEditor.form) { folderEditor.handleInput(raw, key); return; }
     if (form) { formInput(form, raw, key); return; }
+    if (!tree.typing && previewOpen && (key.escape || key.backspace || key.delete)) { setPreviewOpen(false); return; }
     tree.handleInput(raw, key, onKey);
   };
 
@@ -309,6 +329,13 @@ export function useReferences({ service, audit, suggest, notify, openUrl, openMa
     close: closeAll,
     fileUpdate,
     handleInput,
+    openPreview: () => setPreviewOpen(true),
+    preview: previewOpen && reference && !form && !folderEditor.form ? {
+      reference,
+      update: previewContent?.id === reference.id ? previewContent.update : undefined,
+      loading: !!reference.updateId && previewContent?.id !== reference.id,
+      error: previewContent?.id === reference.id ? previewContent.error : undefined,
+    } : undefined,
     /** The links' sort, when it isn't the default order. */
     sortLabel: isDefaultSort(REFERENCE_SORTS, sort) ? undefined : sortLabel(REFERENCE_SORTS, sort),
     view: {

@@ -476,6 +476,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   // ── Keyboard shortcuts (aligned with the TUI) ──
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented) return;
       const target = e.target as HTMLElement;
       const tag = target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
@@ -962,7 +963,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         {fomo.filter === 'todos' ? (
           <TodosPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
         ) : fomo.filter === 'refs' ? (
-          <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} onOpenManual={(id) => void openManualReference(id)} />
+          <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} onOpenManual={(id) => void openManualReference(id)} previewPosition={previewPosition} onEnablePreview={() => { if (previewPosition === 'off') void fomo.updateSettings({ previewPosition: 'bottom' }); }} />
         ) : (
           <div
             ref={listPaneRef}
