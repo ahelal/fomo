@@ -8,9 +8,10 @@ export function referenceFolders(refs: Pick<Reference, 'folder'>[]): string[] {
   return folderPaths(refs);
 }
 
-/** An `http(s)` URL with surrounding whitespace removed; throws when it isn't one. */
+/** An `http(s)` URL or internal Manual-entry reference, with surrounding whitespace removed. */
 export function normalizeReferenceUrl(url: string): string {
   const trimmed = url.trim();
+  if (/^fomo:\/\/manual\/[A-Za-z0-9_-]+$/.test(trimmed)) return trimmed;
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
@@ -19,6 +20,11 @@ export function normalizeReferenceUrl(url: string): string {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Only http(s) links can be saved');
   return trimmed;
+}
+
+/** True for a reference that points to a locally stored Manual entry. */
+export function isManualReferenceUrl(url: string): boolean {
+  return /^fomo:\/\/manual\/[A-Za-z0-9_-]+$/.test(url);
 }
 
 /** True when every word of `query` is in the title, URL, folder or description (case-insensitive). */

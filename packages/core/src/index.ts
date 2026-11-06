@@ -75,6 +75,7 @@ export {
 } from './folders.js';
 export {
   normalizeReferenceUrl,
+  isManualReferenceUrl,
   referenceFolders,
   matchesReference,
   buildReferenceRows,

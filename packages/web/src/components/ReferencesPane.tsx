@@ -3,6 +3,7 @@ import {
   REFERENCE_SORTS,
   buildReferenceRows,
   formatDate,
+  isManualReferenceUrl,
   isDefaultSort,
   nextSort,
   rowFolder,
@@ -23,6 +24,7 @@ interface Props {
   service: FomoService;
   /** Keyboard shortcuts are on (no overlay is open above the pane). */
   active: boolean;
+  onOpenManual(updateId: string): void;
 }
 
 interface DialogState {
@@ -33,6 +35,7 @@ interface DialogState {
 const NOUN = ['link', 'links'] as const;
 
 function host(url: string): string {
+  if (isManualReferenceUrl(url)) return 'Manual';
   try {
     return new URL(url).host.replace(/^www\./, '');
   } catch {
@@ -48,7 +51,7 @@ function openUrl(url: string) {
 let lastSort: ReferenceSort | undefined;
 
 /** Links filed into folders: browse the tree, search, add, edit, color, move folders and delete. */
-export function ReferencesPane({ service, active }: Props) {
+export function ReferencesPane({ service, active, onOpenManual }: Props) {
   const [dialog, setDialog] = useState<DialogState | undefined>();
   const [folderDialog, setFolderDialog] = useState<string | undefined>();
   const [sort, setSort] = useState<ReferenceSort | undefined>(lastSort);
@@ -96,7 +99,11 @@ export function ReferencesPane({ service, active }: Props) {
     if (k === 's') { cycleSort(); return true; }
     if (r?.kind === 'folder' && (k === 'Enter' || k === 'e' || k === 'm')) { setFolderDialog(r.path); return true; }
     if (r?.kind !== 'item') return false;
-    if (k === 'o') { openUrl(r.item.url); return true; }
+    if (k === 'o') {
+      if (isManualReferenceUrl(r.item.url) && r.item.updateId) onOpenManual(r.item.updateId);
+      else openUrl(r.item.url);
+      return true;
+    }
     if (k === 'y') { copyLink(r.item); return true; }
     if (k === 'e' || k === 'Enter') { editLink(r.item); return true; }
     return false;
@@ -180,11 +187,15 @@ export function ReferencesPane({ service, active }: Props) {
           ) : (
             <>
               <p className="tree-details__title" style={tree.colorOf(row.item) ? { color: tree.colorOf(row.item) } : undefined}>{row.item.title}</p>
-              <a className="tree-details__url" href={row.item.url} target="_blank" rel="noreferrer noopener">{row.item.url}</a>
+              {isManualReferenceUrl(row.item.url)
+                ? <p className="tree-details__url">Manual entry</p>
+                : <a className="tree-details__url" href={row.item.url} target="_blank" rel="noreferrer noopener">{row.item.url}</a>}
               {row.item.description && <p className="tree-details__desc">{row.item.description}</p>}
               <p className="tree-details__meta">{row.item.folder || 'top level'} · filed {formatDate(row.item.createdAt)}</p>
               <div className="tree-details__actions">
-                <button type="button" className="btn btn--primary" onClick={() => openUrl(row.item.url)}>o · Open ↗</button>
+                {isManualReferenceUrl(row.item.url) && row.item.updateId
+                  ? <button type="button" className="btn btn--primary" onClick={() => onOpenManual(row.item.updateId!)}>o · Open Manual entry</button>
+                  : <button type="button" className="btn btn--primary" onClick={() => openUrl(row.item.url)}>o · Open ↗</button>}
                 <button type="button" className="btn" onClick={() => editLink(row.item)}>e · Edit</button>
                 <button type="button" className="btn" onClick={() => copyLink(row.item)}>y · Copy</button>
                 <ColorButton

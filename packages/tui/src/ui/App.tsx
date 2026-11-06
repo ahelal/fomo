@@ -442,6 +442,11 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     suggest: suggestReference,
     notify: showMessage,
     openUrl: async (url) => { const { default: open } = await import('open'); await open(url); },
+    openManual: (updateId) => {
+      refs.close();
+      keepSelectedId.current = updateId;
+      applySourceFilter([MANUAL_SOURCE_ID], 'all');
+    },
     openAttachment: openTodoAttachment,
     copy: copyToClipboard,
     pickColor: colorPicker.open,
@@ -2230,8 +2235,7 @@ export function App({ service, config, onConfigChange, digest, refineGrouping, g
     }
     if (input === 'b') {
       const sel = currentUpdate();
-      if (sel?.source === MANUAL_SOURCE_ID) showMessage('Manual entries cannot be filed as bookmarks');
-      else if (sel) refs.fileUpdate(sel);
+      if (sel) refs.fileUpdate(sel);
       else showMessage(grouped ? 'Expand the topic to file a single update' : 'Nothing selected');
       return;
     }

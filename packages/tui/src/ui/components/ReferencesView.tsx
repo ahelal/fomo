@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { folderColor, formatDate, normalizeFolder, type Reference, type ReferenceRow } from '@fomo/core';
+import { folderColor, formatDate, isManualReferenceUrl, normalizeFolder, type Reference, type ReferenceRow } from '@fomo/core';
 import { REF_FIELDS, REF_FOLDER_COLOR, type RefField, type ReferencesViewState } from '../hooks/useReferences.js';
 import { FolderEditorForm } from './FolderEditorForm.js';
 import {
@@ -44,6 +44,7 @@ const FIELDS: FormFieldSpec<RefField>[] = REF_FIELDS.map((field) => ({
 }));
 
 function host(url: string): string {
+  if (isManualReferenceUrl(url)) return 'Manual';
   try {
     return new URL(url).hostname.replace(/^www\./, '');
   } catch {
@@ -112,7 +113,7 @@ function Details({ row, columns, confirmDelete, folderColorOf }: { row?: Referen
     const ref = row.item;
     lines.push(
       <Text key="d" color={TEXT} wrap="truncate-end">{` ${ref.description || '(no description — e to add one)'}`}</Text>,
-      <Text key="u" color={ACCENT} wrap="truncate-end">{` ${ref.url}`}</Text>,
+      <Text key="u" color={ACCENT} wrap="truncate-end">{` ${isManualReferenceUrl(ref.url) ? 'Manual entry' : ref.url}`}</Text>,
       <Text key="m" color={confirmDelete === ref.id ? ERROR : MUTED} wrap="truncate-end">
         {confirmDelete === ref.id
           ? ' d again to delete · any other key cancels'

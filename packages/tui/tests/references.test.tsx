@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { PassThrough } from 'node:stream';
 import { render } from 'ink';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { COLOR_PALETTE, DEFAULT_SETTINGS, deleteFolderEntries, isInFolder, parentFolder, type DeleteFolderMode, moveFolderColors, moveFolderMetadata, moveFolderPath, moveInGrid, paletteIndex, setFolderColor, type FolderColorMap, type FolderMetadata, type FolderMetadataMap, type Reference, type Update } from '@fomo/core';
+import { COLOR_PALETTE, DEFAULT_SETTINGS, MANUAL_SOURCE_ID, deleteFolderEntries, isInFolder, parentFolder, type DeleteFolderMode, moveFolderColors, moveFolderMetadata, moveFolderPath, moveInGrid, paletteIndex, setFolderColor, type FolderColorMap, type FolderMetadata, type FolderMetadataMap, type Reference, type Update } from '@fomo/core';
 import type { FomoDirectService } from '@fomo/core/service';
 import { App } from '../src/ui/App.js';
 import { createMemoryAuditLog } from '../src/audit.js';
@@ -363,6 +363,28 @@ describe('5 Bookmarks view', () => {
 });
 
 describe('b files the selected update', () => {
+  it('files a Manual entry without asking Copilot for an external link', async () => {
+    const manual: Update = {
+      ...update,
+      id: `${MANUAL_SOURCE_ID}__1`,
+      source: MANUAL_SOURCE_ID,
+      title: 'Study notes',
+      url: 'fomo://manual/entry-1',
+      content: 'Remember this',
+    };
+    const suggest = vi.fn(async () => { throw new Error('Manual entries have no external page'); });
+    const { svc, press, frame } = await renderApp([], suggest, undefined, [manual]);
+    await press('1', 'b');
+    expect(frame()).toContain('File in Bookmarks');
+    expect(suggest).not.toHaveBeenCalled();
+    await press(ENTER);
+    expect(svc.createReference).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Study notes',
+      url: 'fomo://manual/entry-1',
+      updateId: `${MANUAL_SOURCE_ID}__1`,
+    }));
+  });
+
   it('prefills the form, lets Copilot pick the folder and saves it', async () => {
     const suggestion = { title: 'Agentic review', folder: 'ai/code-review', description: 'Copilot review calls tools.' };
     const { svc, suggestReference, press, frame } = await renderApp([ref('1', 'Agents guide', 'ai/agents')], async () => suggestion);

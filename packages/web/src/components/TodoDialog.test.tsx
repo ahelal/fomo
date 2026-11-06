@@ -155,6 +155,21 @@ describe('ReferenceDialog', () => {
     expect(text(none)).toContain('folder color');
     expect(none).toContain('border-color:#f85149');
   });
+
+  it('keeps the internal Manual entry URL fixed when editing its bookmark', () => {
+    const html = renderToStaticMarkup(
+      <ReferenceDialog
+        service={service}
+        reference={{ ...ref, url: 'fomo://manual/entry-1', updateId: 'manual__entry-1' }}
+        folders={['work']}
+        folderColors={FOLDER_COLORS}
+        onSaved={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(text(html)).toContain('Manual entry');
+    expect(html).toMatch(/readonly=""/);
+  });
 });
 
 describe('FolderDialog', () => {

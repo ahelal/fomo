@@ -35,10 +35,12 @@ describe('release-note previews', () => {
         update={{ ...update, id: 'manual__1', source: MANUAL_SOURCE_ID, url: 'fomo://manual/1', content: 'Study notes' }}
         onSetStatus={() => {}}
         onToggleSaved={() => {}}
+        onFileReference={() => {}}
       />,
     );
     expect(html).toContain('Manual');
     expect(html).toContain('Study notes');
     expect(html).not.toContain('fomo://manual/1');
+    expect(html).toContain('b · 🔖 Bookmark');
   });
 });

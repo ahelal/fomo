@@ -5,6 +5,8 @@ import {
   DEFAULT_FOLDER_COLOR,
   DEFAULT_ITEM_COLOR,
   folderMatches,
+  isManualReferenceUrl,
+  MANUAL_SOURCE_ID,
   isDefaultSort,
   itemColorRequest,
   nextSort,
@@ -52,6 +54,7 @@ interface Options {
   /** Show a message in the main status bar (used after filing from the feed). */
   notify(message: string, ms?: number): void;
   openUrl(url: string): Promise<void>;
+  openManual(updateId: string): void;
   openAttachment(target: string): Promise<void>;
   copy(text: string): void;
   /** Opens the color picker popup. */
@@ -101,7 +104,7 @@ function applySuggestion(form: RefForm, s: ReferenceSuggestion, explicit: boolea
 }
 
 /** State and keys of the Bookmarks view (5) and the file-a-link form (b, a, e). */
-export function useReferences({ service, audit, suggest, notify, openUrl, openAttachment, copy, pickColor, jump }: Options) {
+export function useReferences({ service, audit, suggest, notify, openUrl, openManual, openAttachment, copy, pickColor, jump }: Options) {
   const [open, setOpen] = useState(false);
   /** Order of links within a folder (cycled with s). */
   const [sort, setSort] = useState<ReferenceSort | undefined>();
@@ -194,7 +197,7 @@ export function useReferences({ service, audit, suggest, notify, openUrl, openAt
         setForm(editForm(existing, { fromFeed: true, note: `Already in Bookmarks${existing.folder ? ` → ${existing.folder}` : ''} — editing it` }));
         return;
       }
-      if (suggest) runSuggest(draft, false);
+      if (suggest && update.source !== MANUAL_SOURCE_ID) runSuggest(draft, false);
     });
   }, [load, suggest, runSuggest]);
 
@@ -278,7 +281,8 @@ export function useReferences({ service, audit, suggest, notify, openUrl, openAt
     if (row?.kind !== 'item') return false;
     const ref = row.item;
     if (input === 'o') {
-      openUrl(ref.url).catch((err) => {
+      if (isManualReferenceUrl(ref.url) && ref.updateId) openManual(ref.updateId);
+      else openUrl(ref.url).catch((err) => {
         audit.error('open', `${ref.url}: ${errorText(err)}`);
         say('Could not open browser');
       });

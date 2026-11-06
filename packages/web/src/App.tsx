@@ -580,9 +580,9 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
       }
 
       if (key === 'b') {
+        e.preventDefault();
         const update = isGrouped ? rowUpdate(digestRow) : selected;
-        if (update?.source === MANUAL_SOURCE_ID) fomo.notify('Manual entries cannot be filed as bookmarks');
-        else if (update) void fileReference(update);
+        if (update) void fileReference(update);
         else fomo.notify(isGrouped && digestRow ? 'Expand the topic to file a single update' : 'Select an update to file it in Bookmarks');
         return;
       }
@@ -764,6 +764,17 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
   const sourceFilterLabel = fomo.sourceFilter
     ? fomo.sourceFilter.length <= 2 ? fomo.sourceFilter.map(sourceName).join(', ') : `${fomo.sourceFilter.length} sources`
     : undefined;
+
+  const openManualReference = useCallback(async (updateId: string) => {
+    try {
+      const update = await service.getUpdate(updateId);
+      setFilter('all');
+      fomo.setSourceFilter([MANUAL_SOURCE_ID]);
+      setSelected(update);
+    } catch (err) {
+      fomo.notify(`Could not open Manual entry: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [service, setFilter, fomo]);
   const searchMatches = !fomo.search || fomo.loading
     ? undefined
     : isGrouped ? fomo.digest.reduce((n, e) => n + e.items.length, 0) : fomo.total;
@@ -802,7 +813,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
           onReadAndNext={() => (isSaved ? savedReadAndNext(digestRow) : digestReadAndNext(digestRow))}
           onNextUnread={digestNextTopic}
           onOpen={update.source === MANUAL_SOURCE_ID ? undefined : () => openUrl(update.url)}
-          onFileReference={update.source === MANUAL_SOURCE_ID ? undefined : () => void fileReference(update)}
+          onFileReference={() => void fileReference(update)}
           onClose={goBack}
           {...duplicateProps}
         />
@@ -818,7 +829,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         onReadAndNext={handleReadAndNext}
         onNextUnread={handleNextUnread}
         onOpen={selected.source === MANUAL_SOURCE_ID ? undefined : () => selected.url && openUrl(selected.url)}
-        onFileReference={selected.source === MANUAL_SOURCE_ID ? undefined : () => void fileReference(selected)}
+        onFileReference={() => void fileReference(selected)}
         onClose={() => setSelected(undefined)}
         {...duplicateProps}
       />
@@ -951,7 +962,7 @@ function FomoApp({ conn, expiresInDays, onDisconnect }: FomoAppProps) {
         {fomo.filter === 'todos' ? (
           <TodosPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
         ) : fomo.filter === 'refs' ? (
-          <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} />
+          <ReferencesPane service={service} active={!showHelp && !showSettings && !sourcePicker} onOpenManual={(id) => void openManualReference(id)} />
         ) : (
           <div
             ref={listPaneRef}

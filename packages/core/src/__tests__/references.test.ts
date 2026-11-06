@@ -16,10 +16,12 @@ describe('referenceFolders', () => {
 });
 
 describe('normalizeReferenceUrl', () => {
-  it('accepts http(s) links only', () => {
+  it('accepts external links and internal Manual references only', () => {
     expect(normalizeReferenceUrl('  https://example.com/a ')).toBe('https://example.com/a');
+    expect(normalizeReferenceUrl('fomo://manual/entry-1')).toBe('fomo://manual/entry-1');
     expect(() => normalizeReferenceUrl('example.com')).toThrow(/full URL/);
     expect(() => normalizeReferenceUrl('javascript:alert(1)')).toThrow(/http/);
+    expect(() => normalizeReferenceUrl('fomo://other/entry-1')).toThrow(/http/);
   });
 });
 

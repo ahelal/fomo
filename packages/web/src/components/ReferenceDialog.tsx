@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   itemColorFallback,
   itemColorRequest,
+  isManualReferenceUrl,
   normalizeFolder,
   referenceFolders,
   type FolderColorMap,
@@ -54,6 +55,7 @@ export function ReferenceDialog({ service, reference, initial, updateId, folders
   const folderRef = useRef<HTMLInputElement>(null);
   const folders = givenFolders ?? loaded?.folders ?? [];
   const folderColors = givenColors ?? loaded?.folderColors ?? {};
+  const manualReference = isManualReferenceUrl(reference?.url ?? initial?.url ?? '');
 
   useEffect(() => {
     if (givenFolders) return;
@@ -68,7 +70,7 @@ export function ReferenceDialog({ service, reference, initial, updateId, folders
 
   // Start where there is something to decide: the URL for a new link, otherwise the folder.
   useEffect(() => {
-    (values.url ? folderRef.current : urlRef.current)?.focus();
+    (manualReference || values.url ? folderRef.current : urlRef.current)?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -120,8 +122,8 @@ export function ReferenceDialog({ service, reference, initial, updateId, folders
       <DialogField label="Title">
         <input value={values.title} onChange={onInput('title')} placeholder="Defaults to the URL" />
       </DialogField>
-      <DialogField label="URL">
-        <input ref={urlRef} value={values.url} onChange={onInput('url')} placeholder="https://…" inputMode="url" required />
+      <DialogField label={manualReference ? 'Manual entry' : 'URL'}>
+        <input ref={urlRef} value={values.url} onChange={onInput('url')} placeholder="https://…" inputMode="url" required readOnly={manualReference} />
       </DialogField>
       <FolderField value={values.folder} folders={folders} folderColors={folderColors} inputRef={folderRef} onChange={set('folder')} />
       <DialogField label="Description">
